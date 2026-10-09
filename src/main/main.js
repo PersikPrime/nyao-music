@@ -106,6 +106,9 @@ function registerIpc() {
     // .exe запускает установщик, .dmg открывается в Finder — дальше как обычная установка
     const err = await shell.openPath(file);
     if (err) throw new Error(err);
+    // На Windows установщик перезаписывает файлы приложения — само приложение должно закрыться,
+    // иначе Nyao Music.exe останется занятым и может записаться не до конца
+    if (process.platform === 'win32') setTimeout(() => app.quit(), 1500);
     return file;
   });
   handle('settings:get', () => settings.get());
