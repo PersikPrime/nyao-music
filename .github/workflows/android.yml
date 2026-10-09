@@ -7,6 +7,9 @@ on:
     paths: ['android/**', 'version.json', '.github/workflows/android.yml']
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -29,8 +32,27 @@ jobs:
           ./gradlew assembleRelease --no-daemon
       - name: Имя файла с версией
         id: ver
-        run: echo "name=NyaoMusic-$(jq -r '.name' version.json)-$(jq -r '.build' version.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          N=$(jq -r '.name' version.json); B=$(jq -r '.build' version.json)
+          echo "name=NyaoMusic-$N-$B" >> "$GITHUB_OUTPUT"
+          echo "tag=v$N.$B" >> "$GITHUB_OUTPUT"
+          echo "title=Nyao Music $N ($B)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v5
         with:
           name: ${{ steps.ver.outputs.name }}
           path: android/app/build/outputs/apk/release/app-release.apk
+
+      # Релиз с APK: тег v0.2.17 и т. д. Если релиз этой сборки уже есть — APK в нём заменяется
+      - name: Релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk "${{ steps.ver.outputs.name }}.apk"
+          if gh release view "${{ steps.ver.outputs.tag }}" > /dev/null 2>&1; then
+            gh release upload "${{ steps.ver.outputs.tag }}" "${{ steps.ver.outputs.name }}.apk" --clobber
+          else
+            gh release create "${{ steps.ver.outputs.tag }}" "${{ steps.ver.outputs.name }}.apk" \
+              --title "${{ steps.ver.outputs.title }}" \
+              --notes "Android APK, собран автоматически из коммита ${GITHUB_SHA::7}." \
+              --target "$GITHUB_SHA"
+          fi
