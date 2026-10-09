@@ -131,6 +131,7 @@ function setRangeFill(input) {
   const p = ((input.value - input.min) / (input.max - input.min)) * 100;
   input.style.setProperty('--p', `${p}%`);
 }
+const SETTINGS_ICON_SM = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>';
 const ICONS = {
   play: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>',
   pause: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1.2"/><rect x="14" y="4" width="4" height="16" rx="1.2"/></svg>',
@@ -204,16 +205,73 @@ function renderRail() {
       ${pls.map((p) => `<button class="side-pl" data-open-pl="${esc(p.id)}"><span class="sw" style="background:${colors[p.source] || '#7A6CFF'}"></span><span class="nm">${esc(p.title)}</span></button>`).join('')}
     </div>`;
   }
-  const accounts = IS_MAC ? `<div class="side-accounts">${accountPill('ya')}${accountPill('yt')}</div>` : '';
+  const accounts = IS_MAC ? `<div class="side-accounts">${accountButton()}</div>` : '';
   $('#rail').innerHTML = NAV.map((n) => btn(...n)).join('') + extra + '<div class="spacer"></div>' + btn('settings', 'Настройки', SETTINGS_ICON) + accounts;
 }
-function accountPill(svc) {
-  const st = state.status[svc];
-  const isYa = svc === 'ya';
-  return `<button class="acc ${st ? '' : 'off'}" data-goto="settings"><span class="dot" style="background:${isYa ? 'var(--ya)' : 'var(--yt-bright)'};color:${isYa ? '#000' : '#fff'}">${isYa ? 'Я' : 'YT'}</span><span class="nm">${st ? esc(st.name) : 'Войти'}</span></button>`;
+// Подключаемые сервисы. Новый сервис (VK Музыка, SoundCloud…) добавляется сюда — кнопка аккаунта и меню подхватят его сами
+const SERVICES = [
+  { id: 'ya', short: 'Я', name: 'Яндекс Музыка', bg: 'var(--ya)', fg: '#000' },
+  { id: 'yt', short: 'YT', name: 'YouTube Music', bg: 'var(--yt-bright)', fg: '#fff' }
+];
+function svcDot(s, on = true) {
+  return `<span class="dot ${on ? '' : 'off'}" style="background:${s.bg};color:${s.fg}">${s.short}</span>`;
+}
+/** Одна кнопка «Аккаунт» вместо пилюли на каждый сервис: аватар с именем и стопка значков подключённых сервисов */
+function accountButton() {
+  const first = SERVICES.map((s) => state.status[s.id]).find(Boolean);
+  const name = first ? first.name : 'Войти';
+  const initial = first ? esc(String(first.name).trim().charAt(0).toUpperCase()) : '+';
+  return `<button class="acc-btn ${first ? '' : 'off'}" data-acc-menu aria-label="Аккаунт" title="Аккаунт">
+    <span class="av">${initial}</span>
+    <span class="nm">${esc(name)}</span>
+    <span class="stack">${SERVICES.map((s) => svcDot(s, !!state.status[s.id])).join('')}</span>
+  </button>`;
+}
+function openAccountMenu(anchor) {
+  const menu = $('#menu');
+  menu.innerHTML = `<div class="lbl">Аккаунт</div>
+    ${SERVICES.map((s) => {
+      const st = state.status[s.id];
+      return `<div class="acc-row">${svcDot(s, !!st)}
+        <span class="acc-info"><b>${s.name}</b><span>${st ? esc(st.name) : 'не подключено'}</span></span>
+        <button class="acc-act ${st ? '' : 'primary'}" data-a="${st ? 'logout' : 'login'}" data-svc="${s.id}">${st ? 'Выйти' : 'Войти'}</button>
+      </div>`;
+    }).join('')}
+    <button data-a="settings">${SETTINGS_ICON_SM} Настройки аккаунтов</button>`;
+  menu.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  const m = menu.getBoundingClientRect();
+  const left = IS_MAC ? r.left : r.right - m.width;
+  const top = IS_MAC ? r.top - m.height - 8 : r.bottom + 8;
+  menu.style.left = `${Math.max(8, Math.min(left, innerWidth - m.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(top, innerHeight - m.height - 8))}px`;
+  menu.onclick = async (e) => {
+    const b = e.target.closest('[data-a]');
+    if (!b) return;
+    e.stopPropagation();
+    if (b.dataset.a === 'settings') {
+      menu.hidden = true;
+      return go('settings');
+    }
+    const svc = b.dataset.svc;
+    const meta = SERVICES.find((s) => s.id === svc);
+    menu.hidden = true;
+    try {
+      if (b.dataset.a === 'login') {
+        await api.auth.login(svc);
+        toast(`${meta.name}: вход выполнен`);
+      } else {
+        await api.auth.logout(svc);
+        toast(`${meta.name}: выход выполнен`);
+      }
+    } catch (err) {
+      toast(err.message, true);
+    }
+    await afterAuthChange();
+  };
 }
 function renderAccounts() {
-  if (!IS_MAC) $('#accounts').innerHTML = accountPill('ya') + accountPill('yt');
+  if (!IS_MAC) $('#accounts').innerHTML = accountButton();
   renderRail();
 }
 
@@ -1233,10 +1291,18 @@ $('#rail').addEventListener('click', (e) => {
   if (nav) return go(nav.dataset.route);
   const pl = e.target.closest('[data-open-pl]');
   if (pl) return openPlaylist(pl.dataset.openPl);
-  if (e.target.closest('[data-goto]')) go('settings');
+  const acc = e.target.closest('[data-acc-menu]');
+  if (acc) {
+    e.stopPropagation();
+    openAccountMenu(acc);
+  }
 });
 $('#accounts').addEventListener('click', (e) => {
-  if (e.target.closest('[data-goto]')) go('settings');
+  const acc = e.target.closest('[data-acc-menu]');
+  if (acc) {
+    e.stopPropagation();
+    openAccountMenu(acc);
+  }
 });
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, textarea')) return;

@@ -178,3 +178,11 @@ body.mac {
 .mac .ob-svc { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .10); }
 .mac .ob-input { background: rgba(0, 0, 0, .25); border-color: rgba(255, 255, 255, .12); }
 .mac .ob-card h1, .mac .ob-card h2 { font-family: -apple-system, 'SF Pro Display', var(--font); font-weight: 700; letter-spacing: -.02em; }
+
+/* Кнопка аккаунта внизу стеклянной боковой панели */
+.mac .side-accounts .acc-btn { flex: 1; max-width: none; height: 40px; padding: 0 8px 0 5px; background: rgba(255, 255, 255, .08); border-radius: 14px; }
+.mac .side-accounts .acc-btn:hover { background: rgba(255, 255, 255, .14); }
+.mac .side-accounts .acc-btn .nm { flex: 1; text-align: left; font-weight: 600; color: rgba(255, 255, 255, .9); }
+.mac .side-accounts .acc-btn .stack .dot { box-shadow: 0 0 0 2px rgba(40, 36, 52, .9); }
+.mac .menu .acc-row .acc-act { background: rgba(255, 255, 255, .1); }
+.mac .menu .acc-row .acc-act.primary { background: #fff; color: #000; }
