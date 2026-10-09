@@ -175,10 +175,10 @@ fun WaveSettings(onChanged: () -> Unit, modifier: Modifier = Modifier, showMood:
         }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             val ya = accounts[SOURCE_YA] != null
-            val yt = accounts[SOURCE_YT] != null
+            val yt = accounts[SOURCE_YT] != null || accounts[org.nyao.music.data.SOURCE_SC] != null
             Row(Modifier.padding(horizontal = 4.dp)) {
                 Text("Яндекс ${100 - share}%", style = MaterialTheme.typography.labelMedium, color = NyaoColors.Muted, modifier = Modifier.weight(1f))
-                Text("$share% YouTube Music", style = MaterialTheme.typography.labelMedium, color = NyaoColors.Muted)
+                Text(if (accounts[org.nyao.music.data.SOURCE_SC] != null) "$share% YouTube и SoundCloud" else "$share% YouTube Music", style = MaterialTheme.typography.labelMedium, color = NyaoColors.Muted)
             }
             BalanceBar(share, onChange = { liveShare = it }, onFinish = {
                 liveShare = null
@@ -186,7 +186,7 @@ fun WaveSettings(onChanged: () -> Unit, modifier: Modifier = Modifier, showMood:
                 onChanged()
             })
             if (!ya || !yt) Text(
-                if (!ya && !yt) "Сервисы не подключены" else if (!yt) "YouTube Music не подключён — волна только из Яндекса" else "Яндекс не подключён — волна только из YouTube Music",
+                if (!ya && !yt) "Сервисы не подключены" else if (!yt) "YouTube Music и SoundCloud не подключены — волна только из Яндекса" else "Яндекс не подключён — волна из YouTube Music / SoundCloud",
                 style = MaterialTheme.typography.bodySmall,
                 color = NyaoColors.Muted,
                 modifier = Modifier.padding(start = 4.dp),

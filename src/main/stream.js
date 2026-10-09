@@ -18,10 +18,52 @@ export function chunkRange(range, chunk = YT_CHUNK) {
   return `bytes=${start}-${end}`;
 }
 
+/** Скачивает HLS-поток (SoundCloud) целиком в память: init-сегмент + все куски по порядку, по 6 параллельно */
+export async function downloadHls(fetchFn, playlistUrl, headers = {}) {
+  const text = await (await fetchFn(playlistUrl, { headers })).text();
+  const base = new URL(playlistUrl);
+  const abs = (u) => new URL(u, base).toString();
+  const urls = [];
+  const map = text.match(/#EXT-X-MAP:URI="([^"]+)"/);
+  if (map) urls.push(abs(map[1]));
+  for (const line of text.split(/\r?\n/)) {
+    const l = line.trim();
+    if (l && !l.startsWith('#')) urls.push(abs(l));
+  }
+  if (!urls.length) throw new Error('пустой HLS-плейлист');
+  const parts = new Array(urls.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < urls.length) {
+      const i = next++;
+      const res = await fetchFn(urls[i], { headers });
+      if (!res.ok) throw new Error(`кусок HLS: HTTP ${res.status}`);
+      parts[i] = Buffer.from(await res.arrayBuffer());
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, urls.length) }, worker));
+  return Buffer.concat(parts);
+}
+
+/** Отдаёт буфер с поддержкой Range — так перемотка работает и для HLS */
+export function bufferResponse(buf, range, mime) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(range || '');
+  const headers = { 'content-type': mime, 'accept-ranges': 'bytes' };
+  if (!m) return new Response(buf, { status: 200, headers: { ...headers, 'content-length': String(buf.length) } });
+  const start = m[1] ? Number(m[1]) : 0;
+  const end = m[2] ? Math.min(Number(m[2]), buf.length - 1) : buf.length - 1;
+  if (start >= buf.length) return new Response(null, { status: 416, headers: { 'content-range': `bytes */${buf.length}` } });
+  return new Response(buf.subarray(start, end + 1), {
+    status: 206,
+    headers: { ...headers, 'content-length': String(end - start + 1), 'content-range': `bytes ${start}-${end}/${buf.length}` }
+  });
+}
+
 export class StreamService {
-  constructor({ ya, yt, fetch = globalThis.fetch, fetchBySource = {} }) {
-    this.providers = { ya, yt };
-    this.fetchers = { ya: fetchBySource.ya || fetch, yt: fetchBySource.yt || fetch };
+  constructor({ ya, yt, sc, fetch = globalThis.fetch, fetchBySource = {} }) {
+    this.providers = { ya, yt, sc };
+    this.fetchers = { ya: fetchBySource.ya || fetch, yt: fetchBySource.yt || fetch, sc: fetchBySource.sc || fetch };
+    this.hls = new Map(); // trackId → Promise<Buffer>, последние несколько треков SoundCloud
     this.cache = new Map();
     this.pending = new Map();
     this.errors = new Map();
@@ -55,7 +97,7 @@ export class StreamService {
     const exclude = this.failedClients.get(trackId) || [];
     const job = (source === 'yt' ? provider.streamUrl(srcId, (u, h) => this.check(u, h), log, { exclude }) : provider.streamUrl(srcId))
       .then((r) => {
-        const entry = { source, client: r.client, url: r.url, headers: r.headers || {}, expires: Date.now() + (r.ttl || 30 * 60_000), mime: r.mime };
+        const entry = { source, client: r.client, url: r.url, headers: r.headers || {}, expires: Date.now() + (r.ttl || 30 * 60_000), mime: r.mime, hls: !!r.hls };
         this.cache.set(trackId, entry);
         this.errors.delete(trackId);
         return entry;
@@ -85,6 +127,23 @@ export class StreamService {
         entry = await this.resolve(trackId, attempt > 0);
       } catch (e) {
         return new Response(e.message, { status: 502, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+      }
+      if (entry.hls) {
+        try {
+          if (!this.hls.has(trackId)) {
+            const job = downloadHls(this.fetchers[entry.source], entry.url, entry.headers);
+            this.hls.set(trackId, job);
+            job.catch(() => this.hls.delete(trackId));
+            while (this.hls.size > 4) this.hls.delete(this.hls.keys().next().value);
+          }
+          return bufferResponse(await this.hls.get(trackId), range, entry.mime || 'audio/mpeg');
+        } catch (e) {
+          console.warn(`[stream] ${trackId}: HLS не скачался (${e.message}), обновляю ссылку`);
+          this.errors.set(trackId, `HLS: ${e.message}`);
+          this.cache.delete(trackId);
+          this.hls.delete(trackId);
+          continue;
+        }
       }
       const headers = { ...entry.headers };
       if (entry.source === 'yt') headers.Range = chunkRange(range);

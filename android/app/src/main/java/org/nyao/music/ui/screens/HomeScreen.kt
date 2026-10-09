@@ -87,10 +87,10 @@ private val CHAR_NAMES = mapOf("favorite" to "Любимое", "discover" to "Н
 @Composable
 fun HomeScreen(model: AppModel, wide: Boolean) {
     val accounts by Repo.accounts.collectAsState()
-    val anyAccount = accounts[SOURCE_YA] != null || accounts[SOURCE_YT] != null
+    val anyAccount = accounts.values.any { it != null }
     LaunchedEffect(anyAccount) { if (anyAccount) model.loadHome() }
     val home = model.home
-    val name = (accounts[SOURCE_YA] ?: accounts[SOURCE_YT])?.name
+    val name = (accounts[SOURCE_YA] ?: accounts[SOURCE_YT] ?: accounts[org.nyao.music.data.SOURCE_SC])?.name
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
         // Верхняя строка: бейдж приложения, поиск, аватар-печенька
@@ -229,7 +229,7 @@ private fun CarouselCard(p: Playlist, width: Int, onClick: () -> Unit) {
         SourceTag(p.source, Modifier.align(Alignment.TopStart).padding(14.dp))
         Column(Modifier.align(Alignment.BottomStart).padding(start = 16.dp, end = 12.dp, bottom = 14.dp)) {
             Text(p.title, style = MaterialTheme.typography.titleMedium, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val sub = p.subtitle.ifEmpty { if (p.count > 0) "${if (p.source == SOURCE_YA) "Яндекс" else "YouTube Music"} · ${p.count}" else "" }
+            val sub = p.subtitle.ifEmpty { if (p.count > 0) "${org.nyao.music.data.sourceName(p.source)} · ${p.count}" else "" }
             if (sub.isNotEmpty() && width > 150) Text(sub, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

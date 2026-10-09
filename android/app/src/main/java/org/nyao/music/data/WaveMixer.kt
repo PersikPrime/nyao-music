@@ -13,7 +13,7 @@ import kotlinx.coroutines.sync.withLock
  * Доля YT — ytmShare в процентах. Если вошли только в один сервис — волна из него одного.
  * Перенос src/main/wave.js.
  */
-class WaveMixer(private val ya: YandexApi, private val yt: YtMusicApi, private val prefs: Prefs) {
+class WaveMixer(private val ya: YandexApi, private val yt: YtMusicApi, private val sc: ScApi, private val prefs: Prefs) {
 
     companion object {
         /** Чередование: на каждый трек основы — share/(1-share) треков extra */
@@ -43,15 +43,16 @@ class WaveMixer(private val ya: YandexApi, private val yt: YtMusicApi, private v
     private val seen = HashSet<String>()
     private var refill: Job? = null
 
+    /** Есть ли что подмешивать: YouTube Music и/или SoundCloud */
+    private val hasExtras: Boolean get() = yt.loggedIn || sc.loggedIn
+
     private suspend fun refillPool() {
-        if (!yt.loggedIn) return
+        if (!hasExtras) return
         val s = prefs.settings.value
         val exclude = lock.withLock { HashSet(seen) }
-        val tracks = try {
-            yt.wavePool(s.diversity, exclude)
-        } catch (_: Exception) {
-            emptyList()
-        }
+        val a = if (yt.loggedIn) runCatching { yt.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
+        val b = if (sc.loggedIn) runCatching { sc.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
+        val tracks = alternateAll(a, b)
         lock.withLock { tracks.forEach { t -> if (t.id !in seen && pool.none { it.id == t.id }) pool += t } }
     }
 
@@ -62,7 +63,7 @@ class WaveMixer(private val ya: YandexApi, private val yt: YtMusicApi, private v
 
     private suspend fun batch(yaCall: suspend () -> List<Track>): List<Track> {
         val s = prefs.settings.value
-        val useYt = yt.loggedIn && s.ytmShare > 0
+        val useYt = hasExtras && s.ytmShare > 0
         if (useYt && lock.withLock { pool.size } < 6) {
             refill?.join()
             if (lock.withLock { pool.size } < 6) refillPool()

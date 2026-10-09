@@ -72,6 +72,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.nyao.music.data.Repo
 import org.nyao.music.playback.PlaybackEvents
 import org.nyao.music.playback.PlayerConnection
@@ -117,6 +118,13 @@ fun NyaoRoot() {
 
     LaunchedEffect(Unit) {
         Repo.refreshAccounts()
+        // Тихая проверка обновлений при запуске (после того, как начали слушать сообщения)
+        launch {
+            delay(3000)
+            runCatching { org.nyao.music.data.Updates.check(org.nyao.music.BuildConfig.VERSION_CODE) }.getOrNull()?.let { u ->
+                if (u.available) PlaybackEvents.emit("Доступна Nyao Music ${u.label} — обновить можно в Настройках")
+            }
+        }
         PlaybackEvents.messages.collect { snackbar.showSnackbar(it) }
     }
 
@@ -249,7 +257,7 @@ private fun MiniPlayer(onOpen: () -> Unit, modifier: Modifier = Modifier) {
                 AnimatedContent(t.title, transitionSpec = { (slideInVertically { it / 2 } + fadeIn()) togetherWith (slideOutVertically { -it / 2 } + fadeOut()) }, label = "miniTitle") { title ->
                     Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, color = pal.onContainer)
                 }
-                Text(t.artist + if (t.source == "yt") " · YT" else " · Я", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = pal.sub)
+                Text(t.artist + " · " + org.nyao.music.ui.components.sourceShort(t.source), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = pal.sub)
             }
             Box(
                 Modifier.size(48.dp).bouncy().clip(RoundedCornerShape(16.dp)).background(pal.accent).clickable { PlayerConnection.toggle() },

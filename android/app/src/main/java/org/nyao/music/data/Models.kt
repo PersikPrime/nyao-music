@@ -38,10 +38,19 @@ data class HomeData(
     val ytSections: List<HomeSection> = emptyList(),
 )
 
-data class SearchResult(val ya: List<Track> = emptyList(), val yt: List<Track> = emptyList())
+data class SearchResult(val ya: List<Track> = emptyList(), val yt: List<Track> = emptyList(), val sc: List<Track> = emptyList())
 
 const val SOURCE_YA = "ya"
 const val SOURCE_YT = "yt"
+const val SOURCE_SC = "sc"
+
+val ALL_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC)
+
+fun sourceName(source: String): String = when (source) {
+    SOURCE_YA -> "Яндекс Музыка"
+    SOURCE_SC -> "SoundCloud"
+    else -> "YouTube Music"
+}
 
 fun formatTime(sec: Int): String {
     if (sec <= 0) return "0:00"
@@ -57,6 +66,13 @@ fun parseDuration(text: String?): Int {
     val parts = text.trim().split(":").mapNotNull { it.toIntOrNull() }
     if (parts.isEmpty() || parts.size > 3) return 0
     return parts.fold(0) { acc, p -> acc * 60 + p }
+}
+
+/** Чередует несколько списков: a0, b0, c0, a1, b1, c1, … */
+fun <T> alternateAll(vararg lists: List<T>): List<T> {
+    val out = ArrayList<T>()
+    for (i in 0 until (lists.maxOfOrNull { it.size } ?: 0)) lists.forEach { if (i < it.size) out += it[i] }
+    return out
 }
 
 /** Чередует два списка: a0, b0, a1, b1, … — чтобы «Мне нравится» не было «сначала весь Яндекс». */

@@ -17,7 +17,8 @@ const state = {
   route: 'home',
   params: {},
   stack: [],
-  status: { ya: null, yt: null },
+  status: { ya: null, yt: null, sc: null },
+  update: { info: null, checking: false, progress: null, error: null },
   settings: null,
   home: null,
   lib: { lists: null, filter: 'all', selected: 'liked', tracks: null, counts: null },
@@ -47,13 +48,14 @@ function fmt(sec) {
 function badge(source, extra = '') {
   if (source === 'ya') return `<span class="badge ya ${extra}">Я</span>`;
   if (source === 'yt') return `<span class="badge yt ${extra}">YT</span>`;
+  if (source === 'sc') return `<span class="badge sc ${extra}">SC</span>`;
   if (source === 'mix') return '<span class="badge mix">Я+YT</span>';
   return '';
 }
-const RING = { ya: '#FFD60A', yt: '#FF6A5C', mix: '#C6B8FF' };
+const RING = { ya: '#FFD60A', yt: '#FF6A5C', sc: '#FF8A3D', mix: '#C6B8FF' };
 function coverHtml(item, cls = '', withBadge = false) {
   const src = item && item.source;
-  const bgCls = src === 'ya' ? 'ya-bg' : src === 'yt' ? 'yt-bg' : '';
+  const bgCls = src === 'ya' ? 'ya-bg' : src === 'yt' ? 'yt-bg' : src === 'sc' ? 'sc-bg' : '';
   const ring = `<svg width="45%" height="45%" viewBox="0 0 72 72" fill="none" stroke="${RING[src] || RING.mix}" stroke-width="3"><circle cx="36" cy="36" r="26"/><circle cx="36" cy="36" r="12"/></svg>`;
   const img = item && item.cover ? `<img src="${esc(item.cover)}" alt="" loading="lazy">` : '';
   return `<div class="cover ${cls} ${bgCls}">${ring}${img}${withBadge ? badge(src) : ''}</div>`;
@@ -166,11 +168,12 @@ function balanceTrack(share) {
   return `linear-gradient(90deg, #FFD60A 0%, #FFD60A ${Math.max(0, mid - 9)}%, var(--accent) ${mid}%, ${ytc} ${Math.min(100, mid + 9)}%, ${ytc} 100%)`;
 }
 function shareLabel(share) {
-  if (!state.status.yt) return 'YouTube Music не подключён';
-  if (!state.status.ya) return 'только YouTube Music';
+  const extra = [state.status.yt && 'YT', state.status.sc && 'SC'].filter(Boolean).join('+');
+  if (!extra) return 'YouTube Music и SoundCloud не подключены';
+  if (!state.status.ya) return `только ${extra}`;
   if (share === 0) return 'только Яндекс';
-  if (share === 100) return 'только YouTube Music';
-  return share >= 50 ? `каждый ${Math.round(100 / (100 - share))}-й трек — Яндекс` : `каждый ${Math.round(100 / share)}-й трек — YT`;
+  if (share === 100) return `только ${extra}`;
+  return share >= 50 ? `каждый ${Math.round(100 / (100 - share))}-й трек — Яндекс` : `каждый ${Math.round(100 / share)}-й трек — ${extra}`;
 }
 function waveControlsHtml(compact = false) {
   const s = state.settings || {};
@@ -189,7 +192,7 @@ function waveControlsHtml(compact = false) {
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="eyebrow">Баланс источников</span><span style="font-size:12px;color:var(--accent)" id="share-label">${shareLabel(share)}</span></div>
     <div class="balance"><div class="track" id="share-track" style="background:${balanceTrack(share)}"></div><input type="range" min="0" max="100" step="5" value="${share}" data-input="share" aria-label="Доля YouTube Music"></div>
-    <div class="balance-legend"><span>${badge('ya')}<b id="share-ya">${100 - share}%</b></span><span><b id="share-yt">${share}%</b>${badge('yt')}</span></div>
+    <div class="balance-legend"><span>${badge('ya')}<b id="share-ya">${100 - share}%</b></span><span><b id="share-yt">${share}%</b>${badge('yt')}${state.status.sc ? badge('sc') : ''}</span></div>
   </div>`;
 }
 
@@ -199,7 +202,7 @@ function renderRail() {
   let extra = '';
   if (IS_MAC) {
     const pls = (state.lib.lists || []).slice(0, 7);
-    const colors = { ya: '#FFD60A', yt: '#FF453A', mix: '#7A6CFF' };
+    const colors = { ya: '#FFD60A', yt: '#FF453A', sc: '#FF5500', mix: '#7A6CFF' };
     extra = `<div class="side-extra">
       ${pls.length ? '<div class="side-title">Плейлисты</div>' : ''}
       ${pls.map((p) => `<button class="side-pl" data-open-pl="${esc(p.id)}"><span class="sw" style="background:${colors[p.source] || '#7A6CFF'}"></span><span class="nm">${esc(p.title)}</span></button>`).join('')}
@@ -211,7 +214,8 @@ function renderRail() {
 // Подключаемые сервисы. Новый сервис (VK Музыка, SoundCloud…) добавляется сюда — кнопка аккаунта и меню подхватят его сами
 const SERVICES = [
   { id: 'ya', short: 'Я', name: 'Яндекс Музыка', bg: 'var(--ya)', fg: '#000' },
-  { id: 'yt', short: 'YT', name: 'YouTube Music', bg: 'var(--yt-bright)', fg: '#fff' }
+  { id: 'yt', short: 'YT', name: 'YouTube Music', bg: 'var(--yt-bright)', fg: '#fff' },
+  { id: 'sc', short: 'SC', name: 'SoundCloud', bg: 'var(--sc)', fg: '#fff' }
 ];
 function svcDot(s, on = true) {
   return `<span class="dot ${on ? '' : 'off'}" style="background:${s.bg};color:${s.fg}">${s.short}</span>`;
@@ -490,7 +494,7 @@ function syncLyrics(force) {
 
 function libraryCounts() {
   const l = state.lib.lists || [];
-  return { all: l.length + 1, ya: l.filter((p) => p.source === 'ya').length, yt: l.filter((p) => p.source === 'yt').length, mix: l.filter((p) => p.source === 'mix').length };
+  return { all: l.length + 1, ya: l.filter((p) => p.source === 'ya').length, yt: l.filter((p) => p.source === 'yt').length, sc: l.filter((p) => p.source === 'sc').length, mix: l.filter((p) => p.source === 'mix').length };
 }
 
 function renderLibrary() {
@@ -508,7 +512,7 @@ function renderLibrary() {
         <h1 class="page">Медиатека</h1>
         <button class="btn" data-action="new-mix">${ICONS.plus}Новый микс</button>
       </div>
-      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${f('mix', 'Мои миксы', 'var(--accent)')}</div>
+      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}</div>
       ${shown ? `<div class="tiles">${shown.map((p) => `<button class="tile ${p.id === lib.selected ? 'sel' : ''}" data-action="lib-select" data-id="${esc(p.id)}">
           ${p.id === 'liked' ? heart('40%') : coverHtml(p, '', true)}
           <div class="t">${esc(p.title)}</div><div class="s">${p.id === 'liked' ? 'Оба сервиса' : esc(p.source === 'mix' ? 'Мой микс' : p.source === 'ya' ? 'Яндекс' : 'YouTube Music')}${p.count ? ' · ' + p.count : ''}</div>
@@ -518,7 +522,7 @@ function renderLibrary() {
       ${sel ? `<div class="aside-head">
         <div class="pl-head">
           ${sel.id === 'liked' ? heart('50') : coverHtml(sel)}
-          <div style="min-width:0"><span class="muted" style="font-size:12px">${sel.id === 'liked' ? 'Общий список лайков' : sel.source === 'mix' ? 'Смешанный плейлист' : sel.source === 'ya' ? 'Плейлист Яндекса' : 'Плейлист YouTube Music'}</span>
+          <div style="min-width:0"><span class="muted" style="font-size:12px">${sel.id === 'liked' ? 'Общий список лайков' : sel.source === 'mix' ? 'Смешанный плейлист' : sel.source === 'ya' ? 'Плейлист Яндекса' : sel.source === 'sc' ? 'Плейлист SoundCloud' : 'Плейлист YouTube Music'}</span>
           <h2>${esc(sel.title)}</h2>
           <span class="muted" style="font-size:12px">${lib.tracks ? `${lib.tracks.length} треков · ${fmt(lib.tracks.reduce((a, t) => a + (t.duration || 0), 0))}` : 'Загружаю…'}</span></div>
         </div>
@@ -526,7 +530,7 @@ function renderLibrary() {
           <button class="btn primary" data-action="pl-play" ${lib.tracks && lib.tracks.length ? '' : 'disabled'}>${ICONS.play}Слушать</button>
           <button class="icbtn" data-action="pl-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
           <span class="grow"></span>
-          ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}</span>` : ''}
+          ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}${lib.tracks.some((t) => t.source === 'sc') ? `<span class="dotsrc sc" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sc').length}` : ''}</span>` : ''}
           ${sel.source === 'mix' && sel.id !== 'liked' ? `<button class="icbtn" data-action="del-mix" aria-label="Удалить микс">${ICONS.ban}</button>` : ''}
         </div>
       </div>
@@ -539,19 +543,15 @@ function renderSearch() {
   const s = state.search;
   let merged = [];
   if (s.res) {
-    const a = s.res.ya;
-    const b = s.res.yt;
-    for (let i = 0; i < Math.max(a.length, b.length); i++) {
-      if (a[i]) merged.push(a[i]);
-      if (b[i]) merged.push(b[i]);
-    }
+    const lists = [s.res.ya, s.res.yt, s.res.sc || []];
+    for (let i = 0; i < Math.max(...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) merged.push(l[i]);
     if (s.filter !== 'all') merged = merged.filter((t) => t.source === s.filter);
   }
   const f = (v, label, dot) => `<button class="chip solid ${s.filter === v ? 'on' : ''}" data-action="search-filter" data-v="${v}">${dot ? `<span class="d" style="background:${dot}"></span>` : ''}${label}</button>`;
   view.innerHTML = `<div class="scroll">
     <h1 class="page">Поиск</h1>
     <form class="search-field" data-form="search" style="max-width:640px">${ICONS.search}<input name="q" type="search" value="${esc(s.q)}" placeholder="Трек или исполнитель" aria-label="Поиск"></form>
-    ${s.res ? `<div class="chips">${f('all', 'Все')}${f('ya', `Яндекс · ${s.res.ya.length}`, 'var(--ya)')}${f('yt', `YouTube Music · ${s.res.yt.length}`, 'var(--yt-bright)')}</div>` : ''}
+    ${s.res ? `<div class="chips">${f('all', 'Все')}${f('ya', `Яндекс · ${s.res.ya.length}`, 'var(--ya)')}${f('yt', `YouTube Music · ${s.res.yt.length}`, 'var(--yt-bright)')}${f('sc', `SoundCloud · ${(s.res.sc || []).length}`, 'var(--sc)')}</div>` : ''}
     ${s.loading ? '<div class="skeleton" style="height:300px"></div>' : s.res ? (merged.length ? tracksHtml(merged, 'search') : '<div class="empty">Ничего не нашлось</div>') : ''}
   </div>`;
   const input = $('input[name=q]', view);
@@ -655,32 +655,77 @@ function renderAlbum() {
   </div>`;
 }
 
+const SVC_HELP = {
+  ya: { manual: 'Вставить OAuth-токен вручную', input: '<input type="text" data-manual="ya" placeholder="y0_AgAAAA…">' },
+  yt: { manual: 'Вставить cookies вручную (если Google не пускает в окне входа)', input: '<textarea rows="3" data-manual="yt" placeholder="SAPISID=…; __Secure-3PAPISID=…; …"></textarea>' },
+  sc: { manual: 'Вставить OAuth-токен вручную (cookie oauth_token с soundcloud.com)', input: '<input type="text" data-manual="sc" placeholder="2-123456-…">' }
+};
 function svcCard(svc) {
   const st = state.status[svc];
-  const isYa = svc === 'ya';
+  const meta = SERVICES.find((x) => x.id === svc);
+  const extra = svc === 'ya' && st && st.plus === false ? ' · без Плюса полные треки могут не играть' : svc === 'sc' && st ? ' · треки Go+ играют только отрывком' : '';
   return `<div class="card">
     <div class="svc">
-      <div class="logo" style="background:${isYa ? 'var(--ya)' : 'var(--yt)'};color:${isYa ? '#000' : '#fff'}">${isYa ? 'Я' : 'YT'}</div>
-      <div class="info"><div class="name">${isYa ? 'Яндекс Музыка' : 'YouTube Music'}</div>
-        <div class="st">${st ? `Вход выполнен: ${esc(st.name)}${st.error ? ' (токен не принят — войди заново)' : ''}${isYa && st.plus === false ? ' · без Плюса полные треки могут не играть' : ''}` : 'Не подключено'}</div></div>
+      <div class="logo" style="background:${meta.bg};color:${meta.fg}">${meta.short}</div>
+      <div class="info"><div class="name">${meta.name}</div>
+        <div class="st">${st ? `Вход выполнен: ${esc(st.name)}${st.error ? ' (токен не принят — войди заново)' : ''}${extra}` : svc === 'sc' ? 'Не подключено · поиск работает и без входа' : 'Не подключено'}</div></div>
       ${st ? `<button class="btn danger" data-action="logout" data-svc="${svc}">Выйти</button>` : `<button class="btn primary" data-action="login" data-svc="${svc}">Войти</button>`}
     </div>
-    <details><summary>${isYa ? 'Вставить OAuth-токен вручную' : 'Вставить cookies вручную (если Google не пускает в окне входа)'}</summary>
-      <div class="manual">${isYa ? '<input type="text" data-manual="ya" placeholder="y0_AgAAAA…">' : '<textarea rows="3" data-manual="yt" placeholder="SAPISID=…; __Secure-3PAPISID=…; …"></textarea>'}
+    <details><summary>${SVC_HELP[svc].manual}</summary>
+      <div class="manual">${SVC_HELP[svc].input}
       <button class="btn" data-action="manual-save" data-svc="${svc}">Сохранить</button></div>
     </details>
   </div>`;
 }
 
+/** Центр обновлений: версия, проверка релиза на GitHub, скачивание установщика */
+function updateCardHtml() {
+  const u = state.update;
+  const i = u.info;
+  let status = 'Нажми «Проверить», чтобы посмотреть свежий релиз на GitHub.';
+  if (u.checking) status = 'Проверяю…';
+  else if (u.error) status = `Не получилось: ${esc(u.error)}`;
+  else if (i && i.available) status = `Доступна версия <b>${esc(i.latest.label)}</b>${i.asset ? ` · ${(i.asset.size / 1048576).toFixed(0)} МБ` : ' · файла для этой системы в релизе нет'}`;
+  else if (i) status = `Установлена последняя версия${i.latest ? ` (${esc(i.latest.label)})` : ''}.`;
+  const pct = u.progress != null ? Math.round(u.progress * 100) : null;
+  return `<section class="card update-card">
+    <div class="svc">
+      <div class="logo" style="background:var(--accent-soft);color:var(--accent)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></div>
+      <div class="info"><div class="name">Центр обновлений</div><div class="st">Сейчас: Nyao Music ${esc(state.version || '')}</div></div>
+      ${i && i.available && i.asset
+        ? `<button class="btn primary" data-action="update-install" ${pct != null ? 'disabled' : ''}>${pct != null ? `Скачиваю… ${pct}%` : 'Скачать и установить'}</button>`
+        : `<button class="btn" data-action="update-check" ${u.checking ? 'disabled' : ''}>Проверить</button>`}
+    </div>
+    <div class="hint" id="update-status">${status}</div>
+    ${pct != null ? `<div class="update-bar"><span style="width:${pct}%"></span></div>` : ''}
+    ${i && i.available && i.notes ? `<details><summary>Что нового</summary><div class="hint" style="white-space:pre-wrap;margin-top:8px">${esc(i.notes)}</div></details>` : ''}
+    ${i && i.url ? `<button class="link-plain" data-action="update-page" style="font-size:12px;color:var(--accent);margin-top:6px">Открыть релизы на GitHub</button>` : ''}
+  </section>`;
+}
+async function checkUpdates(silent = false) {
+  state.update.checking = true;
+  state.update.error = null;
+  if (state.route === 'settings') renderSettings();
+  try {
+    state.update.info = await api.updates.check();
+    if (silent && state.update.info.available) toast(`Доступна Nyao Music ${state.update.info.latest.label} — обновить можно в Настройках`);
+  } catch (e) {
+    state.update.error = e.message;
+  }
+  state.update.checking = false;
+  if (state.route === 'settings') renderSettings();
+}
+
 function renderSettings() {
   view.innerHTML = `<div class="scroll settings">
     <h1 class="page">Настройки</h1>
-    <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Аккаунты</h2>${svcCard('ya')}${svcCard('yt')}</section>
+    <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Аккаунты</h2>${SERVICES.map((x) => svcCard(x.id)).join('')}</section>
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Моя волна</h2>${waveControlsHtml()}</section>
     ${discordCardHtml()}
+    ${updateCardHtml()}
     <section class="card">
       <h2 class="sec">О приложении</h2>
-      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · тема ${IS_MAC ? 'macOS (Liquid Glass)' : 'Windows'}. Оба сервиса подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из LRCLIB.</div>
+      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · тема ${IS_MAC ? 'macOS (Liquid Glass)' : 'Windows'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из LRCLIB.</div>
       <button class="btn" data-action="onboarding" style="margin-top:12px">Показать приветствие снова</button>
     </section>
   </div>`;
@@ -730,7 +775,7 @@ const RENDER = { home: renderHome, wave: renderWave, player: renderPlayer, libra
 
 // ---------- Загрузка данных ----------
 async function loadStatus() {
-  state.status = await api.auth.status().catch(() => ({ ya: null, yt: null }));
+  state.status = await api.auth.status().catch(() => ({ ya: null, yt: null, sc: null }));
   renderAccounts();
 }
 async function loadHome() {
@@ -756,7 +801,7 @@ let likedPromise = null;
 function loadLiked(force = false) {
   if (!likedPromise || force) {
     likedPromise = api.library.liked().then((r) => {
-      state.lib.counts = { ya: r.ya, yt: r.yt };
+      state.lib.counts = { ya: r.ya, yt: r.yt, sc: r.sc || 0 };
       state.lib.liked = r.tracks;
       r.tracks.forEach((t) => player.liked.add(t.id));
       return r.tracks;
@@ -1012,6 +1057,27 @@ async function handleAction(el, e) {
       setTimeout(refreshRpcStatus, 1500);
       break;
     }
+    case 'update-check':
+      await checkUpdates();
+      break;
+    case 'update-page':
+      if (state.update.info && state.update.info.url) api.openExternal(state.update.info.url);
+      break;
+    case 'update-install': {
+      const asset = state.update.info && state.update.info.asset;
+      if (!asset) break;
+      state.update.progress = 0;
+      renderSettings();
+      try {
+        await api.updates.download(asset);
+        toast(IS_MAC ? 'Установщик открыт: перетащи Nyao Music в «Программы»' : 'Установщик запущен — после установки приложение перезапустится');
+      } catch (err) {
+        state.update.error = err.message;
+      }
+      state.update.progress = null;
+      if (state.route === 'settings') renderSettings();
+      break;
+    }
     case 'onboarding':
       openOnboarding();
       break;
@@ -1112,7 +1178,7 @@ view.addEventListener('submit', async (e) => {
     state.search.res = res;
   } catch (err) {
     toast(err.message, true);
-    state.search.res = { ya: [], yt: [] };
+    state.search.res = { ya: [], yt: [], sc: [] };
   }
   state.search.loading = false;
   if (state.route === 'search') renderSearch();
@@ -1372,6 +1438,16 @@ function openOnboarding() {
   if (state.status.ya || state.status.yt) {
     loadLiked();
     loadLibrary();
+  }
+  if (api.updates) {
+    api.updates.onProgress((p) => {
+      state.update.progress = p;
+      const btn = $('[data-action="update-install"]');
+      if (btn) btn.textContent = `Скачиваю… ${Math.round(p * 100)}%`;
+      const bar = $('.update-bar span');
+      if (bar) bar.style.width = `${Math.round(p * 100)}%`;
+    });
+    setTimeout(() => checkUpdates(true), 4000);
   }
   api.version().then((v) => {
     state.version = v.label;

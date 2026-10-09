@@ -55,6 +55,7 @@ private const val FIREFOX_UA = "Mozilla/5.0 (Android 14; Mobile; rv:140.0) Gecko
 @Composable
 fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
     val ya = source == SOURCE_YA
+    val isSc = source == org.nyao.music.data.SOURCE_SC
     val scope = rememberCoroutineScope()
     val close by rememberUpdatedState(onClose)
     var loading by remember { mutableStateOf(true) }
@@ -73,6 +74,18 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
             }
             return true
         }
+        if (isSc) {
+            // SoundCloud после входа кладёт OAuth-токен в cookie oauth_token
+            val cookie = CookieManager.getInstance().getCookie("https://soundcloud.com") ?: return false
+            val token = cookie.split(";").map { it.trim() }.firstOrNull { it.startsWith("oauth_token=") }?.substringAfter("=") ?: return false
+            done = true
+            CookieManager.getInstance().flush()
+            scope.launch {
+                Repo.setScToken(Uri.decode(token))
+                close(true)
+            }
+            return false
+        }
         if (url.startsWith("https://music.youtube.com")) {
             val cookie = CookieManager.getInstance().getCookie("https://music.youtube.com") ?: return false
             if (!cookie.contains("SAPISID")) return false
@@ -86,11 +99,19 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
         return false
     }
 
+    // Вход SoundCloud — одностраничный, поэтому cookie проверяем ещё и по таймеру
+    if (isSc) androidx.compose.runtime.LaunchedEffect(Unit) {
+        while (!done) {
+            kotlinx.coroutines.delay(1000)
+            check("https://soundcloud.com/")
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { close(false) }) { Icon(Icons.Rounded.Close, "Закрыть") }
             Text(
-                if (ya) "Вход в Яндекс Музыку" else "Вход в YouTube Music",
+                if (ya) "Вход в Яндекс Музыку" else if (isSc) "Вход в SoundCloud" else "Вход в YouTube Music",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
             )
@@ -128,7 +149,7 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
                             check(url)
                         }
                     }
-                    loadUrl(if (ya) YandexApi.OAUTH_URL else YT_LOGIN)
+                    loadUrl(if (ya) YandexApi.OAUTH_URL else if (isSc) "https://soundcloud.com/signin" else YT_LOGIN)
                 }
             },
             onRelease = { it.destroy() },

@@ -89,3 +89,41 @@ export async function logoutYTMusic() {
 export async function logoutYandex() {
   await session.fromPartition('persist:ya-login').clearStorageData();
 }
+
+// ---------- SoundCloud: после входа сайт кладёт OAuth-токен в cookie oauth_token ----------
+const SC_PARTITION = 'persist:sc-login';
+
+export async function scToken() {
+  const cookies = await session.fromPartition(SC_PARTITION).cookies.get({ name: 'oauth_token' });
+  const c = cookies.find((x) => /soundcloud\.com$/.test(x.domain.replace(/^\./, '')));
+  return c ? decodeURIComponent(c.value) : null;
+}
+
+export function loginSoundCloud(parent) {
+  return new Promise((resolve, reject) => {
+    const win = loginWindow(parent, 'Вход в SoundCloud', SC_PARTITION, FIREFOX_UA);
+    let done = false;
+    const inspect = async () => {
+      if (done) return;
+      const token = await scToken();
+      if (!token || done) return;
+      done = true;
+      clearInterval(timer);
+      resolve(token);
+      win.close();
+    };
+    // окно входа SoundCloud — одностраничное, поэтому кроме навигаций раз в секунду проверяем cookie
+    const timer = setInterval(inspect, 1000);
+    win.webContents.on('did-navigate', inspect);
+    win.webContents.on('did-navigate-in-page', inspect);
+    win.on('closed', () => {
+      clearInterval(timer);
+      if (!done) reject(new Error('Вход в SoundCloud отменён'));
+    });
+    win.loadURL('https://soundcloud.com/signin');
+  });
+}
+
+export async function logoutSoundCloud() {
+  await session.fromPartition(SC_PARTITION).clearStorageData();
+}

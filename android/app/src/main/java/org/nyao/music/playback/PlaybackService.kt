@@ -80,9 +80,10 @@ class PlaybackService : MediaSessionService() {
             .setUpstreamDataSourceFactory(resolving)
             .setCacheKeyFactory { spec -> spec.uri.toString() }
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        val routed = DataSource.Factory { RoutingDataSource(cached.createDataSource(), resolving.createDataSource()) }
 
         player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(cached))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(routed))
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
                 true,

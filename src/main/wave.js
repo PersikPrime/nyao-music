@@ -21,9 +21,10 @@ export function interleave(base, extra, sharePercent) {
 }
 
 export class WaveMixer {
-  constructor({ ya, yt, getSettings }) {
+  constructor({ ya, yt, sc, getSettings }) {
     this.ya = ya;
     this.yt = yt;
+    this.sc = sc;
     this.getSettings = getSettings;
     this.pool = [];
     this.seen = new Set();
@@ -35,14 +36,22 @@ export class WaveMixer {
     return { diversity: s.waveDiversity, mood: s.waveMood, share: s.ytmShare };
   }
 
+  /** «Дополнительные» сервисы волны: YouTube Music и SoundCloud — что подключено */
+  get extras() {
+    return [this.yt, this.sc].filter((p) => p && p.loggedIn);
+  }
+
   async refillPool() {
-    if (!this.yt.loggedIn) return;
+    const extras = this.extras;
+    if (!extras.length) return;
     if (this.refilling) return this.refilling;
     const { diversity } = this.opts();
-    this.refilling = this.yt
-      .wavePool({ diversity, exclude: this.seen })
-      .then((tracks) => {
-        for (const t of tracks) if (!this.seen.has(t.id)) this.pool.push(t);
+    this.refilling = Promise.all(extras.map((p) => p.wavePool({ diversity, exclude: this.seen }).catch(() => [])))
+      .then((lists) => {
+        // чередуем сервисы, чтобы YouTube и SoundCloud шли вперемешку
+        const mixed = [];
+        for (let i = 0; i < Math.max(0, ...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) mixed.push(l[i]);
+        for (const t of mixed) if (!this.seen.has(t.id) && !this.pool.some((p) => p.id === t.id)) this.pool.push(t);
       })
       .catch(() => {})
       .finally(() => {
@@ -59,7 +68,7 @@ export class WaveMixer {
 
   async batch(yaPromise) {
     const { share } = this.opts();
-    const useYt = this.yt.loggedIn && share > 0;
+    const useYt = this.extras.length > 0 && share > 0;
     if (useYt && this.pool.length < 6) await this.refillPool();
     let base = [];
     if (this.ya.loggedIn && share < 100) {

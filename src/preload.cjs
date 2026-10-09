@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   openExternal: (url) => call('open:external', url),
   version: () => call('app:version'),
+  updates: {
+    check: () => call('update:check'),
+    download: (asset) => call('update:download', asset),
+    onProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p))
+  },
   settings: {
     get: () => call('settings:get'),
     set: (patch) => call('settings:set', patch)

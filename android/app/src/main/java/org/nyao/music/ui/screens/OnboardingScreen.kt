@@ -61,7 +61,7 @@ private const val STEPS = 4
 fun OnboardingScreen(model: AppModel) {
     var step by rememberSaveable { mutableIntStateOf(0) }
     val accounts by Repo.accounts.collectAsState()
-    val any = accounts[SOURCE_YA] != null || accounts[SOURCE_YT] != null
+    val any = accounts.values.any { it != null }
 
     fun finish(startWave: Boolean) {
         Repo.prefs.setOnboarded(true)
@@ -156,7 +156,7 @@ private fun Welcome() {
     Text("Nyao Music", style = MaterialTheme.typography.displaySmall)
     Spacer(Modifier.height(12.dp))
     Text(
-        "Одна «Моя волна» из Яндекс Музыки и YouTube Music. Яндекс подбирает основу, YouTube подмешивает треки, которых там нет.",
+        "Одна «Моя волна» из Яндекс Музыки, YouTube Music и SoundCloud. Яндекс подбирает основу, остальные подмешивают треки, которых там нет.",
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
@@ -170,7 +170,7 @@ private fun Accounts(model: AppModel) {
     val accounts by Repo.accounts.collectAsState()
     Title("Подключи сервисы", "Откроется обычная страница входа сервиса. Пароль в Nyao не попадает — сохраняется только токен.")
     Spacer(Modifier.height(20.dp))
-    listOf(SOURCE_YA, SOURCE_YT).forEach { svc ->
+    org.nyao.music.data.ALL_SOURCES.forEach { svc ->
         val acc = accounts[svc]
         Row(
             Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(28.dp))
@@ -179,10 +179,10 @@ private fun Accounts(model: AppModel) {
         ) {
             ServiceLogo(svc)
             Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-                Text(if (svc == SOURCE_YA) "Яндекс Музыка" else "YouTube Music", style = MaterialTheme.typography.titleMedium)
+                Text(org.nyao.music.data.sourceName(svc), style = MaterialTheme.typography.titleMedium)
                 Text(
                     acc?.let { "Вход выполнен: ${it.name}" }
-                        ?: if (svc == SOURCE_YA) "Даёт «Мою волну», лайки и плейлисты" else "Подмешивает треки в волну",
+                        ?: when (svc) { SOURCE_YA -> "Даёт «Мою волну», лайки и плейлисты"; SOURCE_YT -> "Подмешивает треки в волну"; else -> "Ремиксы и андеграунд в волну" },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

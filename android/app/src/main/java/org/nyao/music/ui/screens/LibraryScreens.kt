@@ -173,7 +173,8 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
                 liked.isEmpty() -> item { Hint("Пока пусто. Лайкай треки — они появятся здесь из обоих сервисов.") }
                 else -> {
                     val ya = liked.count { it.source == SOURCE_YA }
-                    val yt = liked.size - ya
+                    val sc = liked.count { it.source == org.nyao.music.data.SOURCE_SC }
+                    val yt = liked.size - ya - sc
                     val shown = if (filter == "all") liked else liked.filter { it.source == filter }
                     item {
                         // Карточка «Мне нравится»: печенька с сердцем, счётчики и кнопки
@@ -187,7 +188,7 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
                                 }
                                 Column {
                                     Text("Мне нравится", style = MaterialTheme.typography.headlineSmall, color = NyaoColors.OnPrimary)
-                                    Text("Яндекс $ya · YouTube $yt", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Lavender)
+                                    Text("Яндекс $ya · YouTube $yt" + (if (sc > 0) " · SoundCloud $sc" else ""), style = MaterialTheme.typography.bodySmall, color = NyaoColors.Lavender)
                                 }
                             }
                             PlayButtons(shown, "Мне нравится")
@@ -198,6 +199,7 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
                             PillChip("Все · ${liked.size}", filter == "all", { filter = "all" })
                             if (ya > 0) PillChip("Яндекс · $ya", filter == SOURCE_YA, { filter = SOURCE_YA })
                             if (yt > 0) PillChip("YouTube · $yt", filter == SOURCE_YT, { filter = SOURCE_YT })
+                            if (sc > 0) PillChip("SoundCloud · $sc", filter == org.nyao.music.data.SOURCE_SC, { filter = org.nyao.music.data.SOURCE_SC })
                         }
                     }
                     trackGroup(model, shown, "Мне нравится", current?.id, likedIds)
@@ -260,7 +262,7 @@ fun PlaylistScreen(model: AppModel, playlist: Playlist) {
                 }
                 Text(playlist.title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 18.dp), maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 Text(
-                    (if (playlist.source == SOURCE_YA) "Яндекс Музыка" else "YouTube Music") + (tracks?.let { " · ${it.size} треков" } ?: ""),
+                    org.nyao.music.data.sourceName(playlist.source) + (tracks?.let { " · ${it.size} треков" } ?: ""),
                     style = MaterialTheme.typography.bodyMedium,
                     color = NyaoColors.Muted,
                     modifier = Modifier.padding(top = 4.dp),
@@ -318,12 +320,14 @@ fun SearchScreen(model: AppModel) {
                         PillChip("Все", filter == "all", { filter = "all" })
                         PillChip("Яндекс · ${res.ya.size}", filter == SOURCE_YA, { filter = SOURCE_YA })
                         PillChip("YouTube · ${res.yt.size}", filter == SOURCE_YT, { filter = SOURCE_YT })
+                        PillChip("SoundCloud · ${res.sc.size}", filter == org.nyao.music.data.SOURCE_SC, { filter = org.nyao.music.data.SOURCE_SC })
                     }
                 }
                 val shown = when (filter) {
                     SOURCE_YA -> res.ya
                     SOURCE_YT -> res.yt
-                    else -> alternate(res.ya, res.yt)
+                    org.nyao.music.data.SOURCE_SC -> res.sc
+                    else -> org.nyao.music.data.alternateAll(res.ya, res.yt, res.sc)
                 }
                 if (shown.isEmpty()) item { Hint("Ничего не нашлось.") }
                 else trackGroup(model, shown, "Поиск: ${model.searchQuery}", current?.id, likedIds)

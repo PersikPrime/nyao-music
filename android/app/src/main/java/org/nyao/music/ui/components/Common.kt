@@ -56,7 +56,18 @@ import org.nyao.music.data.Track
 import org.nyao.music.data.formatTime
 import org.nyao.music.ui.theme.NyaoColors
 
-fun sourceColor(source: String): Color = if (source == SOURCE_YA) NyaoColors.Ya else NyaoColors.YtBadge
+fun sourceColor(source: String): Color = when (source) {
+    SOURCE_YA -> NyaoColors.Ya
+    org.nyao.music.data.SOURCE_SC -> NyaoColors.Sc
+    else -> NyaoColors.YtBadge
+}
+
+/** Короткая метка сервиса: Я / YT / SC */
+fun sourceShort(source: String): String = when (source) {
+    SOURCE_YA -> "Я"
+    org.nyao.music.data.SOURCE_SC -> "SC"
+    else -> "YT"
+}
 
 @Composable
 fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(16.dp)) {
@@ -74,7 +85,7 @@ fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCor
 fun SourceTag(source: String, modifier: Modifier = Modifier) {
     val ya = source == SOURCE_YA
     Box(modifier.clip(RoundedCornerShape(10.dp)).background(sourceColor(source)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-        Text(if (ya) "Я" else "YT", color = if (ya) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+        Text(sourceShort(source), color = if (ya) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
     }
 }
 

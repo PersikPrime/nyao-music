@@ -91,27 +91,33 @@ export class Onboarding {
   welcome() {
     return `<div class="ob-hero">${LOGO}
       <h1>Nyao Music</h1>
-      <p>Одна «Моя волна» из Яндекс Музыки и YouTube Music. Яндекс подбирает основу, YouTube подмешивает треки, которых там нет.</p>
+      <p>Одна «Моя волна» из Яндекс Музыки, YouTube Music и SoundCloud. Яндекс подбирает основу, остальные подмешивают треки, которых там нет.</p>
       ${this.version ? `<span class="ob-ver">версия ${esc(this.version)}</span>` : ''}
     </div>`;
   }
 
   accounts() {
     const st = this.ctx.getStatus();
+    const META = {
+      ya: ['Я', 'Яндекс Музыка', 'var(--ya)', '#000', 'Даёт «Мою волну», лайки и плейлисты'],
+      yt: ['YT', 'YouTube Music', 'var(--yt)', '#fff', 'Подмешивает треки в волну. Поиск работает и без входа'],
+      sc: ['SC', 'SoundCloud', 'var(--sc)', '#fff', 'Ремиксы и андеграунд в волну. Поиск работает и без входа']
+    };
     const card = (svc) => {
       const isYa = svc === 'ya';
+      const [short, name, bg, fg, hint] = META[svc];
       const acc = st[svc];
       const busy = this.busy === svc;
       return `<div class="ob-svc ${acc ? 'ok' : ''}">
-        <div class="logo" style="background:${isYa ? 'var(--ya)' : 'var(--yt)'};color:${isYa ? '#000' : '#fff'}">${isYa ? 'Я' : 'YT'}</div>
-        <div class="info"><div class="name">${isYa ? 'Яндекс Музыка' : 'YouTube Music'}</div>
-          <div class="st">${acc ? `Вход выполнен: ${esc(acc.name)}` : isYa ? 'Даёт «Мою волну», лайки и плейлисты' : 'Подмешивает треки в волну. Поиск работает и без входа'}</div></div>
+        <div class="logo" style="background:${bg};color:${fg}">${short}</div>
+        <div class="info"><div class="name">${name}</div>
+          <div class="st">${acc ? `Вход выполнен: ${esc(acc.name)}` : hint}</div></div>
         ${acc ? '<span class="ob-check" aria-label="Подключено">✓</span>' : `<button class="btn ${isYa ? 'primary' : ''}" data-ob="login" data-svc="${svc}" ${busy ? 'disabled' : ''}>${busy ? 'Жду вход…' : 'Войти'}</button>`}
       </div>`;
     };
     return `<h2>Подключи сервисы</h2>
       <p class="ob-sub">Откроется обычное окно входа сервиса. Пароли в Nyao не попадают — сохраняется только токен, зашифрованный системой.</p>
-      <div class="ob-list">${card('ya')}${card('yt')}</div>
+      <div class="ob-list">${card('ya')}${card('yt')}${card('sc')}</div>
       <p class="ob-note">Можно подключить позже в «Настройках». Если Google не пускает в окне входа, там же есть вставка cookies вручную.</p>`;
   }
 

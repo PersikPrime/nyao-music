@@ -54,11 +54,13 @@ fun SettingsScreen(model: AppModel) {
         Text("Аккаунты", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp))
         ServiceCard(model, SOURCE_YA)
         ServiceCard(model, SOURCE_YT)
+        ServiceCard(model, org.nyao.music.data.SOURCE_SC)
 
         Text("Моя волна", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         OutlinedButton(onClick = { model.go(Route.Wave) }, modifier = Modifier.fillMaxWidth()) { Text("Характер, настроение и баланс источников") }
 
         CacheCard()
+        UpdateCard(model)
 
         Text("О приложении", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         Column(
@@ -89,6 +91,7 @@ private fun ServiceCard(model: AppModel, source: String) {
     val accounts by Repo.accounts.collectAsState()
     val acc = accounts[source]
     val ya = source == SOURCE_YA
+    val isSc = source == org.nyao.music.data.SOURCE_SC
     val scope = rememberCoroutineScope()
     var manual by remember { mutableStateOf(false) }
     var value by remember { mutableStateOf("") }
@@ -99,9 +102,10 @@ private fun ServiceCard(model: AppModel, source: String) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             ServiceLogo(source)
             Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-                Text(if (ya) "Яндекс Музыка" else "YouTube Music", style = MaterialTheme.typography.titleMedium)
+                Text(org.nyao.music.data.sourceName(source), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    if (acc != null) "Вход выполнен: ${acc.name}" + (if (ya && acc.plus == false) " · без Плюса треки могут не играть" else "") else "Не подключено",
+                    if (acc != null) "Вход выполнен: ${acc.name}" + (if (ya && acc.plus == false) " · без Плюса треки могут не играть" else if (isSc) " · треки Go+ пропускаются" else "")
+                    else if (isSc) "Не подключено · поиск работает и без входа" else "Не подключено",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -109,7 +113,11 @@ private fun ServiceCard(model: AppModel, source: String) {
             if (acc != null) {
                 OutlinedButton(onClick = {
                     scope.launch {
-                        if (ya) Repo.setYandexToken(null) else Repo.setYtCookie(null)
+                        when {
+                            ya -> Repo.setYandexToken(null)
+                            isSc -> Repo.setScToken(null)
+                            else -> Repo.setYtCookie(null)
+                        }
                         if (!ya) android.webkit.CookieManager.getInstance().removeAllCookies(null)
                         model.accountsChanged()
                     }
@@ -119,27 +127,31 @@ private fun ServiceCard(model: AppModel, source: String) {
             }
         }
         TextButton(onClick = { manual = !manual }) {
-            Text(if (ya) "Вставить OAuth-токен вручную" else "Вставить cookies вручную (если Google не пускает)")
+            Text(if (ya) "Вставить OAuth-токен вручную" else if (isSc) "Вставить токен вручную (cookie oauth_token)" else "Вставить cookies вручную (если Google не пускает)")
         }
         if (manual) {
             OutlinedTextField(
                 value = value,
                 onValueChange = { value = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(if (ya) "y0_AgAAAA…" else "SAPISID=…; __Secure-3PAPISID=…; …") },
+                placeholder = { Text(if (ya) "y0_AgAAAA…" else if (isSc) "2-123456-…" else "SAPISID=…; __Secure-3PAPISID=…; …") },
                 shape = RoundedCornerShape(16.dp),
-                minLines = if (ya) 1 else 3,
+                minLines = if (ya || isSc) 1 else 3,
             )
             FilledTonalButton(onClick = {
                 scope.launch {
-                    if (ya) Repo.setYandexToken(value) else Repo.setYtCookie(value)
+                    when {
+                        ya -> Repo.setYandexToken(value)
+                        isSc -> Repo.setScToken(value)
+                        else -> Repo.setYtCookie(value)
+                    }
                     value = ""
                     manual = false
                     model.accountsChanged()
                     model.message("Сохранено")
                 }
             }, enabled = value.isNotBlank()) { Text("Сохранить") }
-            if (!ya) Text(
+            if (!ya && !isSc) Text(
                 "Cookies можно скопировать из десктопной версии Nyao или из браузера, где ты вошёл в music.youtube.com (нужны SAPISID и __Secure-3PSID).",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -152,7 +164,7 @@ private fun ServiceCard(model: AppModel, source: String) {
 fun ServiceLogo(source: String, size: Int = 48) {
     val ya = source == SOURCE_YA
     Box(Modifier.size(size.dp).clip(RoundedCornerShape((size / 3.5f).dp)).background(sourceColor(source)), contentAlignment = Alignment.Center) {
-        Text(if (ya) "Я" else "YT", color = if (ya) Color.Black else Color.White, fontWeight = FontWeight.Bold)
+        Text(org.nyao.music.ui.components.sourceShort(source), color = if (ya) Color.Black else Color.White, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -183,5 +195,65 @@ private fun CacheCard() {
                 used = 0L
             }
         }, enabled = (used ?: 0L) > 0L) { Text("Очистить кэш") }
+    }
+}
+
+/**
+ * Центр обновлений: сравнивает номер сборки с последним релизом на GitHub.
+ * APK скачивается браузером — после загрузки Android сам предложит установить его поверх.
+ */
+@Composable
+private fun UpdateCard(model: AppModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf<org.nyao.music.data.UpdateInfo?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    fun check() {
+        checking = true
+        error = null
+        scope.launch {
+            try {
+                info = org.nyao.music.data.Updates.check(BuildConfig.VERSION_CODE)
+            } catch (e: Exception) {
+                error = e.message
+            }
+            checking = false
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) { check() }
+    Text("Обновления", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val i = info
+        Text(
+            when {
+                checking -> "Проверяю GitHub…"
+                error != null -> "Не получилось: $error"
+                i != null && i.available -> "Доступна версия ${i.label} · ${i.apkSize / (1024 * 1024)} МБ"
+                i != null -> "Установлена последняя версия" + (i.label?.let { " ($it)" } ?: "")
+                else -> "Сейчас: ${BuildConfig.VERSION_NAME}"
+            },
+            style = MaterialTheme.typography.titleSmall,
+        )
+        Text("Сейчас установлена ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (i != null && i.available && i.notes.isNotBlank()) {
+            Text(i.notes.take(400), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (i != null && i.available && i.apkUrl != null) {
+                Button(onClick = {
+                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(i.apkUrl)))
+                    model.message("APK скачивается в браузере — открой его, чтобы установить")
+                }) { Text("Скачать ${i.label}") }
+            } else {
+                OutlinedButton(onClick = { check() }, enabled = !checking) { Text("Проверить") }
+            }
+            if (i?.pageUrl != null) TextButton(onClick = {
+                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(i.pageUrl)))
+            }) { Text("Релизы") }
+        }
     }
 }

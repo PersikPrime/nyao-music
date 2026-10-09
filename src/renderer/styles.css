@@ -17,6 +17,7 @@
   --ya: #ffd60a;
   --yt: #e5281f;
   --yt-bright: #ff453a;
+  --sc: #ff5500;
   --font: 'Onest', 'Segoe UI', system-ui, sans-serif;
   --display: 'Unbounded', 'Onest', sans-serif;
   --card-radius: 20px;
@@ -78,6 +79,8 @@ h2.sec { margin: 0; font-size: 20px; font-weight: 600; }
 .badge { flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 5px; line-height: 1.4; }
 .badge.ya { background: var(--ya); color: #000; }
 .badge.yt { background: var(--yt); color: #fff; }
+.badge.sc { background: var(--sc); color: #fff; }
+.badge.sc.dim { background: #3a1e0c; color: #d08a5c; }
 .badge.mix { background: #2a2540; color: #e2daff; }
 .badge.ya.dim { background: #3a3410; color: #c9b44a; }
 .badge.yt.dim { background: #3a1414; color: #c97a74; }
@@ -419,3 +422,8 @@ details textarea, details input[type=text] { flex: 1; min-width: 0; background: 
 .menu .acc-row .acc-act.primary { background: var(--text); color: #000; font-weight: 600; }
 .menu .acc-row .acc-act:hover { filter: brightness(1.1); }
 .menu:has(.acc-row) { min-width: 300px; }
+
+.dotsrc.sc { background: var(--sc); }
+.cover.sc-bg { background: #2a1408; }
+.update-bar { height: 6px; border-radius: 3px; background: var(--s3); overflow: hidden; margin-top: 10px; }
+.update-bar span { display: block; height: 100%; background: var(--accent); transition: width .2s; }

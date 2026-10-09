@@ -37,6 +37,7 @@ object NyaoColors {
     val Ya = Color(0xFFFFD60A)
     val Yt = Color(0xFFFF6A5C)
     val YtBadge = Color(0xFFE5281F)
+    val Sc = Color(0xFFFF5500)
     val Ink = Color(0xFF13111C)
 }
 

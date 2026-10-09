@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { settings, secrets } from './store.js';
 import { YandexProvider } from './providers/yandex.js';
 import { YTMusicProvider } from './providers/ytmusic.js';
+import { SoundCloudProvider } from './providers/soundcloud.js';
+import { checkUpdate, downloadAsset } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
 import { findLyrics } from './lyrics.js';
 import { Catalog } from './catalog.js';
 import { DiscordRPC } from './discord.js';
-import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic } from './auth.js';
+import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(__dirname, '..', 'renderer');
@@ -31,7 +33,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const fetchFn = (url, opts) => net.fetch(url, opts);
-let ya, yt, wave, streams, catalog, win;
+let ya, yt, sc, wave, streams, catalog, win;
 const rpc = new DiscordRPC({ log: (m) => console.log(m) });
 function configureRpc() {
   const s = settings.get();
@@ -44,8 +46,9 @@ function initProviders() {
   // по которым googlevideo проверяет ссылку
   const nodeFetch = globalThis.fetch.bind(globalThis);
   yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch });
-  wave = new WaveMixer({ ya, yt, getSettings: () => settings.get() });
-  streams = new StreamService({ ya, yt, fetchBySource: { ya: fetchFn, yt: nodeFetch } });
+  sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch });
+  wave = new WaveMixer({ ya, yt, sc, getSettings: () => settings.get() });
+  streams = new StreamService({ ya, yt, sc, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch } });
   catalog = new Catalog({ ya, yt });
 }
 
@@ -94,6 +97,17 @@ function registerIpc() {
   });
 
   handle('app:version', () => readVersion());
+  handle('update:check', () => checkUpdate(readVersion(), globalThis.fetch.bind(globalThis)));
+  handle('update:download', async (asset) => {
+    if (!asset || !/^https:\/\/github\.com\//.test(asset.url)) throw new Error('Нет файла для этой системы');
+    const file = await downloadAsset(asset, app.getPath('downloads'), (p) => {
+      if (win && !win.isDestroyed()) win.webContents.send('update:progress', p);
+    }, globalThis.fetch.bind(globalThis));
+    // .exe запускает установщик, .dmg открывается в Finder — дальше как обычная установка
+    const err = await shell.openPath(file);
+    if (err) throw new Error(err);
+    return file;
+  });
   handle('settings:get', () => settings.get());
   handle('settings:set', (patch) => {
     const next = settings.set(patch);
@@ -104,11 +118,12 @@ function registerIpc() {
   handle('rpc:status', () => rpc.status);
 
   handle('auth:status', async () => {
-    const [yaAcc, ytAcc] = await Promise.all([
+    const [yaAcc, ytAcc, scAcc] = await Promise.all([
       ya.loggedIn ? safe(ya.getAccount(), { name: 'Яндекс', error: true }) : null,
-      yt.loggedIn ? safe(yt.getAccount(), { name: 'YouTube Music' }) : null
+      yt.loggedIn ? safe(yt.getAccount(), { name: 'YouTube Music' }) : null,
+      sc.loggedIn ? safe(sc.getAccount(), { name: 'SoundCloud', error: true }) : null
     ]);
-    return { ya: yaAcc, yt: ytAcc };
+    return { ya: yaAcc, yt: ytAcc, sc: scAcc };
   });
   handle('auth:login', async (service) => {
     if (service === 'ya') {
@@ -116,6 +131,12 @@ function registerIpc() {
       secrets.set('yandexToken', token);
       ya.setToken(token);
       return ya.getAccount();
+    }
+    if (service === 'sc') {
+      const token = await loginSoundCloud(win);
+      secrets.set('scToken', token);
+      sc.setToken(token);
+      return sc.getAccount();
     }
     const cookie = await loginYTMusic(win);
     secrets.set('ytmCookie', cookie);
@@ -130,6 +151,11 @@ function registerIpc() {
       ya.setToken(v);
       return ya.getAccount();
     }
+    if (service === 'sc') {
+      secrets.set('scToken', v);
+      sc.setToken(v);
+      return sc.getAccount();
+    }
     secrets.set('ytmCookie', v);
     yt.setCookie(v);
     return yt.getAccount();
@@ -139,6 +165,10 @@ function registerIpc() {
       secrets.set('yandexToken', null);
       ya.setToken(null);
       await logoutYandex();
+    } else if (service === 'sc') {
+      secrets.set('scToken', null);
+      sc.setToken(null);
+      await logoutSoundCloud();
     } else {
       secrets.set('ytmCookie', null);
       yt.setCookie(null);
@@ -156,28 +186,35 @@ function registerIpc() {
   });
 
   handle('library:playlists', async () => {
-    const [yaLists, ytLists] = await Promise.all([
+    const [yaLists, ytLists, scLists] = await Promise.all([
       ya.loggedIn ? safe(ya.playlists(), []) : [],
-      yt.loggedIn ? safe(yt.playlists(), []) : []
+      yt.loggedIn ? safe(yt.playlists(), []) : [],
+      sc.loggedIn ? safe(sc.playlists(), []) : []
     ]);
-    return [...readMixes().map(mixSummary), ...yaLists, ...ytLists];
+    return [...readMixes().map(mixSummary), ...yaLists, ...ytLists, ...scLists];
   });
 
   handle('library:liked', async () => {
-    const [a, b] = await Promise.all([ya.loggedIn ? safe(ya.likedTracks(), []) : [], yt.loggedIn ? safe(yt.likedTracks(), []) : []]);
+    const [a, b, c] = await Promise.all([
+      ya.loggedIn ? safe(ya.likedTracks(), []) : [],
+      yt.loggedIn ? safe(yt.likedTracks(), []) : [],
+      sc.loggedIn ? safe(sc.likedTracks(), []) : []
+    ]);
     // Чередуем, чтобы общий список не был «сначала весь Яндекс, потом весь YT»
     const out = [];
-    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    for (let i = 0; i < Math.max(a.length, b.length, c.length); i++) {
       if (a[i]) out.push(a[i]);
       if (b[i]) out.push(b[i]);
+      if (c[i]) out.push(c[i]);
     }
-    return { tracks: out, ya: a.length, yt: b.length };
+    return { tracks: out, ya: a.length, yt: b.length, sc: c.length };
   });
 
   handle('library:tracks', async (playlistId) => {
     if (playlistId.startsWith('mix:')) return (readMixes().find((m) => m.id === playlistId) || { tracks: [] }).tracks;
     if (playlistId.startsWith('ya:')) return ya.playlistTracks(playlistId);
     if (playlistId.startsWith('yt:')) return yt.playlistTracks(playlistId);
+    if (playlistId.startsWith('sc:')) return sc.playlistTracks(playlistId);
     throw new Error('Неизвестный плейлист');
   });
 
@@ -210,8 +247,9 @@ function registerIpc() {
 
   handle('search', async (q) => {
     // Поиск YouTube Music работает и без входа — аккаунт нужен только для лайков и библиотеки
-    const [a, b] = await Promise.all([ya.loggedIn ? safe(ya.search(q), []) : [], safe(yt.search(q), [])]);
-    return { ya: a, yt: b };
+    // SoundCloud тоже ищет без входа
+    const [a, b, c] = await Promise.all([ya.loggedIn ? safe(ya.search(q), []) : [], safe(yt.search(q), []), safe(sc.search(q), [])]);
+    return { ya: a, yt: b, sc: c };
   });
 
   handle('wave:start', () => wave.start());
@@ -226,6 +264,7 @@ function registerIpc() {
   handle('like', async (track, on) => {
     if (track.source === 'ya') await ya.like(track, on);
     else if (track.source === 'yt') await yt.like(track, on);
+    else if (track.source === 'sc') await sc.like(track, on);
     return on;
   });
 }

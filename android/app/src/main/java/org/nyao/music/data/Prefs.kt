@@ -47,4 +47,8 @@ class Prefs(context: Context) {
     var ytCookie: String?
         get() = sp.getString("ytCookie", null)
         set(v) = sp.edit().apply { if (v == null) remove("ytCookie") else putString("ytCookie", v) }.apply()
+
+    var scToken: String?
+        get() = sp.getString("scToken", null)
+        set(v) = sp.edit().apply { if (v == null) remove("scToken") else putString("scToken", v) }.apply()
 }
