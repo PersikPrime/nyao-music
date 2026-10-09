@@ -4,6 +4,9 @@
 
 Плеер для Windows, macOS и Android: Яндекс Музыка и YouTube Music в одном окне, общая «Моя волна» с подмешиванием треков YTM, общие лайки и смешанные плейлисты.
 
+<img width="1804" height="1123" alt="image" src="https://github.com/user-attachments/assets/a8649434-cae0-4cec-9607-dece4b59a9b7" />
+
+
 ## Запуск
 
 Нужен Node.js 20+.
