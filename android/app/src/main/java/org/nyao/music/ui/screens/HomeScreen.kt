@@ -137,7 +137,7 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text("Подключи сервисы", style = MaterialTheme.typography.titleLarge)
-                    Text("Войди в Яндекс Музыку и YouTube Music — появятся волна, лайки и плейлисты.", color = NyaoColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                    Text("Войди в Яндекс Музыку, YouTube Music или SoundCloud — появятся волна, лайки и плейлисты.", color = NyaoColors.Muted, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }

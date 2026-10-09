@@ -181,7 +181,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     SourceTag(t.source)
-                    Text("из ${org.nyao.music.data.sourceName(t.source)}", style = MaterialTheme.typography.bodySmall, color = pal.onContainer)
+                    Text("из ${org.nyao.music.data.sourceName(t.source, genitive = true)}", style = MaterialTheme.typography.bodySmall, color = pal.onContainer)
                 }
             }
         }

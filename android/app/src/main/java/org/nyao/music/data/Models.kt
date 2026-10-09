@@ -46,8 +46,9 @@ const val SOURCE_SC = "sc"
 
 val ALL_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC)
 
-fun sourceName(source: String): String = when (source) {
-    SOURCE_YA -> "Яндекс Музыка"
+/** Название сервиса; genitive = true — для «из Яндекс Музыки» */
+fun sourceName(source: String, genitive: Boolean = false): String = when (source) {
+    SOURCE_YA -> if (genitive) "Яндекс Музыки" else "Яндекс Музыка"
     SOURCE_SC -> "SoundCloud"
     else -> "YouTube Music"
 }

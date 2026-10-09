@@ -313,7 +313,7 @@ fun SearchScreen(model: AppModel) {
         val res = model.search
         when {
             model.searching -> item { Loading() }
-            res == null -> item { Hint("Ищет сразу в Яндекс Музыке и YouTube Music. YouTube работает и без входа.") }
+            res == null -> item { Hint("Ищет сразу в Яндекс Музыке, YouTube Music и SoundCloud. YouTube и SoundCloud работают и без входа.") }
             else -> {
                 item {
                     Row(Modifier.padding(start = 16.dp, top = 14.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

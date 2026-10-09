@@ -212,6 +212,13 @@ function renderRail() {
   $('#rail').innerHTML = NAV.map((n) => btn(...n)).join('') + extra + '<div class="spacer"></div>' + btn('settings', 'Настройки', SETTINGS_ICON) + accounts;
 }
 // Подключаемые сервисы. Новый сервис (VK Музыка, SoundCloud…) добавляется сюда — кнопка аккаунта и меню подхватят его сами
+/** Название сервиса: в родительном падеже («из Яндекс Музыки») или обычное */
+function srcName(source, gen = false) {
+  if (source === 'ya') return gen ? 'Яндекс Музыки' : 'Яндекс Музыка';
+  if (source === 'sc') return 'SoundCloud';
+  if (source === 'mix') return gen ? 'моего микса' : 'Мой микс';
+  return 'YouTube Music';
+}
 const SERVICES = [
   { id: 'ya', short: 'Я', name: 'Яндекс Музыка', bg: 'var(--ya)', fg: '#000' },
   { id: 'yt', short: 'YT', name: 'YouTube Music', bg: 'var(--yt-bright)', fg: '#fff' },
@@ -320,13 +327,13 @@ function renderHome() {
   view.innerHTML = `<div class="scroll">
     <div class="home-top">
       <h1 class="page">${greeting()}${name ? ', ' + esc(name.split(' ')[0]) : ''}</h1>
-      <form class="search-field" data-form="home-search">${ICONS.search}<input name="q" type="search" placeholder="Поиск в Яндексе и YouTube Music" aria-label="Поиск"></form>
+      <form class="search-field" data-form="home-search">${ICONS.search}<input name="q" type="search" placeholder="Поиск в Яндексе, YouTube Music и SoundCloud" aria-label="Поиск"></form>
     </div>
     ${!loggedAny ? `<div class="card"><div class="field"><label>Подключи сервисы</label><div class="hint">Войди в Яндекс Музыку и/или YouTube Music — после этого здесь появятся волна, плейлисты и лайки.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Открыть настройки</button></div></div>` : ''}
     <div class="hero">
       <section class="wave-card">
         <canvas id="home-ribbon"></canvas>
-        <span class="eyebrow">${state.status.ya && state.status.yt ? 'Яндекс + YouTube Music' : state.status.ya ? 'Яндекс Музыка' : state.status.yt ? 'YouTube Music' : 'Нужен вход'}</span>
+        <span class="eyebrow">${SERVICES.filter((x) => state.status[x.id]).map((x) => (x.id === 'ya' ? 'Яндекс' : x.name)).join(' + ') || 'Нужен вход'}</span>
         <h2>Моя волна</h2>
         <div class="actions">
           <button class="btn primary" data-action="wave-toggle" ${loggedAny ? '' : 'disabled'}>${waveOn ? ICONS.pause + 'Пауза' : ICONS.play + 'Слушать'}</button>
@@ -382,7 +389,7 @@ function renderPlayer() {
     body = t ? `<div class="np-cover">
       ${coverHtml(t, 'np-art')}
       <div class="np-info">
-        <div class="src-chips"><span class="src-chip">${badge(t.source)}Играет из ${t.source === 'ya' ? 'Яндекс Музыки' : 'YouTube Music'}</span>${player.label ? `<span class="src-chip" style="padding-left:10px">${esc(player.label)}</span>` : ''}</div>
+        <div class="src-chips"><span class="src-chip">${badge(t.source)}Играет из ${srcName(t.source, true)}</span>${player.label ? `<span class="src-chip" style="padding-left:10px">${esc(player.label)}</span>` : ''}</div>
         <h1>${esc(t.title)}</h1>
         <div class="by">${t.artistRef ? `<button class="link-plain" data-action="open-artist" data-ref="${esc(t.artistRef)}">${esc(t.artist)}</button>` : esc(t.artist)}${t.album ? ` <span class="muted">·</span> ${t.albumRef ? `<button class="link-plain" data-action="open-album" data-ref="${esc(t.albumRef)}">${esc(t.album)}</button>` : esc(t.album)}` : ''}</div>
         <div class="row-actions">
@@ -419,7 +426,7 @@ function renderPlayer() {
       ${t ? `<div class="np-card"><div class="h"><span>Об этом треке</span></div><div class="facts">
         <span>Исполнитель</span><span>${esc(t.artist)}</span>
         ${t.album ? `<span>Альбом</span><span>${esc(t.album)}</span>` : ''}
-        <span>Источник</span><span>${t.source === 'ya' ? 'Яндекс Музыка' : 'YouTube Music'}</span>
+        <span>Источник</span><span>${srcName(t.source)}</span>
         <span>Откуда</span><span>${esc(player.label || '—')}</span>
       </div></div>` : ''}
     </aside>
@@ -515,7 +522,7 @@ function renderLibrary() {
       <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}</div>
       ${shown ? `<div class="tiles">${shown.map((p) => `<button class="tile ${p.id === lib.selected ? 'sel' : ''}" data-action="lib-select" data-id="${esc(p.id)}">
           ${p.id === 'liked' ? heart('40%') : coverHtml(p, '', true)}
-          <div class="t">${esc(p.title)}</div><div class="s">${p.id === 'liked' ? 'Оба сервиса' : esc(p.source === 'mix' ? 'Мой микс' : p.source === 'ya' ? 'Яндекс' : 'YouTube Music')}${p.count ? ' · ' + p.count : ''}</div>
+          <div class="t">${esc(p.title)}</div><div class="s">${p.id === 'liked' ? 'Все сервисы' : esc(p.source === 'ya' ? 'Яндекс' : srcName(p.source))}${p.count ? ' · ' + p.count : ''}</div>
         </button>`).join('')}</div>` : '<div class="tiles">' + '<div class="skeleton" style="aspect-ratio:1"></div>'.repeat(8) + '</div>'}
     </div>
     <aside class="aside">
