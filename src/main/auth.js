@@ -11,8 +11,8 @@ const YTM_PARTITION = 'persist:ytm-login';
 // модальное окно на macOS превращается в «шторку» без кнопок, и его не закрыть.
 function loginWindow(parent, title, partition, userAgent) {
   const win = new BrowserWindow({
-    width: 520,
-    height: 760,
+    width: 560,
+    height: 780,
     title,
     backgroundColor: '#FFFFFF',
     autoHideMenuBar: true,
@@ -25,7 +25,31 @@ function loginWindow(parent, title, partition, userAgent) {
     const [pw] = parent.getSize();
     win.setPosition(Math.round(px + pw / 2 - 260), py + 60);
   }
-  if (userAgent) win.webContents.setUserAgent(userAgent);
+  if (userAgent) {
+    win.webContents.setUserAgent(userAgent);
+    // UA на всю сессию входа — так его получают и всплывающие окна (например, «Войти через Google» у SoundCloud)
+    session.fromPartition(partition).setUserAgent(userAgent);
+  }
+  // Всплывающие окна входа (Google, Apple, Facebook) открываем в той же сессии и без меню Electron —
+  // иначе они получают «голый» браузер Electron, и Google отвечает «браузер не поддерживает JavaScript»
+  win.webContents.setWindowOpenHandler(() => ({
+    action: 'allow',
+    overrideBrowserWindowOptions: {
+      width: 500,
+      height: 700,
+      autoHideMenuBar: true,
+      backgroundColor: '#FFFFFF',
+      webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false }
+    }
+  }));
+  const children = new Set();
+  win.on('closed', () => children.forEach((c) => !c.isDestroyed() && c.close()));
+  win.webContents.on('did-create-window', (child) => {
+    children.add(child);
+    child.on('closed', () => children.delete(child));
+    child.setMenuBarVisibility(false);
+    if (userAgent) child.webContents.setUserAgent(userAgent);
+  });
   return win;
 }
 

@@ -658,7 +658,10 @@ function renderAlbum() {
 const SVC_HELP = {
   ya: { manual: 'Вставить OAuth-токен вручную', input: '<input type="text" data-manual="ya" placeholder="y0_AgAAAA…">' },
   yt: { manual: 'Вставить cookies вручную (если Google не пускает в окне входа)', input: '<textarea rows="3" data-manual="yt" placeholder="SAPISID=…; __Secure-3PAPISID=…; …"></textarea>' },
-  sc: { manual: 'Вставить OAuth-токен вручную (cookie oauth_token с soundcloud.com)', input: '<input type="text" data-manual="sc" placeholder="2-123456-…">' }
+  sc: {
+    manual: 'Войти через свой браузер (если окно входа не пускает)',
+    input: `<div class="hint" style="margin-bottom:8px">1. <button class="link-plain" data-action="open-url" data-url="https://soundcloud.com/signin" style="color:var(--accent)">Открой soundcloud.com</button> в своём браузере и войди.<br>2. Нажми F12 (на Mac — ⌥⌘I) → вкладка «Application» / «Хранилище» → Cookies → https://soundcloud.com.<br>3. Скопируй значение <b>oauth_token</b> и вставь сюда.</div><input type="text" data-manual="sc" placeholder="2-123456-…">`
+  }
 };
 function svcCard(svc) {
   const st = state.status[svc];
@@ -1057,6 +1060,9 @@ async function handleAction(el, e) {
       setTimeout(refreshRpcStatus, 1500);
       break;
     }
+    case 'open-url':
+      if (/^https:\/\//.test(el.dataset.url)) api.openExternal(el.dataset.url);
+      break;
     case 'update-check':
       await checkUpdates();
       break;
