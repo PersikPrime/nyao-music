@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Три волны Nyao: жёлтая — Яндекс, красная — YouTube, лавандовая — общая волна поверх -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M29,49c8.1,-13.75 16.9,-13.75 25,0s16.9,13.75 25,0"
+        android:strokeWidth="6.9"
+        android:strokeColor="#FFD60A"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M29,59c8.1,-13.75 16.9,-13.75 25,0s16.9,13.75 25,0"
+        android:strokeWidth="6.9"
+        android:strokeColor="#F0574A"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M29,54c8.1,-13.75 16.9,-13.75 25,0s16.9,13.75 25,0"
+        android:strokeWidth="6.9"
+        android:strokeColor="#D8CEFF"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+</vector>

@@ -1,0 +1,180 @@
+/* Тема macOS: Liquid Glass. Всё под body.mac, поэтому на Windows этот файл ни на что не влияет. */
+body.mac {
+  --bg: #06050b;
+  --accent: #d8ceff;
+  --accent-soft: rgba(216, 206, 255, .16);
+  --accent-line: rgba(216, 206, 255, .4);
+  --s1: rgba(255, 255, 255, .06);
+  --s2: rgba(255, 255, 255, .09);
+  --s3: rgba(255, 255, 255, .14);
+  --line: rgba(255, 255, 255, .1);
+  --line2: rgba(255, 255, 255, .16);
+  --text: #f5f5f7;
+  --muted: rgba(245, 245, 247, .62);
+  --dim: rgba(245, 245, 247, .42);
+  --yt-bright: #ff453a;
+  --font: -apple-system, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', system-ui, sans-serif;
+  --display: -apple-system, 'SF Pro Display', 'Helvetica Neue', system-ui, sans-serif;
+  --glass-bg: rgba(255, 255, 255, .07);
+  --glass-border: rgba(255, 255, 255, .14);
+  --glass-hi: inset 0 1px 0 rgba(255, 255, 255, .3), inset 0 -1px 0 rgba(255, 255, 255, .05);
+  --glass-blur: blur(30px) saturate(180%);
+  background: var(--bg);
+}
+
+/* ---------- Фон под стеклом ---------- */
+.mac .backdrop { display: block; position: fixed; inset: 0; overflow: hidden; background: var(--bg); }
+.mac .backdrop canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .95; }
+.mac .blob { position: absolute; border-radius: 50%; }
+.mac .b1 { left: -10%; top: -18%; width: 44vw; height: 44vw; background: #5b4bff; opacity: .5; filter: blur(110px); }
+.mac .b2 { left: 6%; top: 62%; width: 32vw; height: 32vw; background: #ff9f0a; opacity: .3; filter: blur(110px); }
+.mac .b3 { left: 72%; top: 42%; width: 40vw; height: 40vw; background: #ff3b30; opacity: .38; filter: blur(120px); }
+.mac .b4 { left: 60%; top: -16%; width: 26vw; height: 26vw; background: #30d5c8; opacity: .2; filter: blur(100px); }
+/* Фон окрашивается в цвет источника текущего трека */
+.mac.src-yt .b1 { background: #b3261e; }
+.mac.src-ya .b3 { background: #d4a000; }
+
+.mac .app { background: transparent; }
+.mac .titlebar { display: none; }
+.mac .body { padding: 10px; gap: 10px; }
+
+/* Стекло — общий рецепт */
+.mac .card, .mac .np-card, .mac .wave-card, .mac .yt-card, .mac .next-card, .mac .release,
+.mac .aside, .mac .np-aside, .mac .menu, .mac .toast, .mac .search-field, .mac .seg, .mac .pill-seg, .mac .np-tabs, .mac .lyric-peek, .mac .rail {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-hi);
+}
+.mac .card, .mac .np-card { border-radius: 22px; }
+
+/* ---------- Плавающий стеклянный сайдбар ---------- */
+.mac .rail {
+  width: 232px; align-items: stretch; gap: 2px; padding: 52px 10px 12px; border-radius: 18px;
+  -webkit-app-region: drag;
+}
+.mac .rail > * { -webkit-app-region: no-drag; }
+.mac .rail .nav-btn { width: 100%; height: 34px; border-radius: 10px; display: flex; align-items: center; gap: 10px; padding: 0 10px; color: rgba(245, 245, 247, .85); font-size: 13px; font-weight: 500; }
+.mac .rail .nav-btn svg { width: 17px; height: 17px; color: rgba(245, 245, 247, .7); }
+.mac .rail .nav-btn .lbl { display: inline; }
+.mac .rail .nav-btn:hover { background: rgba(255, 255, 255, .07); }
+.mac .rail .nav-btn.active { background: rgba(255, 255, 255, .14); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3); font-weight: 600; }
+.mac .rail .nav-btn.active svg { color: var(--accent); }
+.mac .rail .side-extra { display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+.mac .side-title { font-size: 11px; font-weight: 600; color: rgba(245, 245, 247, .45); padding: 16px 10px 6px; }
+.mac .side-pl { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border: 0; background: none; border-radius: 8px; font-size: 13px; color: rgba(245, 245, 247, .85); text-align: left; width: 100%; }
+.mac .side-pl:hover { background: rgba(255, 255, 255, .07); }
+.mac .side-pl .sw { width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35); }
+.mac .side-pl .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mac .side-accounts { display: flex; gap: 6px; padding: 8px 2px 0; }
+.mac .side-accounts .acc { flex: 1; background: rgba(255, 255, 255, .08); height: 30px; padding: 0 8px 0 4px; font-size: 12px; overflow: hidden; white-space: nowrap; }
+.mac .side-accounts .acc { min-width: 0; text-overflow: ellipsis; }
+.mac .side-accounts .acc .dot { width: 20px; height: 20px; font-size: 9px; flex-shrink: 0; }
+
+/* Область контента: прозрачная, перетаскивание окна за верхнюю полоску */
+.mac .view { border-radius: 18px; }
+.mac .view::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 22px; -webkit-app-region: drag; z-index: 3; }
+.mac .scroll, .mac .wave-view, .mac .page-view, .mac .np-body, .mac .aside-scroll { padding-bottom: 110px; }
+.mac .np-aside { padding-bottom: 110px; border-radius: 18px; margin-left: 10px; }
+.mac .aside { border-radius: 18px; margin-left: 10px; }
+
+/* Заголовки — системный SF, плотный и крупный */
+.mac h1.page, .mac .wave-title, .mac .artist-name, .mac .album-head h1, .mac .np-info h1, .mac .wave-card h2 { font-weight: 800; letter-spacing: -0.035em; }
+.mac .wave-title { font-size: clamp(56px, 7vw, 92px); }
+.mac .artist-name { font-size: clamp(56px, 8vw, 104px); letter-spacing: -0.045em; }
+.mac .lyrics p { font-weight: 800; letter-spacing: -0.02em; }
+
+/* Кнопки и чипсы — стеклянные */
+.mac .btn, .mac .chip, .mac .icbtn, .mac .back {
+  background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .18); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+}
+.mac .btn.primary, .mac .bigplay {
+  background: rgba(255, 255, 255, .2); color: #fff; border: 1px solid rgba(255, 255, 255, .4);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, .55), 0 10px 30px rgba(0, 0, 0, .35);
+}
+.mac .chip.on, .mac .seg button.on, .mac .pill-seg button.on, .mac .np-tabs button.on {
+  background: rgba(255, 255, 255, .2); color: #fff; border: 1px solid rgba(255, 255, 255, .3); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 4px 14px rgba(0, 0, 0, .3);
+}
+.mac .chip.solid.on { background: rgba(255, 255, 255, .22); color: #fff; }
+.mac .seg { background: rgba(0, 0, 0, .28); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .4); border-color: transparent; border-radius: 16px; }
+.mac .seg button { border-radius: 13px; }
+
+/* ---------- Моя волна ---------- */
+.mac .wave-hero canvas { display: none; } /* лента уже течёт под всем окном */
+.mac .wave-hero .top { top: 30px; }
+.mac .wave-play {
+  width: 116px; height: 116px; color: #fff;
+  background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .35);
+  -webkit-backdrop-filter: blur(20px) saturate(200%); backdrop-filter: blur(20px) saturate(200%);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, .55), inset 0 -10px 30px rgba(255, 255, 255, .08), 0 18px 50px rgba(0, 0, 0, .45);
+  position: relative; overflow: hidden;
+}
+.mac .wave-play::before { content: ''; position: absolute; left: 14px; top: 10px; width: 60px; height: 30px; border-radius: 50%; background: rgba(255, 255, 255, .28); filter: blur(8px); }
+.mac .now-pill { background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .2); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35); }
+.mac .drop .ball { border: 1px solid rgba(255, 255, 255, .35); box-shadow: inset 0 2px 0 rgba(255, 255, 255, .55), inset 0 -8px 16px rgba(0, 0, 0, .25), 0 6px 16px rgba(0, 0, 0, .35); overflow: hidden; }
+.mac .drop .ball::before { content: ''; position: absolute; left: 9px; top: 6px; width: 24px; height: 12px; border-radius: 50%; background: rgba(255, 255, 255, .6); filter: blur(3px); }
+.mac .drop .ball svg { display: none; }
+.mac .drop.on .ball { box-shadow: inset 0 2px 0 rgba(255, 255, 255, .55), 0 0 0 3px rgba(0, 0, 0, .35), 0 0 0 5px var(--c), 0 0 24px var(--c); }
+.mac .balance input::-webkit-slider-thumb { width: 34px !important; height: 22px !important; border-radius: 11px; background: rgba(255, 255, 255, .6); border: 1px solid rgba(255, 255, 255, .8); box-shadow: inset 0 1px 0 #fff, 0 4px 14px rgba(0, 0, 0, .4); }
+.mac .wave-card { background: rgba(255, 255, 255, .05); }
+.mac .wave-card canvas { opacity: .8; }
+
+/* ---------- Сейчас играет: погружение ---------- */
+.mac .np-main { background: transparent; }
+.mac .np-art { border-radius: 28px; border: 1px solid rgba(255, 255, 255, .25); box-shadow: inset 0 2px 0 rgba(255, 255, 255, .4), 0 40px 90px rgba(0, 0, 0, .55); }
+.mac .np-art::after { content: ''; position: absolute; left: -10%; top: -30%; width: 75%; height: 65%; border-radius: 50%; background: rgba(255, 255, 255, .14); filter: blur(30px); transform: rotate(-20deg); pointer-events: none; }
+.mac .lyrics p.on {
+  align-self: flex-start; padding: 12px 22px; margin: 0 -22px; border-radius: 22px;
+  background: rgba(255, 255, 255, .12); border: 1px solid rgba(255, 255, 255, .24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 14px 40px rgba(0, 0, 0, .3);
+  -webkit-backdrop-filter: blur(20px) saturate(200%); backdrop-filter: blur(20px) saturate(200%);
+}
+.mac .lyrics p { color: rgba(255, 240, 238, .28); }
+.mac .lyrics p.past { color: rgba(255, 240, 238, .4); }
+.mac .src-chip { background: rgba(255, 255, 255, .1); border-color: rgba(255, 255, 255, .16); }
+
+/* ---------- Исполнитель / альбом ---------- */
+.mac .artist-hero { margin: 0; border-radius: 18px 18px 0 0; }
+.mac .album-head { background: rgba(0, 0, 0, .18); border-bottom-color: rgba(255, 255, 255, .08); border-radius: 18px 18px 0 0; }
+.mac .album-head .cover, .mac .album-tile .cover { border: 1px solid rgba(255, 255, 255, .2); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 14px 30px rgba(0, 0, 0, .4); }
+.mac .album-tile .cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(160deg, rgba(255, 255, 255, .18), transparent 40%); pointer-events: none; }
+.mac .artist-tile .cover { border: 1px solid rgba(255, 255, 255, .25); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45); }
+.mac .trow:hover { background: rgba(255, 255, 255, .07); }
+.mac .trow.cur { background: rgba(255, 255, 255, .1); }
+
+/* ---------- Плеер — плавающая стеклянная капсула ---------- */
+.mac .playerbar {
+  position: absolute; z-index: 20; left: calc(50% + 121px); transform: translateX(-50%); bottom: 22px;
+  width: min(820px, calc(100vw - 300px)); height: 70px; border-radius: 35px; padding: 0 14px 0 11px;
+  display: flex; gap: 14px; border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .11);
+  -webkit-backdrop-filter: blur(36px) saturate(200%); backdrop-filter: blur(36px) saturate(200%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -1px 0 rgba(255, 255, 255, .08), 0 22px 60px rgba(0, 0, 0, .5);
+}
+.mac .playerbar .now { flex: 0 1 260px; }
+.mac .playerbar .cover.sm { width: 48px; height: 48px; border-radius: 13px; }
+.mac .playerbar .center { flex: 1; }
+.mac .playerbar .controls { gap: 10px; }
+.mac .playerbar .play { background: none; color: #fff; width: 42px; height: 42px; }
+.mac .playerbar .play svg { width: 26px; height: 26px; }
+.mac .playerbar .progress { position: absolute; left: 26px; right: 26px; bottom: 3px; width: auto; max-width: none; height: 8px; }
+.mac .playerbar .progress span { display: none; }
+.mac .playerbar .progress input { height: 8px; width: 100%; min-width: 0; }
+.mac .playerbar .right { flex: 0 0 auto; }
+.mac .playerbar .vol { display: none; }
+.mac .playerbar #pb-like { display: none; }
+.mac input[type=range]::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--fill, #fff) var(--p, 0%), rgba(255, 255, 255, .16) var(--p, 0%)); }
+
+.mac .toast { bottom: 108px; background: rgba(40, 36, 52, .55); }
+.mac .menu { background: rgba(36, 32, 48, .6); border-radius: 14px; }
+.mac .menu button:hover { background: rgba(255, 255, 255, .1); }
+.mac .skeleton { background: rgba(255, 255, 255, .06); }
+
+/* Приветствие — стеклянная карточка поверх размытого фона */
+.mac .onboarding { background: rgba(10, 8, 18, .35); backdrop-filter: blur(30px) saturate(1.4); -webkit-backdrop-filter: blur(30px) saturate(1.4); }
+.mac .ob-card { background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .16); border-radius: 34px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 40px 120px rgba(0, 0, 0, .55); backdrop-filter: blur(40px) saturate(1.6); -webkit-backdrop-filter: blur(40px) saturate(1.6); }
+.mac .ob-svc { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .10); }
+.mac .ob-input { background: rgba(0, 0, 0, .25); border-color: rgba(255, 255, 255, .12); }
+.mac .ob-card h1, .mac .ob-card h2 { font-family: -apple-system, 'SF Pro Display', var(--font); font-weight: 700; letter-spacing: -.02em; }

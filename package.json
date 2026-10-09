@@ -1,0 +1,61 @@
+{
+  "name": "nyao-music",
+  "productName": "Nyao Music",
+  "version": "0.2.17",
+  "description": "Единый плеер для Яндекс Музыки и YouTube Music с общей «Моей волной»",
+  "author": "Takko",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "yt-test": "node scripts/yt-test.mjs",
+    "dist": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "bump": "node scripts/bump.mjs"
+  },
+  "dependencies": {
+    "youtubei.js": "^18.1.0"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "org.nyao.music",
+    "productName": "Nyao Music",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "version.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.music",
+      "icon": "build/icon-mac.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Nyao Music"
+    }
+  }
+}

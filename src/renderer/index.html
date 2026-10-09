@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' https: data:; media-src nyao:; connect-src 'none'">
+<title>Nyao Music</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Unbounded:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="theme-mac.css">
+</head>
+<body>
+<!-- Фон для темы macOS: цветные пятна и живая лента под стеклом -->
+<div class="backdrop" aria-hidden="true">
+  <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="blob b4"></div>
+  <canvas id="bg-ribbon"></canvas>
+</div>
+
+<div class="app">
+  <header class="titlebar">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M3 10.6c3-5 6-5 9 0s6 5 9 0" stroke="#FFD60A"/><path d="M3 13.4c3-5 6-5 9 0s6 5 9 0" stroke="#F0574A"/><path d="M3 12c3-5 6-5 9 0s6 5 9 0" stroke="#D8CEFF"/></svg>
+      <span>Nyao Music</span>
+    </div>
+    <div class="accounts" id="accounts"></div>
+    <div class="winctl">
+      <button data-win="minimize" aria-label="Свернуть"><svg width="12" height="12" viewBox="0 0 12 12" stroke="currentColor" fill="none"><path d="M1 6h10"/></svg></button>
+      <button data-win="maximize" aria-label="Развернуть"><svg width="12" height="12" viewBox="0 0 12 12" stroke="currentColor" fill="none"><rect x="1.5" y="1.5" width="9" height="9"/></svg></button>
+      <button data-win="close" class="close" aria-label="Закрыть"><svg width="12" height="12" viewBox="0 0 12 12" stroke="currentColor" fill="none"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9"/></svg></button>
+    </div>
+  </header>
+
+  <div class="body">
+    <nav class="rail" id="rail" aria-label="Разделы"></nav>
+    <main id="view" class="view"></main>
+  </div>
+
+  <footer class="playerbar" id="playerbar">
+    <div class="now">
+      <button class="cover-btn" id="pb-coverbtn" aria-label="Открыть «Сейчас играет»"><div id="pb-cover"></div></button>
+      <div class="meta">
+        <button class="t link-plain" id="pb-title">Ничего не играет</button>
+        <div class="s" id="pb-sub">Запусти «Мою волну»</div>
+      </div>
+      <button id="pb-like" class="ic" aria-label="Нравится"></button>
+    </div>
+    <div class="center">
+      <div class="controls">
+        <button id="pb-shuffle" class="ic" aria-label="Перемешать"></button>
+        <button id="pb-prev" class="ic lg" aria-label="Предыдущий"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+        <button id="pb-play" class="play" aria-label="Играть"></button>
+        <button id="pb-next" class="ic lg" aria-label="Следующий"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+        <button id="pb-repeat" class="ic" aria-label="Повтор"></button>
+      </div>
+      <div class="progress"><span id="pb-cur">0:00</span><input type="range" id="pb-seek" min="0" max="1000" value="0" aria-label="Перемотка"><span id="pb-dur">0:00</span></div>
+    </div>
+    <div class="right">
+      <button id="pb-np" class="ic" aria-label="Сейчас играет" title="Сейчас играет"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M14 4v16"/></svg></button>
+      <button id="pb-lyrics" class="ic" aria-label="Текст" title="Текст"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+      <button id="pb-queue" class="ic" aria-label="Очередь" title="Очередь"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h10M17 15v6l4-3z"/></svg></button>
+      <span class="vol"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9zM16 9a4 4 0 0 1 0 6"/></svg>
+      <input type="range" id="pb-vol" min="0" max="100" value="80" aria-label="Громкость"></span>
+    </div>
+  </footer>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="menu" class="menu" hidden></div>
+<audio id="audio" preload="auto"></audio>
+<script type="module" src="app.js"></script>
+</body>
+</html>
