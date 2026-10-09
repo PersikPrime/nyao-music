@@ -17,8 +17,8 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            args: --win nsis --x64
-            files: dist/*.exe
+            args: --win nsis zip --x64
+            files: dist/*.exe dist/*.zip
           - os: macos-latest
             args: --mac dmg --arm64 --x64
             files: dist/*.dmg
