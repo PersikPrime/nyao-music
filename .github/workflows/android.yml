@@ -4,7 +4,7 @@ name: Android APK
 
 on:
   push:
-    paths: ['android/**', 'version.json', '.github/workflows/android.yml']
+    paths: ['android/**', 'version.json', '.github/workflows/android.yml', '.github/scripts/**']
   workflow_dispatch:
 
 permissions:
@@ -42,17 +42,10 @@ jobs:
           name: ${{ steps.ver.outputs.name }}
           path: android/app/build/outputs/apk/release/app-release.apk
 
-      # Релиз с APK: тег v0.2.17 и т. д. Если релиз этой сборки уже есть — APK в нём заменяется
+      # Релиз с APK: тег v0.2.17 и т. д. Если в релизе уже есть APK этой сборки — он заменяется
       - name: Релиз
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk "${{ steps.ver.outputs.name }}.apk"
-          if gh release view "${{ steps.ver.outputs.tag }}" > /dev/null 2>&1; then
-            gh release upload "${{ steps.ver.outputs.tag }}" "${{ steps.ver.outputs.name }}.apk" --clobber
-          else
-            gh release create "${{ steps.ver.outputs.tag }}" "${{ steps.ver.outputs.name }}.apk" \
-              --title "${{ steps.ver.outputs.title }}" \
-              --notes "Android APK, собран автоматически из коммита ${GITHUB_SHA::7}." \
-              --target "$GITHUB_SHA"
-          fi
+          .github/scripts/release-upload.sh "${{ steps.ver.outputs.name }}.apk"

@@ -1,0 +1,42 @@
+# Сборка десктопной версии: Windows (.exe-установщик) и macOS (.dmg для Apple Silicon и Intel).
+# Готовые файлы попадают в тот же релиз, что и APK (тег v0.2.N).
+name: Desktop (Windows + macOS)
+
+on:
+  push:
+    paths: ['src/**', 'build/**', 'package.json', 'package-lock.json', 'version.json', '.github/workflows/desktop.yml', '.github/scripts/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: --win nsis --x64
+            files: dist/*.exe
+          - os: macos-latest
+            args: --mac dmg --arm64 --x64
+            files: dist/*.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Сборка
+        env:
+          # Подписи разработчика нет — сборка неподписанная (на Mac — ad-hoc подпись)
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder ${{ matrix.args }} --publish never
+      - name: Релиз
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/release-upload.sh ${{ matrix.files }}
