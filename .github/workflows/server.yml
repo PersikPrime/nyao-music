@@ -64,8 +64,15 @@ jobs:
           HOST: ${{ secrets.NYAO_SSH_HOST }}
           USER_: ${{ secrets.NYAO_SSH_USER }}
         run: |
-          SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes ${USER_:-deploy}@$HOST"
-          $SSH "mkdir -p $REMOTE_DIR"
+          SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
+          # понятная ошибка в сводке запуска, если сервер не пустил
+          grep -q "BEGIN OPENSSH PRIVATE KEY" ~/.ssh/id_deploy || echo "::error::NYAO_SSH_KEY не похож на приватный ключ (нужен файл nyao_deploy без .pub)"
+          test -s ~/.ssh/known_hosts || echo "::error::ssh-keyscan не достучался до $HOST:22 (файрвол или другой порт SSH)"
+          if ! $SSH "mkdir -p $REMOTE_DIR && command -v docker >/dev/null || echo NO_DOCKER" > ssh.out 2> ssh.err; then
+            echo "::error::SSH не пустил: $(tail -n 3 ssh.err | tr '\n' ' ')"
+            exit 1
+          fi
+          if grep -q NO_DOCKER ssh.out; then echo "::error::На сервере нет docker (или пользователь не в группе docker)"; exit 1; fi
           tar -C server --exclude=node_modules --exclude=test -czf - . | $SSH "tar -xzf - -C $REMOTE_DIR && chmod 600 $REMOTE_DIR/.env"
           $SSH "cd $REMOTE_DIR && docker compose up -d --build --remove-orphans && docker image prune -f > /dev/null && docker compose ps"
 
