@@ -1354,6 +1354,8 @@ player.addEventListener('state', pushRpc);
 player.audio.addEventListener('seeked', pushRpc);
 player.audio.addEventListener('durationchange', pushRpc);
 player.addEventListener('error', (e) => toast(e.detail, true));
+player.addEventListener('info', (e) => toast(e.detail));
+if (api.sc) api.sc.onSent((r) => toast(`SoundCloud: отложенные лайки доставлены (${r.sent})`));
 player.addEventListener('loading', (e) => {
   if (e.detail) toast('Собираю волну…');
 });

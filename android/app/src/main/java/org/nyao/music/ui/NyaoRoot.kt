@@ -120,6 +120,13 @@ fun NyaoRoot() {
         Repo.refreshAccounts()
         // Тихая проверка обновлений при запуске (после того, как начали слушать сообщения)
         launch {
+            delay(60_000)
+            while (true) {
+                runCatching { Repo.flushScLikes() }
+                delay(10 * 60_000L)
+            }
+        }
+        launch {
             delay(3000)
             runCatching { org.nyao.music.data.Updates.check(org.nyao.music.BuildConfig.VERSION_CODE) }.getOrNull()?.let { u ->
                 if (u.available) PlaybackEvents.emit("Доступна Nyao Music ${u.label} — обновить можно в Настройках")

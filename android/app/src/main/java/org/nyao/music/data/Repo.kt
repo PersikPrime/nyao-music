@@ -134,11 +134,37 @@ object Repo {
     suspend fun like(track: Track, on: Boolean) {
         when (track.source) {
             SOURCE_YA -> ya.like(track, on)
-            SOURCE_SC -> sc.like(track.srcId, on)
+            SOURCE_SC -> try {
+                sc.like(track.srcId, on)
+                flushScLikes()
+            } catch (e: Exception) {
+                // защита SoundCloud не пустила — в Nyao лайк ставим сразу, в SoundCloud дошлём позже
+                prefs.scPendingLikes = prefs.scPendingLikes.filterNot { it.startsWith("${track.srcId}:") }.toSet() + "${track.srcId}:${if (on) 1 else 0}"
+                org.nyao.music.playback.PlaybackEvents.emit("SoundCloud пока не принял лайк — отправлю позже сам")
+            }
             else -> yt.like(track.srcId, on)
         }
         _liked.value = if (on) _liked.value + track.id else _liked.value - track.id
         if (on && mode.value == Mode.WAVE) wave.feedback("like", track, 0)
+    }
+
+    /** Досылает отложенные лайки SoundCloud */
+    suspend fun flushScLikes() {
+        if (!sc.loggedIn) return
+        val list = prefs.scPendingLikes
+        if (list.isEmpty()) return
+        val left = LinkedHashSet<String>()
+        for (item in list) {
+            val (id, on) = item.split(":").let { it[0] to (it.getOrNull(1) == "1") }
+            try {
+                sc.like(id, on)
+            } catch (_: Exception) {
+                left += item
+            }
+        }
+        prefs.scPendingLikes = left
+        val sent = list.size - left.size
+        if (sent > 0) org.nyao.music.playback.PlaybackEvents.emit("SoundCloud: отложенные лайки доставлены ($sent)")
     }
 
     // ---------- Воспроизведение ----------

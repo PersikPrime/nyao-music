@@ -30,10 +30,21 @@ export function mapTrack(t) {
   };
 }
 
+/** SoundCloud прислал капчу DataDome вместо ответа: в err.captcha — ссылка на неё */
+export class CaptchaError extends Error {
+  constructor(url) {
+    super('SoundCloud просит пройти проверку (капчу)');
+    this.captcha = url;
+  }
+}
+
 export class SoundCloudProvider {
-  constructor({ token = null, fetch = globalThis.fetch } = {}) {
+  constructor({ token = null, fetch = globalThis.fetch, writeFetch = null } = {}) {
     this.token = token;
     this.fetch = fetch;
+    // Запросы на запись (лайки) идут через сессию браузера, где ты входил: там cookie защиты DataDome
+    // и отпечаток настоящего Chromium. Без них SoundCloud отвечает 403 и капчей.
+    this.writeFetch = writeFetch;
     this.clientId = null;
     this.account = null;
     this.raw = new Map(); // id → исходный объект трека (нужен для потока)
@@ -73,15 +84,21 @@ export class SoundCloudProvider {
     const url = new URL(path.startsWith('http') ? path : API + path);
     url.searchParams.set('client_id', clientId);
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
-    const headers = { 'User-Agent': UA, Accept: 'application/json', Origin: 'https://soundcloud.com', Referer: 'https://soundcloud.com/' };
+    const write = method !== 'GET' && this.writeFetch;
+    const headers = { Accept: 'application/json', Origin: 'https://soundcloud.com', Referer: 'https://soundcloud.com/' };
+    if (!write) headers['User-Agent'] = UA; // в сессии браузера свой User-Agent — не подменяем его
     if (this.token) headers.Authorization = `OAuth ${this.token}`;
-    const res = await this.fetch(url.toString(), { method, headers });
+    const res = await (write ? this.writeFetch : this.fetch)(url.toString(), { method, headers });
     if ((res.status === 401 || res.status === 403) && retry && !this.token) {
       // client_id протух — берём свежий и повторяем
       await this.getClientId(true);
       return this.request(method, path, { query, retry: false });
     }
     const text = await res.text();
+    if (res.status === 403) {
+      const m = text.match(/https:\/\/[a-z.]*captcha-delivery\.com\/[^"\s]+/);
+      if (m) throw new CaptchaError(m[0].replace(/\\u0026/g, '&'));
+    }
     if (!res.ok) throw new Error(`SoundCloud ${method} ${url.pathname}: ${res.status} ${text.slice(0, 160)}`);
     return text ? JSON.parse(text) : null;
   }

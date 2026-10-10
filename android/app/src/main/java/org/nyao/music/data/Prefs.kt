@@ -51,4 +51,9 @@ class Prefs(context: Context) {
     var scToken: String?
         get() = sp.getString("scToken", null)
         set(v) = sp.edit().apply { if (v == null) remove("scToken") else putString("scToken", v) }.apply()
+
+    /** Отложенные лайки SoundCloud: "id:1" (поставить) или "id:0" (снять) */
+    var scPendingLikes: Set<String>
+        get() = sp.getStringSet("scPending", emptySet()) ?: emptySet()
+        set(v) = sp.edit().putStringSet("scPending", v).apply()
 }

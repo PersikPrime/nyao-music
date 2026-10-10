@@ -151,3 +151,33 @@ export function loginSoundCloud(parent) {
 export async function logoutSoundCloud() {
   await session.fromPartition(SC_PARTITION).clearStorageData();
 }
+
+/** fetch через сессию окна входа SoundCloud (cookie DataDome + сетевой стек Chromium) */
+export function scSessionFetch(url, opts) {
+  return session.fromPartition(SC_PARTITION).fetch(url, opts);
+}
+
+/**
+ * Окно с капчей SoundCloud (DataDome) в той же сессии. Резолвится, когда проверка пройдена
+ * (DataDome поставил новую cookie) или окно закрыли.
+ */
+export function solveScCaptcha(parent, url) {
+  return new Promise((resolve) => {
+    const ses = session.fromPartition(SC_PARTITION);
+    const win = loginWindow(parent, 'SoundCloud: проверка, что ты не бот', SC_PARTITION, FIREFOX_UA);
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      ses.cookies.removeListener('changed', onCookie);
+      if (!win.isDestroyed()) win.close();
+      resolve(ok);
+    };
+    const onCookie = (_e, cookie, _cause, removed) => {
+      if (!removed && cookie.name === 'datadome') setTimeout(() => finish(true), 800);
+    };
+    ses.cookies.on('changed', onCookie);
+    win.on('closed', () => finish(false));
+    win.loadURL(url);
+  });
+}

@@ -13,7 +13,7 @@ import { StreamService } from './stream.js';
 import { findLyrics } from './lyrics.js';
 import { Catalog } from './catalog.js';
 import { DiscordRPC } from './discord.js';
-import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud } from './auth.js';
+import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(__dirname, '..', 'renderer');
@@ -46,10 +46,55 @@ function initProviders() {
   // по которым googlevideo проверяет ссылку
   const nodeFetch = globalThis.fetch.bind(globalThis);
   yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch });
-  sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch });
+  sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch });
   wave = new WaveMixer({ ya, yt, sc, getSettings: () => settings.get() });
   streams = new StreamService({ ya, yt, sc, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch } });
   catalog = new Catalog({ ya, yt });
+}
+
+// ---------- Отложенные лайки SoundCloud ----------
+// Если защита SoundCloud не пропустила лайк, он ставится в Nyao сразу и ждёт в очереди: повторяем позже.
+const pendingFile = () => path.join(app.getPath('userData'), 'sc-pending-likes.json');
+function readPending() {
+  try {
+    return JSON.parse(fs.readFileSync(pendingFile(), 'utf8'));
+  } catch {
+    return [];
+  }
+}
+function writePending(list) {
+  fs.writeFileSync(pendingFile(), JSON.stringify(list, null, 2));
+}
+function queueScLike(track, on) {
+  const list = readPending().filter((x) => x.srcId !== track.srcId);
+  list.push({ srcId: track.srcId, title: track.title, on, at: Date.now() });
+  writePending(list);
+}
+let flushing = false;
+/** Пытается дослать отложенные лайки. Капчу здесь не показываем — только в ответ на действие пользователя */
+async function flushScLikes() {
+  if (flushing || !sc || !sc.loggedIn) return;
+  const list = readPending();
+  if (!list.length) return;
+  flushing = true;
+  const left = [];
+  for (let i = 0; i < list.length; i++) {
+    try {
+      await sc.like({ srcId: list[i].srcId }, list[i].on);
+    } catch (e) {
+      if (e.captcha) {
+        left.push(...list.slice(i)); // защита всё ещё злится — остальное даже не пробуем
+        break;
+      }
+      left.push(list[i]);
+    }
+  }
+  // за время отправки могли добавиться новые лайки — не теряем их
+  const added = readPending().filter((x) => !list.some((y) => y.srcId === x.srcId && y.at === x.at));
+  writePending([...left.filter((x) => !added.some((y) => y.srcId === x.srcId)), ...added]);
+  const done = list.length - left.length;
+  flushing = false;
+  if (done && win && !win.isDestroyed()) win.webContents.send('sc:pending', { sent: done, left: left.length });
 }
 
 // ---------- Мои миксы: локальные плейлисты из треков обоих сервисов ----------
@@ -88,6 +133,35 @@ function handle(channel, fn) {
   });
 }
 
+/**
+ * Лайк SoundCloud: обычный запрос через сессию браузера → если вылезла капча, показываем её и повторяем →
+ * если всё равно не вышло, ставим лайк в очередь (в Nyao он уже стоит).
+ */
+async function likeSoundCloud(track, on) {
+  try {
+    await sc.like(track, on);
+    flushScLikes();
+    return on;
+  } catch (e) {
+    if (!e.captcha) {
+      queueScLike(track, on);
+      return { on, pending: true, reason: e.message };
+    }
+    const solved = await solveScCaptcha(win, e.captcha);
+    if (solved) {
+      try {
+        await sc.like(track, on);
+        flushScLikes();
+        return on;
+      } catch {
+        // упадём в очередь ниже
+      }
+    }
+    queueScLike(track, on);
+    return { on, pending: true, reason: solved ? 'SoundCloud всё ещё не пускает' : 'проверку не прошли' };
+  }
+}
+
 function registerIpc() {
   handle('win:minimize', () => win.minimize());
   handle('win:maximize', () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
@@ -119,6 +193,8 @@ function registerIpc() {
   });
   handle('rpc:update', (info) => rpc.update(info));
   handle('rpc:status', () => rpc.status);
+  handle('sc:pending', () => readPending());
+  handle('sc:flush', () => flushScLikes());
 
   handle('auth:status', async () => {
     const [yaAcc, ytAcc, scAcc] = await Promise.all([
@@ -267,7 +343,7 @@ function registerIpc() {
   handle('like', async (track, on) => {
     if (track.source === 'ya') await ya.like(track, on);
     else if (track.source === 'yt') await yt.like(track, on);
-    else if (track.source === 'sc') await sc.like(track, on);
+    else if (track.source === 'sc') return likeSoundCloud(track, on);
     return on;
   });
 }
@@ -320,6 +396,9 @@ app.whenReady().then(() => {
   registerIpc();
   configureRpc();
   createWindow();
+  // отложенные лайки SoundCloud: через минуту после запуска и потом раз в 10 минут
+  setTimeout(flushScLikes, 60_000);
+  setInterval(flushScLikes, 10 * 60_000);
   // Картинки обложек грузятся напрямую с CDN сервисов — убираем Referer, чтобы не было 403
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['https://*.googleusercontent.com/*', 'https://avatars.yandex.net/*', 'https://*.ggpht.com/*'] }, (details, cb) => {
     delete details.requestHeaders.Referer;

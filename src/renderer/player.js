@@ -198,7 +198,9 @@ export class Player extends EventTarget {
     else this.liked.delete(track.id);
     this.emit('like');
     try {
-      await api.like(track, on);
+      const res = await api.like(track, on);
+      // SoundCloud мог не пустить лайк сразу — в Nyao он стоит, а в SoundCloud дойдёт позже
+      if (res && res.pending) this.emit('info', 'SoundCloud пока не принял лайк — отправлю позже сам');
       if (this.mode === 'wave' && on) api.wave.feedback('like', track, 0).catch(() => {});
     } catch (e) {
       if (on) this.liked.delete(track.id);

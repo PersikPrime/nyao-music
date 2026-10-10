@@ -16,6 +16,8 @@ class ScApi(private val prefs: Prefs) {
 
     companion object {
         private const val API = "https://api-v2.soundcloud.com"
+        /** Тот же User-Agent, что у окна входа: cookie защиты DataDome привязана к нему */
+        const val LOGIN_UA = "Mozilla/5.0 (Android 14; Mobile; rv:140.0) Gecko/140.0 Firefox/140.0"
         const val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 
         fun bigArtwork(url: String?): String? = url?.replace(Regex("-(large|t\\d+x\\d+|small|tiny|badge|crop)\\."), "-t500x500.")
@@ -82,11 +84,17 @@ class ScApi(private val prefs: Prefs) {
             .header("Origin", "https://soundcloud.com")
             .header("Referer", "https://soundcloud.com/")
         prefs.scToken?.let { rb.header("Authorization", "OAuth $it") }
+        if (method != "GET") {
+            // Запись (лайки) проверяет защита DataDome: отправляем cookie из окна входа и его же User-Agent
+            runCatching { android.webkit.CookieManager.getInstance().getCookie("https://soundcloud.com") }.getOrNull()?.let { rb.header("Cookie", it) }
+            rb.header("User-Agent", LOGIN_UA)
+        }
         val (code, text) = Net.call(rb.build())
         if ((code == 401 || code == 403) && retry && !loggedIn) {
             clientId(force = true)
             return request(method, path, query, retry = false)
         }
+        if (code == 403 && text.contains("captcha-delivery.com")) throw ApiException("SoundCloud просит пройти проверку (капчу)", 403)
         if (code !in 200..299) throw ApiException("SoundCloud $method ${url.encodedPath}: $code", code)
         val t = text.trim()
         if (t.isEmpty()) return null

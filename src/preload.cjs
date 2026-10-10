@@ -58,6 +58,11 @@ contextBridge.exposeInMainWorld('nyao', {
   streamError: (id) => call('stream:error', id),
   lyrics: (track) => call('lyrics', track),
   like: (track, on) => call('like', track, on),
+  sc: {
+    pending: () => call('sc:pending'),
+    flush: () => call('sc:flush'),
+    onSent: (cb) => ipcRenderer.on('sc:pending', (_e, r) => cb(r))
+  },
   rpc: {
     update: (info) => call('rpc:update', info),
     status: () => call('rpc:status')
