@@ -273,7 +273,8 @@ export function createApp({ db, tg, mirror = null, log = console.log }) {
 
   return async function handler(req, res) {
     const url = new URL(req.url, 'http://localhost');
-    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    // за Cloudflare настоящий адрес — в CF-Connecting-IP (иначе все запросы были бы «с одного IP» Cloudflare)
+    const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     if (req.method === 'OPTIONS') return send(res, 204, '');
     try {
       // файлы зеркала отдаём потоком, с поддержкой докачки
