@@ -118,7 +118,7 @@ export function createApp({ db, tg, mirror = null, log = console.log }) {
   }
 
   const routes = [
-    ['GET', /^\/health$/, async () => ({ ok: true, telegram: tg.configured })],
+    ['GET', /^\/health$/, async () => ({ ok: true, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
 
     // ---------- Вход ----------
     ['POST', /^\/auth\/start$/, async ({ req, ip }) => {
@@ -146,6 +146,10 @@ export function createApp({ db, tg, mirror = null, log = console.log }) {
         return page(`Привет, ${profile.name}!`, 'Готово — возвращайся в Nyao Music, вкладку можно закрыть.');
       } catch (e) {
         log(`[auth] ${e.message}`);
+        if (/abort|timeout|fetch failed|ECONN|ETIMEDOUT/i.test(String(e.message) + String(e.cause && e.cause.code))) {
+          Object.assign(login, { status: 'error', error: 'Сервер не достучался до Telegram' });
+          return page('Сервер не видит Telegram', 'Вход подтверждён, но сервер Nyao не смог связаться с Telegram. Попробуй позже.', false);
+        }
         Object.assign(login, { status: 'error', error: 'Telegram не подтвердил вход' });
         return page('Не получилось', 'Telegram не подтвердил вход. Попробуй ещё раз.', false);
       }

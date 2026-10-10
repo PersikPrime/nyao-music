@@ -1,6 +1,6 @@
 # Деплой сервера Nyao Music на Selectel: тесты → копируем server/ по SSH → docker compose up.
 # Секреты (Settings → Secrets → Actions): NYAO_SSH_HOST, NYAO_SSH_USER, NYAO_SSH_KEY,
-# NYAO_TG_CLIENT_SECRET, NYAO_DB_PASSWORD. Токены музыкальных сервисов на сервер не попадают.
+# NYAO_TG_CLIENT_SECRET, NYAO_DB_PASSWORD, NYAO_TG_RELAY (адрес ретранслятора на Cloudflare). Токены музыкальных сервисов на сервер не попадают.
 name: Server deploy
 
 on:
@@ -48,6 +48,8 @@ jobs:
         env:
           TG_SECRET: ${{ secrets.NYAO_TG_CLIENT_SECRET }}
           DB_PASSWORD: ${{ secrets.NYAO_DB_PASSWORD }}
+          # адрес Cloudflare Worker из server/cloudflare-worker.js: в РФ ТСПУ режет серверу oauth.telegram.org
+          TG_RELAY: ${{ secrets.NYAO_TG_RELAY }}
         run: |
           test -n "$DB_PASSWORD" || { echo "::error::Нет секрета NYAO_DB_PASSWORD"; exit 1; }
           test -n "$TG_SECRET" || echo "::warning::Нет секрета NYAO_TG_CLIENT_SECRET — вход через Telegram будет выключен"
@@ -57,6 +59,7 @@ jobs:
             echo "TG_CLIENT_ID=$TG_CLIENT_ID"
             echo "TG_CLIENT_SECRET=$(q "$TG_SECRET")"
             echo "POSTGRES_PASSWORD=$(q "$DB_PASSWORD")"
+            echo "TG_RELAY=$(q "$TG_RELAY")"
           } > server/.env
 
       - name: Копирование и запуск

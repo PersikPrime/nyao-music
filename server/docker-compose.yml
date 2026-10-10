@@ -22,6 +22,7 @@ services:
       PUBLIC_URL: https://${DOMAIN}
       TG_CLIENT_ID: ${TG_CLIENT_ID}
       TG_CLIENT_SECRET: ${TG_CLIENT_SECRET}
+      TG_RELAY: ${TG_RELAY:-}
       MIRROR_DIR: /data/releases
     volumes:
       - releases:/data/releases

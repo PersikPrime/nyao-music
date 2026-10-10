@@ -5,9 +5,7 @@ import crypto from 'node:crypto';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 export const ISSUER = 'https://oauth.telegram.org';
-const AUTH_URL = `${ISSUER}/auth`;
-const TOKEN_URL = `${ISSUER}/token`;
-const JWKS_URL = `${ISSUER}/.well-known/jwks.json`;
+const AUTH_URL = `${ISSUER}/auth`; // открывается в браузере пользователя — напрямую
 
 export const b64url = (buf) => Buffer.from(buf).toString('base64url');
 
@@ -18,13 +16,19 @@ export function pkce() {
 }
 
 export class TelegramOIDC {
-  constructor({ clientId, clientSecret, redirectUri, fetch = globalThis.fetch, keys = null }) {
+  /**
+   * relay — адрес ретранслятора (Cloudflare Worker), если серверу закрыт прямой доступ к oauth.telegram.org
+   * (в РФ на части хостингов его режет ТСПУ). Через него идут только /token и ключи JWKS.
+   */
+  constructor({ clientId, clientSecret, redirectUri, relay = '', fetch = globalThis.fetch, keys = null }) {
     this.clientId = String(clientId || '');
     this.clientSecret = String(clientSecret || '');
     this.redirectUri = redirectUri;
     this.fetch = fetch;
+    const base = String(relay || '').trim().replace(/\/$/, '') || ISSUER;
+    this.tokenUrl = `${base}/token`;
     // keys можно подменить в тестах; по умолчанию — публичные ключи Telegram, кэшируются jose
-    this.keys = keys || createRemoteJWKSet(new URL(JWKS_URL));
+    this.keys = keys || createRemoteJWKSet(new URL(`${base}/.well-known/jwks.json`), { timeoutDuration: 15000 });
   }
 
   get configured() {
@@ -52,8 +56,9 @@ export class TelegramOIDC {
       client_id: this.clientId,
       code_verifier: verifier
     });
-    const res = await this.fetch(TOKEN_URL, {
+    const res = await this.fetch(this.tokenUrl, {
       method: 'POST',
+      signal: AbortSignal.timeout(15000), // если Telegram недоступен — не висим минутами
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         Authorization: 'Basic ' + Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')

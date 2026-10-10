@@ -108,3 +108,11 @@ test('устаревший state отклоняется', async () => {
     server.close();
   }
 });
+
+test('ретранслятор: /token и ключи идут через Cloudflare Worker', async () => {
+  const urls = [];
+  const tg = new TelegramOIDC({ clientId: '1', clientSecret: 's', redirectUri: 'https://x/cb', relay: 'https://tg.example.com/', fetch: async (u) => { urls.push(u); return new Response('{"error":"x"}', { status: 400 }); }, keys: () => {} });
+  await assert.rejects(tg.exchange('c', 'v'), /400/);
+  assert.equal(urls[0], 'https://tg.example.com/token');
+  assert.match(tg.authUrl({ state: 's', challenge: 'c' }), /^https:\/\/oauth\.telegram\.org\/auth\?/, 'браузер идёт к Telegram напрямую');
+});

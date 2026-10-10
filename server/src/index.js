@@ -21,7 +21,8 @@ for (let i = 0; ; i++) {
   }
 }
 
-const tg = new TelegramOIDC({ clientId: env.TG_CLIENT_ID, clientSecret: env.TG_CLIENT_SECRET, redirectUri: `${PUBLIC_URL}/auth/telegram/callback` });
+const tg = new TelegramOIDC({ clientId: env.TG_CLIENT_ID, clientSecret: env.TG_CLIENT_SECRET, redirectUri: `${PUBLIC_URL}/auth/telegram/callback`, relay: env.TG_RELAY });
+if (env.TG_RELAY) console.log(`[auth] Telegram через ретранслятор ${env.TG_RELAY}`);
 if (!tg.configured) console.warn('[auth] TG_CLIENT_ID / TG_CLIENT_SECRET не заданы — вход через Telegram выключен');
 
 const mirror = new ReleaseMirror({ repo: env.GITHUB_REPO || 'PersikPrime/nyao-music', dir: env.MIRROR_DIR || '/data/releases', publicUrl: PUBLIC_URL });
