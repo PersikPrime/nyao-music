@@ -25,6 +25,7 @@ export function mapTrack(t) {
     duration: Math.round((t.full_duration || t.duration || 0) / 1000),
     cover: bigArtwork(t.artwork_url || user.avatar_url),
     // BLOCK — недоступен в стране; SNIP — только 30-секундный отрывок (нужен Go+)
+    url: t.permalink_url || null, // страница трека — для кнопки в Discord
     available: t.policy !== 'BLOCK' && t.streamable !== false,
     preview: t.policy === 'SNIP'
   };

@@ -12,8 +12,8 @@ const DEFAULT_SETTINGS = {
   autoplay: true,
   quality: 'high',
   sourcePref: 'auto',
-  discordRpc: false,
-  discordClientId: '', onboarded: false
+  discordRpc: true,      // статус в Discord включён сразу — приложение nyao.Music встроено
+  onboarded: false
 };
 
 function dataPath(name) {
@@ -37,7 +37,16 @@ function writeJson(file, value) {
 
 export const settings = {
   get() {
-    return { ...DEFAULT_SETTINGS, ...readJson(dataPath('settings.json'), {}) };
+    const saved = readJson(dataPath('settings.json'), {});
+    // 0.4: раньше статус Discord был выключен, пока не впишешь свой Application ID. Теперь ID встроен —
+    // включаем один раз всем, дальше уважаем выбор пользователя.
+    if (!saved.rpcBuiltin) {
+      saved.discordRpc = true;
+      saved.rpcBuiltin = true;
+      delete saved.discordClientId;
+      writeJson(dataPath('settings.json'), saved);
+    }
+    return { ...DEFAULT_SETTINGS, ...saved };
   },
   set(patch) {
     const next = { ...this.get(), ...patch };

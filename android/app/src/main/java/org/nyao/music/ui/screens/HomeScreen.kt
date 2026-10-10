@@ -90,7 +90,9 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
     val anyAccount = accounts.values.any { it != null }
     LaunchedEffect(anyAccount) { if (anyAccount) model.loadHome() }
     val home = model.home
-    val name = (accounts[SOURCE_YA] ?: accounts[SOURCE_YT] ?: accounts[org.nyao.music.data.SOURCE_SC])?.name
+    val cloudUser by Repo.cloud.user.collectAsState()
+    val name = cloudUser?.name ?: (accounts[SOURCE_YA] ?: accounts[SOURCE_YT] ?: accounts[org.nyao.music.data.SOURCE_SC])?.name
+    LaunchedEffect(cloudUser != null) { model.loadOthers() }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
         // Верхняя строка: бейдж приложения, поиск, аватар-печенька
@@ -127,6 +129,9 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                 style = MaterialTheme.typography.displayLarge,
                 modifier = Modifier.padding(start = 20.dp, top = 22.dp, bottom = 18.dp),
             )
+        }
+        model.others.firstOrNull()?.let { r ->
+            item(key = "continue-" + r.deviceId) { ContinueCard(model, r, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) }
         }
         item { WaveHero(model, Modifier.appear(0, 40f).padding(horizontal = 16.dp)) }
 

@@ -25,19 +25,36 @@ function imageOrKey(url, fallbackKey) {
   return fallbackKey;
 }
 
+/** Приложение nyao.Music в Discord Developer Portal — встроено, пользователю ничего вводить не надо */
+export const DISCORD_APP_ID = '1557846947933593682';
+
+const SOURCES = {
+  ya: { name: 'Яндекс Музыка', icon: 'yandex', open: 'Открыть в Яндекс Музыке' },
+  yt: { name: 'YouTube Music', icon: 'youtube', open: 'Открыть в YouTube Music' },
+  sc: { name: 'SoundCloud', icon: 'soundcloud', open: 'Открыть в SoundCloud' }
+};
+
+export function trackLink(track) {
+  if (track.source === 'ya') {
+    return track.albumId ? `https://music.yandex.ru/album/${track.albumId}/track/${track.srcId}` : `https://music.yandex.ru/track/${track.srcId}`;
+  }
+  if (track.source === 'sc') return track.url && /^https:\/\/soundcloud\.com\//.test(track.url) ? track.url : null;
+  return `https://music.youtube.com/watch?v=${track.srcId}`;
+}
+
 export function buildActivity(info) {
   const { track, playing, position = 0, duration = 0 } = info;
   if (!track) return null;
-  const isYa = track.source === 'ya';
+  const src = SOURCES[track.source] || SOURCES.yt;
   const activity = {
     type: 2, // «Слушает»
     details: String(track.title || 'Без названия').slice(0, 128),
     state: String(track.artist || ' ').slice(0, 128).padEnd(2, ' '),
     assets: {
       large_image: imageOrKey(track.cover, 'logo'),
-      large_text: String(track.album || (isYa ? 'Яндекс Музыка' : 'YouTube Music')).slice(0, 128).padEnd(2, ' '),
-      small_image: isYa ? 'yandex' : 'youtube',
-      small_text: isYa ? 'Яндекс Музыка' : 'YouTube Music'
+      large_text: String(track.album || src.name).slice(0, 128).padEnd(2, ' '),
+      small_image: src.icon,
+      small_text: src.name
     },
     instance: false
   };
@@ -48,10 +65,8 @@ export function buildActivity(info) {
     activity.assets.small_image = 'pause';
     activity.assets.small_text = 'На паузе';
   }
-  const link = isYa
-    ? track.albumId ? `https://music.yandex.ru/album/${track.albumId}/track/${track.srcId}` : `https://music.yandex.ru/track/${track.srcId}`
-    : `https://music.youtube.com/watch?v=${track.srcId}`;
-  activity.buttons = [{ label: isYa ? 'Открыть в Яндекс Музыке' : 'Открыть в YouTube Music', url: link }];
+  const link = trackLink(track);
+  if (link) activity.buttons = [{ label: src.open, url: link }];
   return activity;
 }
 

@@ -126,6 +126,11 @@ fun NyaoRoot() {
                 delay(10 * 60_000L)
             }
         }
+        // аккаунт Nyao: дослать историю, накопленную офлайн
+        launch {
+            delay(5000)
+            runCatching { Repo.cloud.flush() }
+        }
         launch {
             delay(3000)
             runCatching { org.nyao.music.data.Updates.check(org.nyao.music.BuildConfig.VERSION_CODE) }.getOrNull()?.let { u ->

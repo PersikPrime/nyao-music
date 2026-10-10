@@ -140,10 +140,9 @@ export class Onboarding {
   discord() {
     const s = this.ctx.getSettings();
     return `<h2>Статус в Discord</h2>
-      <p class="ob-sub">По желанию: друзья увидят «Слушает Nyao Music» с обложкой, названием, полоской трека и значком Яндекса или YouTube.</p>
+      <p class="ob-sub">Друзья увидят «Слушает nyao.Music» с обложкой, названием, полоской трека, значком сервиса и кнопкой на трек. Ничего настраивать не нужно — достаточно запущенного Discord.</p>
       <label class="ob-toggle"><input type="checkbox" data-ob-rpc ${s.discordRpc ? 'checked' : ''}><span>Показывать, что я слушаю</span></label>
-      <input class="ob-input" type="text" data-ob-rpc-id value="${esc(s.discordClientId || '')}" placeholder="Application ID из Discord Developer Portal">
-      <p class="ob-note">Нужен свой Application ID — как его получить, написано в «Настройках» → Discord. Можно пропустить.</p>`;
+      <p class="ob-note">Выключить можно в любой момент в «Настройках».</p>`;
   }
 
   done() {
@@ -161,15 +160,8 @@ export class Onboarding {
   }
 
   async saveDiscordStep() {
-    const idEl = this.el.querySelector('[data-ob-rpc-id]');
     const onEl = this.el.querySelector('[data-ob-rpc]');
-    if (!idEl) return true;
-    const id = idEl.value.trim();
-    if (id && !/^\d{15,22}$/.test(id)) {
-      this.ctx.toast('Application ID — это число из 17–20 цифр', true);
-      return false;
-    }
-    await this.ctx.setSettings({ discordClientId: id, discordRpc: !!(onEl && onEl.checked) });
+    if (onEl) await this.ctx.setSettings({ discordRpc: onEl.checked });
     return true;
   }
 

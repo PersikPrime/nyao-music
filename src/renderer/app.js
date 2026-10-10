@@ -19,6 +19,7 @@ const state = {
   stack: [],
   status: { ya: null, yt: null, sc: null },
   update: { info: null, checking: false, progress: null, error: null },
+  cloud: { loggedIn: false, user: null, logging: false, devices: null, others: [] },
   settings: null,
   home: null,
   lib: { lists: null, filter: 'all', selected: 'liked', tracks: null, counts: null },
@@ -230,17 +231,23 @@ function svcDot(s, on = true) {
 /** Одна кнопка «Аккаунт» вместо пилюли на каждый сервис: аватар с именем и стопка значков подключённых сервисов */
 function accountButton() {
   const first = SERVICES.map((s) => state.status[s.id]).find(Boolean);
-  const name = first ? first.name : 'Войти';
+  const cu = state.cloud.loggedIn && state.cloud.user;
+  const name = cu ? cu.name : first ? first.name : 'Войти';
   const initial = first ? esc(String(first.name).trim().charAt(0).toUpperCase()) : '+';
-  return `<button class="acc-btn ${first ? '' : 'off'}" data-acc-menu aria-label="Аккаунт" title="Аккаунт">
-    <span class="av">${initial}</span>
+  return `<button class="acc-btn ${first || cu ? '' : 'off'}" data-acc-menu aria-label="Аккаунт" title="Аккаунт">
+    ${cu ? nyaoAvatar('av') : `<span class="av">${initial}</span>`}
     <span class="nm">${esc(name)}</span>
     <span class="stack">${SERVICES.map((s) => svcDot(s, !!state.status[s.id])).join('')}</span>
   </button>`;
 }
 function openAccountMenu(anchor) {
   const menu = $('#menu');
+  const cu = state.cloud.user;
   menu.innerHTML = `<div class="lbl">Аккаунт</div>
+    <div class="acc-row">${nyaoAvatar('dot')}
+      <span class="acc-info"><b>Аккаунт Nyao</b><span>${state.cloud.loggedIn && cu ? esc(cu.name) : 'синхронизация устройств'}</span></span>
+      ${state.cloud.loggedIn ? '<button class="acc-act" data-a="settings">Открыть</button>' : `<button class="acc-act primary" data-a="cloud-login" ${state.cloud.logging ? 'disabled' : ''}>${state.cloud.logging ? 'Жду…' : 'Войти'}</button>`}
+    </div>
     ${SERVICES.map((s) => {
       const st = state.status[s.id];
       return `<div class="acc-row">${svcDot(s, !!st)}
@@ -263,6 +270,10 @@ function openAccountMenu(anchor) {
     if (b.dataset.a === 'settings') {
       menu.hidden = true;
       return go('settings');
+    }
+    if (b.dataset.a === 'cloud-login') {
+      menu.hidden = true;
+      return cloudLogin();
     }
     const svc = b.dataset.svc;
     const meta = SERVICES.find((s) => s.id === svc);
@@ -301,6 +312,7 @@ function go(route, params = {}, push = true) {
   if (route === 'artist') loadArtist(params.ref);
   if (route === 'album') loadAlbum(params.ref);
   if (route === 'player') loadNpArtist();
+  if (route === 'settings' && state.cloud.loggedIn) loadCloudDevices();
 }
 function back() {
   const prev = state.stack.pop();
@@ -329,6 +341,7 @@ function renderHome() {
       <h1 class="page">${greeting()}${name ? ', ' + esc(name.split(' ')[0]) : ''}</h1>
       <form class="search-field" data-form="home-search">${ICONS.search}<input name="q" type="search" placeholder="Поиск в Яндексе, YouTube Music и SoundCloud" aria-label="Поиск"></form>
     </div>
+    ${continueHtml()}
     ${!loggedAny ? `<div class="card"><div class="field"><label>Подключи сервисы</label><div class="hint">Войди в Яндекс Музыку и/или YouTube Music — после этого здесь появятся волна, плейлисты и лайки.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Открыть настройки</button></div></div>` : ''}
     <div class="hero">
       <section class="wave-card">
@@ -726,9 +739,132 @@ async function checkUpdates(silent = false) {
   if (state.route === 'settings') renderSettings();
 }
 
+// ---------- Аккаунт Nyao (свой сервер): вход через Telegram, синхронизация, продолжение ----------
+function nyaoAvatar(cls = 'av') {
+  const u = state.cloud.loggedIn && state.cloud.user;
+  if (u && u.picture) return `<span class="${cls} nyao-av"><img src="${esc(u.picture)}" alt=""></span>`;
+  const letter = u ? esc(String(u.name || 'N').trim().charAt(0).toUpperCase()) : 'N';
+  return `<span class="${cls} nyao-av">${letter}</span>`;
+}
+const PLATFORM_NAME = { win32: 'Windows', darwin: 'macOS', android: 'Android', linux: 'Linux' };
+function ago(ts) {
+  const m = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
+  if (m < 2) return 'сейчас';
+  if (m < 60) return `${m} мин назад`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} ч назад`;
+  return `${Math.round(h / 24)} дн назад`;
+}
+function nyaoCardHtml() {
+  const c = state.cloud;
+  if (!api.cloud) return '';
+  if (!c.loggedIn) {
+    return `<section class="card nyao-card">
+      <div class="svc">${nyaoAvatar('logo')}
+        <div class="info"><div class="name">Аккаунт Nyao</div>
+          <div class="st">${c.logging ? 'Открыл Telegram в браузере — подтверди вход там, а потом возвращайся сюда.' : 'Миксы, настройки волны и история на всех твоих устройствах + «продолжить с телефона».'}</div></div>
+        ${c.logging ? '<button class="btn" data-action="cloud-cancel">Отмена</button>' : `<button class="btn primary tg" data-action="cloud-login">${TG_ICON}Войти через Telegram</button>`}
+      </div>
+      <div class="hint">Токены Яндекса, YouTube и SoundCloud на сервер не отправляются — они остаются только на этом устройстве.</div>
+    </section>`;
+  }
+  const u = c.user || {};
+  const devs = c.devices;
+  return `<section class="card nyao-card">
+    <div class="svc">${nyaoAvatar('logo')}
+      <div class="info"><div class="name">${esc(u.name || 'Аккаунт Nyao')}</div><div class="st">${u.username ? '@' + esc(u.username) + ' · ' : ''}синхронизация включена</div></div>
+      <button class="btn danger" data-action="cloud-logout">Выйти</button>
+    </div>
+    <div class="devices">
+      <div class="eyebrow">Устройства</div>
+      ${devs ? devs.map((d) => `<div class="dev"><span class="dev-ic">${d.platform === 'android' ? '📱' : '💻'}</span><span class="dev-info"><b>${esc(d.device || PLATFORM_NAME[d.platform] || 'Устройство')}</b><span>${d.current ? 'это устройство' : 'был ' + ago(d.lastSeen)}</span></span>${d.current ? '' : `<button class="link-plain" data-action="cloud-device-remove" data-id="${esc(d.id)}">Отключить</button>`}</div>`).join('') : '<div class="skeleton" style="height:44px"></div>'}
+    </div>
+    <div class="hint">Токены музыкальных сервисов на сервер не отправляются — они остаются только на устройствах.</div>
+  </section>`;
+}
+const TG_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.9 4.3 18.7 19.4c-.2 1-.9 1.3-1.7.8l-4.8-3.5-2.3 2.2c-.3.3-.5.5-1 .5l.3-4.9 8.9-8c.4-.3-.1-.5-.6-.2L6.5 13.2 1.8 11.7c-1-.3-1-1 .2-1.5L20.6 3c.9-.3 1.6.2 1.3 1.3z"/></svg>';
+
+async function loadCloud() {
+  if (!api.cloud) return;
+  const st = await api.cloud.status().catch(() => null);
+  if (!st) return;
+  state.cloud.loggedIn = st.loggedIn;
+  state.cloud.user = st.user;
+  renderAccounts();
+  if (st.loggedIn) {
+    loadOthers();
+    if (state.route === 'settings') loadCloudDevices();
+  }
+}
+async function loadCloudDevices() {
+  try {
+    const me = await api.cloud.me();
+    state.cloud.user = me.user;
+    state.cloud.devices = me.devices;
+  } catch (e) {
+    const st = await api.cloud.status().catch(() => ({ loggedIn: false }));
+    state.cloud.loggedIn = st.loggedIn;
+    if (st.loggedIn) toast(e.message, true);
+  }
+  if (state.route === 'settings') renderSettings();
+}
+async function loadOthers() {
+  if (!state.cloud.loggedIn) return;
+  try {
+    const list = await api.cloud.others();
+    const cur = player.current;
+    // показываем только свежее (за последние 12 часов) и не то, что уже играет здесь
+    state.cloud.others = list.filter((d) => d.track && Date.now() - d.updatedAt < 12 * 3600_000 && !(cur && cur.id === d.track.id)).slice(0, 1);
+  } catch {
+    state.cloud.others = [];
+  }
+  if (state.route === 'home') renderHome();
+}
+async function cloudLogin() {
+  if (state.cloud.logging) return;
+  state.cloud.logging = true;
+  if (state.route === 'settings') renderSettings();
+  try {
+    const user = await api.cloud.login();
+    state.cloud.loggedIn = true;
+    state.cloud.user = user;
+    toast(`Привет, ${user.name}! Синхронизация включена`);
+    loadOthers();
+    loadCloudDevices();
+  } catch (e) {
+    if (!/отмен/i.test(e.message)) toast(e.message, true);
+  }
+  state.cloud.logging = false;
+  renderAccounts();
+  if (state.route === 'settings') renderSettings();
+}
+function continueHtml() {
+  const d = state.cloud.others[0];
+  if (!d) return '';
+  const t = d.track;
+  const pos = d.playing ? d.position + (Date.now() - d.updatedAt) / 1000 : d.position;
+  return `<section class="continue-card">
+    ${coverHtml(t, 'sm')}
+    <div class="meta"><span class="eyebrow">${d.platform === 'android' ? '📱' : '💻'} Продолжить с «${esc(d.device)}» · ${ago(d.updatedAt)}</span>
+      <b>${esc(t.title)}</b><span class="muted">${esc(t.artist)} · ${fmt(Math.min(pos, t.duration || pos))}</span></div>
+    <button class="btn primary" data-action="resume-device" data-id="${esc(d.deviceId)}">${ICONS.play}Продолжить</button>
+    <button class="icbtn" data-action="resume-dismiss" data-id="${esc(d.deviceId)}" aria-label="Скрыть">✕</button>
+  </section>`;
+}
+let nowTimer;
+function pushNow() {
+  if (!api.cloud || !state.cloud.loggedIn) return;
+  clearTimeout(nowTimer);
+  nowTimer = setTimeout(() => {
+    const t = player.current;
+    api.cloud.now({ track: t, position: player.audio.currentTime || 0, playing: player.playing, context: player.mode || '' }).catch(() => {});
+  }, 800);
+}
+
 function renderSettings() {
   view.innerHTML = `<div class="scroll settings">
     <h1 class="page">Настройки</h1>
+    ${nyaoCardHtml()}
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Аккаунты</h2>${SERVICES.map((x) => svcCard(x.id)).join('')}</section>
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Моя волна</h2>${waveControlsHtml()}</section>
     ${discordCardHtml()}
@@ -743,19 +879,15 @@ function renderSettings() {
   refreshRpcStatus();
 }
 
-const RPC_STATUS = { off: 'выключено', 'no-id': 'нужен Application ID', connecting: 'жду Discord… (он должен быть запущен)', connected: 'подключено' };
+const RPC_STATUS = { off: 'выключено', 'no-id': 'выключено', connecting: 'жду Discord… (он должен быть запущен)', connected: 'подключено' };
 function discordCardHtml() {
   const s = state.settings || {};
   return `<section class="card">
     <div class="svc">
       <div class="logo" style="background:#5865F2;color:#fff"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19.3 5.3A16.6 16.6 0 0 0 15.2 4l-.5 1a15.4 15.4 0 0 0-5.4 0L8.8 4a16.6 16.6 0 0 0-4.1 1.3C2.1 9.2 1.4 13 1.7 16.7a16.7 16.7 0 0 0 5.1 2.6l1.1-1.7a10.8 10.8 0 0 1-1.7-.8l.4-.3a11.9 11.9 0 0 0 10.8 0l.4.3c-.5.3-1.1.6-1.7.8l1.1 1.7a16.6 16.6 0 0 0 5.1-2.6c.4-4.3-.7-8-2.9-11.4zM8.7 14.5c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1zm6.6 0c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1z"/></svg></div>
-      <div class="info"><div class="name">Discord: «Слушает Nyao Music»</div><div class="st" id="rpc-status">Статус: …</div></div>
-      <button class="btn ${s.discordRpc ? 'primary' : ''}" data-action="rpc-toggle">${s.discordRpc ? 'Включено' : 'Включить'}</button>
+      <div class="info"><div class="name">Статус в Discord</div><div class="st"><span id="rpc-status">Статус: …</span> · в профиле видно «Слушает nyao.Music», трек и кнопку на него</div></div>
+      <button class="btn ${s.discordRpc ? 'primary' : ''}" data-action="rpc-toggle" role="switch" aria-checked="${!!s.discordRpc}">${s.discordRpc ? 'Включено' : 'Выключено'}</button>
     </div>
-    <div class="manual" style="display:flex;gap:8px"><input type="text" data-rpc-id value="${esc(s.discordClientId || '')}" placeholder="Application ID из Discord Developer Portal" style="flex:1;min-width:0;background:var(--s2);border:1px solid var(--line2);border-radius:10px;color:var(--text);font:13px ui-monospace,Consolas,monospace;padding:10px"><button class="btn" data-action="rpc-save">Сохранить</button></div>
-    <details><summary>Как получить Application ID (один раз, 2 минуты)</summary>
-      <div class="hint" style="margin-top:8px">1. discord.com/developers/applications → New Application, назови «Nyao Music» — это имя будет в «Слушает …».<br>2. Скопируй Application ID и вставь сюда.<br>3. Rich Presence → Art Assets: загрузи картинки из папки build/discord с именами <b>logo</b>, <b>yandex</b>, <b>youtube</b>, <b>pause</b>. Значок сервиса появится в кружке под обложкой (Discord обновляет ассеты до 10 минут).</div>
-    </details>
   </section>`;
 }
 async function refreshRpcStatus() {
@@ -772,7 +904,7 @@ function pushRpc() {
     const t = player.current;
     const a = player.audio;
     const info = t ? {
-      track: { title: t.title, artist: t.artist, album: t.album, cover: t.cover, source: t.source, srcId: t.srcId, albumId: t.albumId },
+      track: { title: t.title, artist: t.artist, album: t.album, cover: t.cover, source: t.source, srcId: t.srcId, albumId: t.albumId, url: t.url },
       playing: player.playing,
       position: a.currentTime || 0,
       duration: Number.isFinite(a.duration) ? a.duration : t.duration || 0
@@ -1057,16 +1189,38 @@ async function handleAction(el, e) {
       pushRpc();
       setTimeout(refreshRpcStatus, 1500);
       break;
-    case 'rpc-save': {
-      const v = $('[data-rpc-id]', view).value.trim();
-      if (v && !/^\d{15,22}$/.test(v)) throw new Error('Application ID — это число из 17–20 цифр');
-      state.settings = await api.settings.set({ discordClientId: v, discordRpc: v ? true : state.settings.discordRpc });
+    case 'cloud-login':
+      cloudLogin();
+      break;
+    case 'cloud-cancel':
+      api.cloud.cancel().catch(() => {});
+      break;
+    case 'cloud-logout':
+      await api.cloud.logout();
+      state.cloud = { loggedIn: false, user: null, logging: false, devices: null, others: [] };
+      toast('Вышел из аккаунта Nyao');
       renderSettings();
-      toast('Сохранено');
-      pushRpc();
-      setTimeout(refreshRpcStatus, 1500);
+      renderAccounts();
+      break;
+    case 'cloud-device-remove':
+      await api.cloud.removeDevice(el.dataset.id);
+      toast('Устройство отключено');
+      loadCloudDevices();
+      break;
+    case 'resume-device': {
+      const d = state.cloud.others.find((x) => x.deviceId === el.dataset.id);
+      if (d && d.track) {
+        const pos = d.playing ? d.position + (Date.now() - d.updatedAt) / 1000 : d.position;
+        player.resume(d.track, d.track.duration && pos > d.track.duration - 5 ? 0 : pos, `С устройства «${d.device}»`);
+        state.cloud.others = state.cloud.others.filter((x) => x !== d);
+        if (state.route === 'home') renderHome();
+      }
       break;
     }
+    case 'resume-dismiss':
+      state.cloud.others = state.cloud.others.filter((x) => x.deviceId !== el.dataset.id);
+      if (state.route === 'home') renderHome();
+      break;
     case 'open-url':
       if (/^https:\/\//.test(el.dataset.url)) api.openExternal(el.dataset.url);
       break;
@@ -1351,6 +1505,9 @@ player.addEventListener('time', () => {
 player.addEventListener('like', renderBar);
 player.addEventListener('track', pushRpc);
 player.addEventListener('state', pushRpc);
+player.addEventListener('track', pushNow);
+player.addEventListener('state', pushNow);
+setInterval(() => player.playing && pushNow(), 30_000);
 player.audio.addEventListener('seeked', pushRpc);
 player.audio.addEventListener('durationchange', pushRpc);
 player.addEventListener('error', (e) => toast(e.detail, true));
@@ -1453,6 +1610,20 @@ function openOnboarding() {
   if (state.status.ya || state.status.yt) {
     loadLiked();
     loadLibrary();
+  }
+  loadCloud();
+  if (api.cloud) {
+    api.cloud.onChanged(async (keys) => {
+      // другое устройство поменяло миксы или настройки волны
+      if (keys.includes('wave')) state.settings = await api.settings.get();
+      if (keys.includes('mixes')) {
+        loadHome();
+        loadLibrary();
+      }
+      if (state.route === 'settings' || state.route === 'wave') RENDER[state.route]();
+    });
+    // вернулся к окну — вдруг на телефоне что-то играло
+    window.addEventListener('focus', () => loadOthers());
   }
   if (api.updates) {
     api.updates.onProgress((p) => {

@@ -49,6 +49,7 @@ export class Player extends EventTarget {
   }
 
   async startWave() {
+    this.reportLeave(true);
     this.emit('loading', true);
     try {
       const tracks = await api.wave.start();
@@ -76,6 +77,7 @@ export class Player extends EventTarget {
   playList(tracks, startIndex = 0, label = '') {
     const playable = tracks.filter((t) => t.available !== false);
     if (!playable.length) return;
+    this.reportLeave(true);
     const start = Math.max(0, playable.indexOf(tracks[startIndex]));
     this.mode = 'list';
     this.label = label;
@@ -135,11 +137,29 @@ export class Player extends EventTarget {
     }
   }
 
+  /** Трек закончился или его переключили: отчёт волне Яндекса и запись в историю (для волны без повторов) */
   reportLeave(skipped) {
     const t = this.current;
-    if (this.mode !== 'wave' || !t) return;
+    if (!t || this.reported === this.startedAt) return;
+    this.reported = this.startedAt;
     const played = Math.round(this.audio.currentTime || 0);
-    api.wave.feedback(skipped ? 'skip' : 'trackFinished', t, played).catch(() => {});
+    // «пропущен» — только если переключили в первые полминуты, а не на последних секундах
+    const dur = Number.isFinite(this.audio.duration) ? this.audio.duration : t.duration || 0;
+    const skip = skipped && played < Math.min(30, dur * 0.5);
+    if (played >= 5 || skip) api.cloud && api.cloud.play({ track: t, listened: played, skipped: skip }).catch(() => {});
+    if (this.mode === 'wave') api.wave.feedback(skipped ? 'skip' : 'trackFinished', t, played).catch(() => {});
+  }
+
+  /** «Продолжить с другого устройства»: включает трек и перематывает на нужное место */
+  resume(track, position = 0, label = 'С другого устройства') {
+    this.playList([track], 0, label);
+    if (position > 3) {
+      const seekOnce = () => {
+        this.seek(position);
+        this.audio.removeEventListener('loadedmetadata', seekOnce);
+      };
+      this.audio.addEventListener('loadedmetadata', seekOnce);
+    }
   }
 
   async next(skipped = true) {
@@ -230,7 +250,7 @@ export class Player extends EventTarget {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: t.title,
       artist: t.artist,
-      album: t.album || (t.source === 'ya' ? 'Яндекс Музыка' : 'YouTube Music'),
+      album: t.album || ({ ya: 'Яндекс Музыка', sc: 'SoundCloud' }[t.source] || 'YouTube Music'),
       artwork: t.cover ? [{ src: t.cover, sizes: '400x400' }] : []
     });
   }

@@ -51,7 +51,8 @@ fun SettingsScreen(model: AppModel) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text("Настройки", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp))
-        Text("Аккаунты", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp))
+        NyaoAccountCard(model)
+        Text("Сервисы", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         ServiceCard(model, SOURCE_YA)
         ServiceCard(model, SOURCE_YT)
         ServiceCard(model, org.nyao.music.data.SOURCE_SC)
@@ -230,7 +231,7 @@ private fun UpdateCard(model: AppModel) {
         val i = info
         Text(
             when {
-                checking -> "Проверяю GitHub…"
+                checking -> "Проверяю обновления…"
                 error != null -> "Не получилось: $error"
                 i != null && i.available -> "Доступна версия ${i.label} · ${i.apkSize / (1024 * 1024)} МБ"
                 i != null -> "Установлена последняя версия" + (i.label?.let { " ($it)" } ?: "")

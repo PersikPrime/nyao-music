@@ -12,7 +12,9 @@ import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
 import { findLyrics } from './lyrics.js';
 import { Catalog } from './catalog.js';
-import { DiscordRPC } from './discord.js';
+import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
+import { NyaoCloud } from './cloud.js';
+import os from 'node:os';
 import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,11 +35,48 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const fetchFn = (url, opts) => net.fetch(url, opts);
-let ya, yt, sc, wave, streams, catalog, win;
+let ya, yt, sc, wave, streams, catalog, win, cloud;
 const rpc = new DiscordRPC({ log: (m) => console.log(m) });
 function configureRpc() {
-  const s = settings.get();
-  rpc.configure({ enabled: s.discordRpc, clientId: String(s.discordClientId || '').trim() });
+  rpc.configure({ enabled: settings.get().discordRpc, clientId: DISCORD_APP_ID });
+}
+
+// Что из настроек едет на другие устройства (остальное — своё у каждого компьютера)
+const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood'];
+const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
+function send(channel, payload) {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+
+/** Сверка миксов и настроек волны с сервером Nyao */
+async function syncCloud() {
+  if (!cloud || !cloud.loggedIn) return;
+  try {
+    await cloud.flush();
+    const changed = await cloud.syncState({
+      mixes: {
+        get: () => readMixes(),
+        set: (data) => Array.isArray(data) && writeMixes(data, false),
+        // миксы с двух устройств: объединяем по id, треки внутри — без дублей
+        merge: (local, remote) => {
+          const byId = new Map((Array.isArray(remote) ? remote : []).map((m) => [m.id, m]));
+          for (const m of local) {
+            const r = byId.get(m.id);
+            if (!r) byId.set(m.id, m);
+            else r.tracks = [...r.tracks, ...m.tracks.filter((t) => !r.tracks.some((x) => x.id === t.id))];
+          }
+          return [...byId.values()];
+        }
+      },
+      wave: {
+        get: () => pick(settings.get(), WAVE_KEYS),
+        set: (data) => data && settings.set(pick(data, WAVE_KEYS))
+      }
+    });
+    if (changed.length) send('cloud:changed', changed);
+  } catch (e) {
+    console.warn('[cloud]', e.message);
+  }
 }
 
 function initProviders() {
@@ -47,7 +86,30 @@ function initProviders() {
   const nodeFetch = globalThis.fetch.bind(globalThis);
   yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch });
   sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch });
-  wave = new WaveMixer({ ya, yt, sc, getSettings: () => settings.get() });
+  cloud = new NyaoCloud({
+    dir: app.getPath('userData'),
+    getToken: () => secrets.get('nyaoToken'),
+    setToken: (t) => secrets.set('nyaoToken', t),
+    openUrl: (url) => shell.openExternal(url),
+    device: `${os.hostname().replace(/\.local$/, '')} · ${process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux'}`,
+    log: (m) => console.log(m)
+  });
+  const waveMemFile = path.join(app.getPath('userData'), 'wave-memory.json');
+  wave = new WaveMixer({
+    ya, yt, sc,
+    getSettings: () => settings.get(),
+    getRecent: () => cloud.recentIds(),
+    memory: {
+      get: () => {
+        try {
+          return JSON.parse(fs.readFileSync(waveMemFile, 'utf8'));
+        } catch {
+          return [];
+        }
+      },
+      set: (v) => fs.writeFileSync(waveMemFile, JSON.stringify(v))
+    }
+  });
   streams = new StreamService({ ya, yt, sc, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch } });
   catalog = new Catalog({ ya, yt });
 }
@@ -106,8 +168,10 @@ function readMixes() {
     return [];
   }
 }
-function writeMixes(list) {
+function writeMixes(list, push = true) {
   fs.writeFileSync(mixesFile(), JSON.stringify(list, null, 2));
+  // изменения миксов уезжают на другие устройства
+  if (push && cloud) cloud.pushState('mixes', list).catch((e) => console.warn('[cloud] mixes', e.message));
 }
 function mixSummary(m) {
   return { id: m.id, source: 'mix', title: m.title, count: m.tracks.length, cover: (m.tracks.find((t) => t.cover) || {}).cover || null, ya: m.tracks.filter((t) => t.source === 'ya').length, yt: m.tracks.filter((t) => t.source === 'yt').length };
@@ -173,7 +237,7 @@ function registerIpc() {
   handle('app:version', () => readVersion());
   handle('update:check', () => checkUpdate(readVersion(), globalThis.fetch.bind(globalThis)));
   handle('update:download', async (asset) => {
-    if (!asset || !/^https:\/\/github\.com\//.test(asset.url)) throw new Error('Нет файла для этой системы');
+    if (!asset || !/^https:\/\/(github\.com|api\.nmusic\.bixtl\.cc)\//.test(asset.url)) throw new Error('Нет файла для этой системы');
     const file = await downloadAsset(asset, app.getPath('downloads'), (p) => {
       if (win && !win.isDestroyed()) win.webContents.send('update:progress', p);
     }, globalThis.fetch.bind(globalThis));
@@ -188,12 +252,30 @@ function registerIpc() {
   handle('settings:get', () => settings.get());
   handle('settings:set', (patch) => {
     const next = settings.set(patch);
-    if ('discordRpc' in patch || 'discordClientId' in patch) configureRpc();
+    if ('discordRpc' in patch) configureRpc();
+    if (WAVE_KEYS.some((k) => k in patch) && cloud) cloud.pushState('wave', pick(next, WAVE_KEYS)).catch(() => {});
     return next;
   });
   handle('rpc:update', (info) => rpc.update(info));
   handle('rpc:status', () => rpc.status);
   handle('sc:pending', () => readPending());
+
+  // ---------- Аккаунт Nyao ----------
+  handle('cloud:status', () => cloud.status());
+  handle('cloud:login', async () => {
+    const user = await cloud.login();
+    syncCloud();
+    return user;
+  });
+  handle('cloud:cancel', () => cloud.cancelLogin());
+  handle('cloud:logout', () => cloud.logout());
+  handle('cloud:me', () => cloud.me());
+  handle('cloud:removeDevice', (id) => cloud.removeDevice(id));
+  handle('cloud:play', (play) => cloud.recordPlay(play));
+  handle('cloud:now', (info) => cloud.setNow(info).catch(() => {}));
+  handle('cloud:others', () => cloud.others());
+  handle('cloud:history', () => cloud.history().slice(0, 200));
+  handle('cloud:sync', () => syncCloud());
   handle('sc:flush', () => flushScLikes());
 
   handle('auth:status', async () => {
@@ -399,6 +481,9 @@ app.whenReady().then(() => {
   // отложенные лайки SoundCloud: через минуту после запуска и потом раз в 10 минут
   setTimeout(flushScLikes, 60_000);
   setInterval(flushScLikes, 10 * 60_000);
+  // аккаунт Nyao: сверка при запуске и раз в 5 минут
+  setTimeout(syncCloud, 5_000);
+  setInterval(syncCloud, 5 * 60_000);
   // Картинки обложек грузятся напрямую с CDN сервисов — убираем Referer, чтобы не было 403
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['https://*.googleusercontent.com/*', 'https://avatars.yandex.net/*', 'https://*.ggpht.com/*'] }, (details, cb) => {
     delete details.requestHeaders.Referer;
@@ -408,7 +493,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   rpc.disconnect();
-  app.quit();
+  // дослать историю перед выходом (не дольше 2 секунд)
+  Promise.race([cloud ? cloud.flush().catch(() => {}) : null, new Promise((r) => setTimeout(r, 2000))]).finally(() => app.quit());
 });
 
 // Диагностика: какой сайт отдал сертификат, которому Chromium не доверяет, и кем он выпущен.

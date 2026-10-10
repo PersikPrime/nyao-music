@@ -1,4 +1,4 @@
-// Центр обновлений: смотрит последний релиз на GitHub и скачивает установщик для этой системы.
+// Центр обновлений: смотрит последний релиз (зеркало на сервере Nyao или GitHub) и скачивает установщик для этой системы.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -21,13 +21,30 @@ export function pickAsset(assets, platform = process.platform, arch = process.ar
   return null;
 }
 
-export async function checkUpdate(current, fetchFn = globalThis.fetch) {
+export const MIRROR = 'https://api.nmusic.bixtl.cc/updates/latest';
+
+/** Сначала зеркало на сервере Nyao (быстрее из РФ), если оно молчит — GitHub */
+async function latestRelease(fetchFn) {
+  try {
+    const res = await fetchFn(MIRROR, { headers: { 'User-Agent': 'NyaoMusic' }, signal: AbortSignal.timeout(6000) });
+    if (res.ok) {
+      const rel = await res.json();
+      if (rel && rel.tag_name) return rel;
+    }
+  } catch {
+    // сервер недоступен — не беда
+  }
   const res = await fetchFn(`https://api.github.com/repos/${REPO}/releases/latest`, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'NyaoMusic' }
   });
-  if (res.status === 404) return { available: false, current, note: 'Релизов пока нет' };
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`GitHub ответил ${res.status} (репозиторий приватный или лимит запросов)`);
-  const rel = await res.json();
+  return res.json();
+}
+
+export async function checkUpdate(current, fetchFn = globalThis.fetch) {
+  const rel = await latestRelease(fetchFn);
+  if (!rel) return { available: false, current, note: 'Релизов пока нет' };
   const latest = parseTag(rel.tag_name);
   const asset = pickAsset(rel.assets);
   return {

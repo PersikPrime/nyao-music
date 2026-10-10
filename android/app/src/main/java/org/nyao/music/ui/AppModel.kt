@@ -9,6 +9,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.nyao.music.data.HomeData
 import org.nyao.music.data.Playlist
+import org.nyao.music.data.RemoteNow
 import org.nyao.music.data.Repo
 import org.nyao.music.data.SearchResult
 import org.nyao.music.data.Track
@@ -201,5 +202,88 @@ class AppModel(private val scope: CoroutineScope) {
 
     fun dislike() {
         scope.launch { PlayerConnection.dislike() }
+    }
+
+    // ---- аккаунт Nyao ----
+    var cloudLogging by mutableStateOf(false)
+    var others by mutableStateOf<List<RemoteNow>>(emptyList())
+    private var loginJob: Job? = null
+
+    /** Вход через Telegram: открываем браузер и опрашиваем сервер, пока пользователь не подтвердит */
+    fun cloudLogin(context: android.content.Context) {
+        if (cloudLogging) return
+        cloudLogging = true
+        loginJob = scope.launch {
+            try {
+                val device = listOf(android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }, android.os.Build.MODEL)
+                    .distinct().joinToString(" ").take(60)
+                val (id, url) = org.nyao.music.data.Repo.cloud.startLogin(device)
+                context.startActivity(
+                    android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+                val until = System.currentTimeMillis() + 10 * 60_000L
+                var user: org.nyao.music.data.CloudUser? = null
+                while (user == null && System.currentTimeMillis() < until) {
+                    kotlinx.coroutines.delay(2000)
+                    user = try {
+                        org.nyao.music.data.Repo.cloud.poll(id)
+                    } catch (e: org.nyao.music.data.ApiException) {
+                        if (e.code == 400 || e.code == 410) throw e
+                        null
+                    } catch (e: java.io.IOException) {
+                        null // сеть моргнула — ждём дальше
+                    }
+                }
+                if (user == null) throw org.nyao.music.data.ApiException("Время входа вышло — попробуй ещё раз")
+                message("Привет, ${user.name}! Синхронизация включена")
+                loadOthers()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                message(e.message ?: "Вход не удался")
+            } finally {
+                cloudLogging = false
+            }
+        }
+    }
+
+    fun cancelCloudLogin() {
+        loginJob?.cancel()
+        cloudLogging = false
+    }
+
+    fun cloudLogout() {
+        scope.launch {
+            org.nyao.music.data.Repo.cloud.logout()
+            others = emptyList()
+            message("Вышел из аккаунта Nyao")
+        }
+    }
+
+    /** Что недавно играло на других устройствах (для карточки «Продолжить») */
+    fun loadOthers() {
+        if (!org.nyao.music.data.Repo.cloud.loggedIn) return
+        scope.launch {
+            others = try {
+                val cur = PlayerConnection.current.value?.id
+                org.nyao.music.data.Repo.cloud.others()
+                    .filter { System.currentTimeMillis() - it.updatedAt < 12 * 3600_000L && it.track.id != cur }
+                    .take(1)
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    fun resume(r: RemoteNow) {
+        val pos = if (r.playing) r.positionSec + (System.currentTimeMillis() - r.updatedAt) / 1000.0 else r.positionSec
+        val ms = if (r.track.duration > 0 && pos > r.track.duration - 5) 0L else (pos * 1000).toLong()
+        PlayerConnection.resume(r.track, ms, "С устройства «${r.device}»")
+        others = others - r
+    }
+
+    fun dismissOther(r: RemoteNow) {
+        others = others - r
     }
 }

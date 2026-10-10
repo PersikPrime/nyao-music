@@ -52,6 +52,20 @@ class Prefs(context: Context) {
         get() = sp.getString("scToken", null)
         set(v) = sp.edit().apply { if (v == null) remove("scToken") else putString("scToken", v) }.apply()
 
+    /** Аккаунт Nyao (свой сервер). Токены музыкальных сервисов на сервер не уходят */
+    var nyaoToken: String?
+        get() = sp.getString("nyaoToken", null)
+        set(v) = sp.edit().apply { if (v == null) remove("nyaoToken") else putString("nyaoToken", v) }.apply()
+
+    var nyaoUser: String?
+        get() = sp.getString("nyaoUser", null)
+        set(v) = sp.edit().apply { if (v == null) remove("nyaoUser") else putString("nyaoUser", v) }.apply()
+
+    /** С каких треков начинались последние запуски волны — чтобы не начинать с одного и того же */
+    var waveFirsts: List<String>
+        get() = sp.getString("waveFirsts", "")!!.split(",").filter { it.isNotEmpty() }
+        set(v) = sp.edit().putString("waveFirsts", v.joinToString(",")).apply()
+
     /** Отложенные лайки SoundCloud: "id:1" (поставить) или "id:0" (снять) */
     var scPendingLikes: Set<String>
         get() = sp.getStringSet("scPending", emptySet()) ?: emptySet()

@@ -58,6 +58,7 @@ object PlayerConnection {
             controller = c
             c.addListener(listener)
             sync()
+            startTicker()
             pending.forEach { it(c) }
             pending.clear()
         }, ContextCompat.getMainExecutor(app))
@@ -74,6 +75,19 @@ object PlayerConnection {
 
     private fun sync() {
         val c = controller ?: return
+        // смена трека → предыдущий в историю (для волны без повторов и синхронизации)
+        val newId = c.currentMediaItem?.mediaId
+        if (newId != lastId) {
+            lastId?.let { Repo.track(it) }?.let { reportLeave(it, lastPosMs, lastDurMs) }
+            lastId = newId
+            lastPosMs = 0L
+            lastDurMs = 0L
+        }
+        if (newId != lastNowId || c.isPlaying != lastNowPlaying) {
+            lastNowId = newId
+            lastNowPlaying = c.isPlaying
+            pushNow()
+        }
         _queue.value = (0 until c.mediaItemCount).mapNotNull { Repo.track(c.getMediaItemAt(it).mediaId) }
         _index.value = c.currentMediaItemIndex
         _current.value = c.currentMediaItem?.mediaId?.let { Repo.track(it) }
@@ -92,6 +106,62 @@ object PlayerConnection {
         }
         _upNext.value = next
         _shuffle.value = c.shuffleModeEnabled
+    }
+
+    // ---------- История и «сейчас играет» для аккаунта Nyao ----------
+    private val ioScope = CoroutineScope(Dispatchers.IO)
+    private var lastId: String? = null
+    private var lastPosMs = 0L
+    private var lastDurMs = 0L
+    private var lastNowId: String? = null
+    private var lastNowPlaying = false
+    private var ticker: Job? = null
+
+    private fun reportLeave(t: Track, posMs: Long, durMs: Long) {
+        val listened = (posMs / 1000).toInt()
+        val dur = if (durMs > 0) (durMs / 1000).toInt() else t.duration
+        // «пропущен» — переключили в первые полминуты (или до середины короткого трека)
+        val skipped = listened < minOf(30, dur / 2)
+        if (listened < 5 && !skipped) return
+        ioScope.launch { runCatching { Repo.cloud.recordPlay(t, listened, skipped) } }
+    }
+
+    private fun pushNow() {
+        val c = controller ?: return
+        val t = c.currentMediaItem?.mediaId?.let { Repo.track(it) }
+        val pos = c.currentPosition / 1000.0
+        val playing = c.isPlaying
+        ioScope.launch { runCatching { Repo.cloud.setNow(t, pos, playing) } }
+    }
+
+    /** Раз в 2 секунды запоминаем позицию (для истории), раз в 30 секунд — «сейчас играет» на сервер */
+    private fun startTicker() {
+        if (ticker?.isActive == true) return
+        ticker = mainScope.launch {
+            var n = 0
+            while (true) {
+                delay(2000)
+                val c = controller ?: continue
+                if (c.currentMediaItem?.mediaId == lastId) {
+                    lastPosMs = c.currentPosition
+                    if (c.duration > 0) lastDurMs = c.duration
+                }
+                if (++n % 15 == 0 && c.isPlaying) pushNow()
+                if (n % 150 == 0) ioScope.launch { runCatching { Repo.cloud.flush() } }
+            }
+        }
+    }
+
+    /** «Продолжить с другого устройства»: включает трек с нужного места */
+    fun resume(t: Track, positionMs: Long, label: String) {
+        Repo.rememberTrack(t)
+        Repo.mode.value = Repo.Mode.LIST
+        Repo.queueLabel.value = label
+        withController { c ->
+            c.setMediaItems(listOf(Repo.mediaItem(t)), 0, positionMs.coerceAtLeast(0L))
+            c.prepare()
+            c.play()
+        }
     }
 
     // ---------- Таймер сна ----------

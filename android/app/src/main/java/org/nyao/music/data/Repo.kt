@@ -26,6 +26,8 @@ object Repo {
         private set
     lateinit var wave: WaveMixer
         private set
+    lateinit var cloud: NyaoCloud
+        private set
 
     enum class Mode { LIST, WAVE }
 
@@ -49,10 +51,16 @@ object Repo {
         yt = YtMusicApi(prefs)
         ytStreams = YtStreams(yt)
         sc = ScApi(prefs)
-        wave = WaveMixer(ya, yt, sc, prefs)
+        cloud = NyaoCloud(prefs, context.applicationContext.filesDir)
+        wave = WaveMixer(ya, yt, sc, prefs) { cloud.recentIds() }
     }
 
     fun track(id: String): Track? = tracks[id]
+
+    /** Трек пришёл с другого устройства — запоминаем, чтобы плеер нашёл его по id */
+    fun rememberTrack(t: Track) {
+        tracks[t.id] = t
+    }
 
     // ---------- Аккаунты ----------
 

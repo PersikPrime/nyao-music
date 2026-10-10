@@ -14,7 +14,7 @@ data class UpdateInfo(
     val notes: String,
 )
 
-/** Центр обновлений: смотрит последний релиз в github.com/PersikPrime/nyao-music */
+/** Центр обновлений: последний релиз — с зеркала на сервере Nyao или с github.com/PersikPrime/nyao-music */
 object Updates {
     const val REPO = "PersikPrime/nyao-music"
 
@@ -24,16 +24,27 @@ object Updates {
         return m.groupValues[1] to m.groupValues[2].toInt()
     }
 
-    suspend fun check(currentBuild: Int): UpdateInfo {
+    /** Зеркало релизов на сервере Nyao: из РФ качается быстрее, чем с GitHub */
+    const val MIRROR = "https://api.nmusic.bixtl.cc/updates/latest"
+
+    private suspend fun latest(): JSONObject? {
+        runCatching {
+            val (code, text) = Net.call(Request.Builder().url(MIRROR).header("User-Agent", "NyaoMusic-Android").build())
+            if (code in 200..299) JSONObject(text).takeIf { it.has("tag_name") }?.let { return it }
+        }
         val req = Request.Builder()
             .url("https://api.github.com/repos/$REPO/releases/latest")
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "NyaoMusic-Android")
             .build()
         val (code, text) = Net.call(req)
-        if (code == 404) return UpdateInfo(false, null, 0, null, 0, null, "")
+        if (code == 404) return null
         if (code !in 200..299) throw ApiException("GitHub ответил $code (репозиторий приватный или лимит запросов)", code)
-        val rel = JSONObject(text)
+        return JSONObject(text)
+    }
+
+    suspend fun check(currentBuild: Int): UpdateInfo {
+        val rel = latest() ?: return UpdateInfo(false, null, 0, null, 0, null, "")
         val tag = parseTag(rel.str("tag_name"))
         val apk = rel.arr("assets").objects().firstOrNull { it.optString("name").endsWith(".apk") }
         return UpdateInfo(

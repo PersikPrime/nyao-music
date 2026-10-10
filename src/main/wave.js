@@ -1,5 +1,6 @@
 // Общая «Моя волна»: основа — поток Яндекса, в него подмешиваются треки YouTube Music.
 // Доля YTM задаётся в процентах; если войти только в один сервис, волна строится из него одного.
+// Недавно звучавшие треки (история всех устройств) волна пропускает, а начало каждый раз новое.
 
 export function interleave(base, extra, sharePercent) {
   const share = Math.max(0, Math.min(100, sharePercent)) / 100;
@@ -20,14 +21,30 @@ export function interleave(base, extra, sharePercent) {
   return { out, usedExtra: used };
 }
 
+export function shuffle(list) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export class WaveMixer {
-  constructor({ ya, yt, sc, getSettings }) {
+  /**
+   * getRecent — async () => Set id треков, звучавших недавно (на всех устройствах), чтобы волна не повторялась.
+   * memory — { get(), set(v) }: что волна помнит между запусками (какими треками она начиналась).
+   */
+  constructor({ ya, yt, sc, getSettings, getRecent = async () => new Set(), memory = null }) {
     this.ya = ya;
     this.yt = yt;
     this.sc = sc;
     this.getSettings = getSettings;
+    this.getRecent = getRecent;
+    this.memory = memory;
     this.pool = [];
     this.seen = new Set();
+    this.recent = new Set();
     this.refilling = null;
   }
 
@@ -46,12 +63,13 @@ export class WaveMixer {
     if (!extras.length) return;
     if (this.refilling) return this.refilling;
     const { diversity } = this.opts();
-    this.refilling = Promise.all(extras.map((p) => p.wavePool({ diversity, exclude: this.seen }).catch(() => [])))
+    const exclude = new Set([...this.seen, ...this.recent]);
+    this.refilling = Promise.all(extras.map((p) => p.wavePool({ diversity, exclude }).catch(() => [])))
       .then((lists) => {
         // чередуем сервисы, чтобы YouTube и SoundCloud шли вперемешку
         const mixed = [];
         for (let i = 0; i < Math.max(0, ...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) mixed.push(l[i]);
-        for (const t of mixed) if (!this.seen.has(t.id) && !this.pool.some((p) => p.id === t.id)) this.pool.push(t);
+        for (const t of mixed) if (!exclude.has(t.id) && !this.seen.has(t.id) && !this.pool.some((p) => p.id === t.id)) this.pool.push(t);
       })
       .catch(() => {})
       .finally(() => {
@@ -61,7 +79,9 @@ export class WaveMixer {
   }
 
   take(list) {
-    const fresh = list.filter((t) => t && !this.seen.has(t.id));
+    let fresh = list.filter((t) => t && !this.seen.has(t.id) && !this.recent.has(t.id));
+    // всё в пачке уже звучало недавно — лучше повтор, чем тишина: берём пару треков
+    if (!fresh.length) fresh = list.filter((t) => t && !this.seen.has(t.id)).slice(0, 2);
     fresh.forEach((t) => this.seen.add(t.id));
     return fresh;
   }
@@ -93,10 +113,30 @@ export class WaveMixer {
   async start() {
     this.pool = [];
     this.seen = new Set();
+    try {
+      this.recent = await this.getRecent();
+    } catch {
+      this.recent = new Set();
+    }
     const { diversity, mood } = this.opts();
-    const tracks = await this.batch(() => this.ya.waveStart({ diversity, mood }));
+    const tracks = this.freshStart(await this.batch(() => this.ya.waveStart({ diversity, mood })));
     if (this.ya.loggedIn) this.ya.waveFeedback('radioStarted', { source: 'ya' });
     return tracks;
+  }
+
+  /**
+   * Начало волны не должно быть одинаковым: перемешиваем первые треки и не ставим первым тот,
+   * с которого волна уже начиналась в последние запуски (привет, Кобзон).
+   */
+  freshStart(tracks) {
+    if (tracks.length < 2) return tracks;
+    const head = shuffle(tracks.slice(0, Math.min(5, tracks.length)));
+    const out = [...head, ...tracks.slice(head.length)];
+    const firsts = (this.memory && this.memory.get()) || [];
+    const i = out.findIndex((t) => !firsts.includes(t.id));
+    if (i > 0) out.unshift(...out.splice(i, 1));
+    if (this.memory) this.memory.set([out[0].id, ...firsts.filter((id) => id !== out[0].id)].slice(0, 15));
+    return out;
   }
 
   async more(queueIds) {

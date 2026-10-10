@@ -186,3 +186,7 @@ body.mac {
 .mac .side-accounts .acc-btn .stack .dot { box-shadow: 0 0 0 2px rgba(40, 36, 52, .9); }
 .mac .menu .acc-row .acc-act { background: rgba(255, 255, 255, .1); }
 .mac .menu .acc-row .acc-act.primary { background: #fff; color: #000; }
+
+/* Аккаунт Nyao и «продолжить» в стиле Liquid Glass */
+.mac .continue-card { background: linear-gradient(110deg, rgba(216, 206, 255, .22), rgba(255, 255, 255, .06) 70%); border-color: rgba(255, 255, 255, .14); backdrop-filter: blur(24px) saturate(160%); }
+.mac .dev { background: rgba(255, 255, 255, .07); }

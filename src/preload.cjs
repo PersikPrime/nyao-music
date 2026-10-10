@@ -63,6 +63,20 @@ contextBridge.exposeInMainWorld('nyao', {
     flush: () => call('sc:flush'),
     onSent: (cb) => ipcRenderer.on('sc:pending', (_e, r) => cb(r))
   },
+  cloud: {
+    status: () => call('cloud:status'),
+    login: () => call('cloud:login'),
+    cancel: () => call('cloud:cancel'),
+    logout: () => call('cloud:logout'),
+    me: () => call('cloud:me'),
+    removeDevice: (id) => call('cloud:removeDevice', id),
+    play: (p) => call('cloud:play', p),
+    now: (info) => call('cloud:now', info),
+    others: () => call('cloud:others'),
+    history: () => call('cloud:history'),
+    sync: () => call('cloud:sync'),
+    onChanged: (cb) => ipcRenderer.on('cloud:changed', (_e, keys) => cb(keys))
+  },
   rpc: {
     update: (info) => call('rpc:update', info),
     status: () => call('rpc:status')
