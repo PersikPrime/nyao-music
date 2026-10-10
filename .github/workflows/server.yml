@@ -1,0 +1,79 @@
+# Деплой сервера Nyao Music на Selectel: тесты → копируем server/ по SSH → docker compose up.
+# Секреты (Settings → Secrets → Actions): NYAO_SSH_HOST, NYAO_SSH_USER, NYAO_SSH_KEY,
+# NYAO_TG_CLIENT_SECRET, NYAO_DB_PASSWORD. Токены музыкальных сервисов на сервер не попадают.
+name: Server deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ['server/**', '.github/workflows/server.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: server-deploy
+  cancel-in-progress: false
+
+env:
+  DOMAIN: api.nmusic.bixtl.cc
+  TG_CLIENT_ID: '8853157969'
+  REMOTE_DIR: /opt/nyao/server
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Тесты
+        working-directory: server
+        run: |
+          npm ci
+          npm test
+
+      - name: SSH-ключ
+        env:
+          KEY: ${{ secrets.NYAO_SSH_KEY }}
+          HOST: ${{ secrets.NYAO_SSH_HOST }}
+        run: |
+          test -n "$KEY" || { echo "::error::Нет секрета NYAO_SSH_KEY"; exit 1; }
+          test -n "$HOST" || { echo "::error::Нет секрета NYAO_SSH_HOST"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" | tr -d '\r' > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -T 15 -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Файл .env
+        env:
+          TG_SECRET: ${{ secrets.NYAO_TG_CLIENT_SECRET }}
+          DB_PASSWORD: ${{ secrets.NYAO_DB_PASSWORD }}
+        run: |
+          test -n "$DB_PASSWORD" || { echo "::error::Нет секрета NYAO_DB_PASSWORD"; exit 1; }
+          test -n "$TG_SECRET" || echo "::warning::Нет секрета NYAO_TG_CLIENT_SECRET — вход через Telegram будет выключен"
+          q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+          {
+            echo "DOMAIN=$DOMAIN"
+            echo "TG_CLIENT_ID=$TG_CLIENT_ID"
+            echo "TG_CLIENT_SECRET=$(q "$TG_SECRET")"
+            echo "POSTGRES_PASSWORD=$(q "$DB_PASSWORD")"
+          } > server/.env
+
+      - name: Копирование и запуск
+        env:
+          HOST: ${{ secrets.NYAO_SSH_HOST }}
+          USER_: ${{ secrets.NYAO_SSH_USER }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes ${USER_:-deploy}@$HOST"
+          $SSH "mkdir -p $REMOTE_DIR"
+          tar -C server --exclude=node_modules --exclude=test -czf - . | $SSH "tar -xzf - -C $REMOTE_DIR && chmod 600 $REMOTE_DIR/.env"
+          $SSH "cd $REMOTE_DIR && docker compose up -d --build --remove-orphans && docker image prune -f > /dev/null && docker compose ps"
+
+      - name: Проверка
+        run: |
+          for i in $(seq 1 30); do
+            if out=$(curl -fsS "https://$DOMAIN/health"); then echo "$out"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::https://$DOMAIN/health не ответил за 5 минут (DNS, порты 80/443 или сертификат)"
+          exit 1

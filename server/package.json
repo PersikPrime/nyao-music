@@ -1,0 +1,22 @@
+{
+  "name": "nyao-music-server",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Сервер Nyao Music: аккаунт через Telegram, синхронизация между устройствами, зеркало обновлений",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "jose": "^6.2.12",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.5"
+  }
+}

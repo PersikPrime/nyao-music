@@ -1,0 +1,49 @@
+# Сервер Nyao Music: API + Postgres + Caddy (HTTPS). Переменные — в .env рядом (его пишет деплой).
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nyao
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: nyao
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      # пароль отдельно: спецсимволы в пароле сломали бы URL
+      DATABASE_URL: postgres://nyao@db:5432/nyao
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PUBLIC_URL: https://${DOMAIN}
+      TG_CLIENT_ID: ${TG_CLIENT_ID}
+      TG_CLIENT_SECRET: ${TG_CLIENT_SECRET}
+      MIRROR_DIR: /data/releases
+    volumes:
+      - releases:/data/releases
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  releases:
+  caddy_data:
+  caddy_config:
