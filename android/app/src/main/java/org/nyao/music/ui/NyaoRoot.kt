@@ -277,15 +277,14 @@ private fun MiniPlayer(onOpen: () -> Unit, modifier: Modifier = Modifier) {
             ) { Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Играть", tint = pal.onAccent) }
             IconButton(onClick = { PlayerConnection.next() }) { Icon(Icons.Rounded.SkipNext, "Следующий", tint = pal.onContainer) }
         }
-        WavyProgress(
-            progress = progress,
-            playing = playing,
-            onSeek = { f -> PlayerConnection.seekTo((f * PlayerConnection.durationMs()).toLong()) },
-            color = pal.accent,
-            trackColor = pal.container,
-            height = 8.dp,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 28.dp),
-        )
+        // Прогресс — тонкая прямая полоска внутри капсулы и без перемотки: нажатие на нижнюю половину
+        // мини-плеера открывает экран «Сейчас играет», а не перематывает трек (перемотка — там, на волне)
+        Box(
+            Modifier.align(Alignment.BottomCenter).padding(start = 32.dp, end = 32.dp, bottom = 4.dp)
+                .fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(pal.container),
+        ) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).clip(RoundedCornerShape(2.dp)).background(pal.accent))
+        }
     }
 }
 

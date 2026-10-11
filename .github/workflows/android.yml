@@ -25,11 +25,27 @@ jobs:
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses > /dev/null || true
           "$SDKM" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+      # Постоянный ключ подписи из секретов: тогда обновления ставятся поверх, без переустановки
+      - name: Ключ подписи
+        env:
+          KS_B64: ${{ secrets.NYAO_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            printf '%s' "$KS_B64" | base64 -d > "$RUNNER_TEMP/nyao.jks"
+            echo "NYAO_KEYSTORE=$RUNNER_TEMP/nyao.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Нет секрета NYAO_KEYSTORE_B64 — APK подпишется случайным debug-ключом и не встанет поверх старой версии"
+          fi
       - name: Сборка
         working-directory: android
+        env:
+          NYAO_KEYSTORE_PASSWORD: ${{ secrets.NYAO_KEYSTORE_PASSWORD }}
+          NYAO_KEY_ALIAS: nyao
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
+          # проверка: каким сертификатом подписан APK (отпечаток SHA-256 должен быть одинаковым у всех сборок)
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -i "SHA-256" | head -1
       - name: Имя файла с версией
         id: ver
         run: |

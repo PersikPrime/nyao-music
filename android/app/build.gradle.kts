@@ -22,10 +22,25 @@ android {
         versionName = "$nyaoName ($nyaoBuild)"
     }
 
+    // Постоянный ключ подписи: без него каждая сборка на GitHub подписывалась новым случайным debug-ключом,
+    // и Android отказывался ставить обновление поверх («App not installed»). Ключ лежит в секретах GitHub,
+    // CI кладёт его в файл и передаёт путь и пароли через переменные окружения.
+    val ksPath = System.getenv("NYAO_KEYSTORE")
+    signingConfigs {
+        if (ksPath != null && file(ksPath).exists()) {
+            create("nyao") {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("NYAO_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("NYAO_KEY_ALIAS") ?: "nyao"
+                keyPassword = System.getenv("NYAO_KEY_PASSWORD") ?: System.getenv("NYAO_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Личная сборка: подписываем debug-ключом, чтобы APK сразу ставился
-            signingConfig = signingConfigs.getByName("debug")
+            // Есть постоянный ключ — подписываем им; локально без ключа — debug-ключом, чтобы APK ставился
+            signingConfig = signingConfigs.findByName("nyao") ?: signingConfigs.getByName("debug")
             isMinifyEnabled = false
         }
     }
