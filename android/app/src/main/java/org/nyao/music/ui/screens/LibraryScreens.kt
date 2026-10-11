@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import androidx.compose.material3.TextButton
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -207,7 +209,13 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
             }
         }
     } else {
-        val lists = model.playlists
+        val settings by Repo.prefs.settings.collectAsState()
+        val mixes by Repo.mixStore.mixes.collectAsState()
+        LaunchedEffect(settings.splitLiked) { if (settings.splitLiked) model.loadLiked() }
+        // лайки по сервисам (если включено) + свои миксы + плейлисты сервисов
+        val lists = model.playlists?.let { pl ->
+            (if (settings.splitLiked) likedPlaylists(model.liked, true).filter { it.id != "liked" } else emptyList()) + mixes.map { it.asPlaylist() } + pl
+        }
         LazyVerticalGrid(
             GridCells.Adaptive(if (wide) 180.dp else 150.dp),
             Modifier.fillMaxSize(),
@@ -216,6 +224,19 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) { Box(Modifier.padding(horizontal = 0.dp)) { header() } }
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(
+                    Modifier.fillMaxWidth().bouncy().clip(RoundedCornerShape(24.dp)).background(NyaoColors.Tonal).clickable { model.mixBuilderOpen = true }.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(Modifier.size(44.dp).clip(PolarShape(6, 0.1f)).background(NyaoColors.Lavender), contentAlignment = Alignment.Center) { Text("+", style = MaterialTheme.typography.titleLarge, color = NyaoColors.OnLavender) }
+                    Column {
+                        Text("Новый микс", style = MaterialTheme.typography.titleMedium)
+                        Text("Из самого прослушиваемого или пустой", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+                    }
+                }
+            }
             when {
                 lists == null -> item(span = { GridItemSpan(maxLineSpan) }) { Loading() }
                 lists.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) { Hint("Плейлистов нет или сервисы не подключены.") }
@@ -250,8 +271,15 @@ fun PlaylistScreen(model: AppModel, playlist: Playlist) {
     val likedIds by Repo.liked.collectAsState()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
         item {
-            Row(Modifier.statusBarsPadding().padding(8.dp)) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { model.back() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Назад", tint = NyaoColors.Text) }
+                Spacer(Modifier.weight(1f))
+                // свой микс можно удалить
+                if (playlist.id.startsWith("mix:")) TextButton(onClick = {
+                    Repo.mixStore.delete(playlist.id)
+                    model.message("Микс «${playlist.title}» удалён")
+                    model.back()
+                }) { Text("Удалить микс") }
             }
         }
         item {
@@ -262,7 +290,7 @@ fun PlaylistScreen(model: AppModel, playlist: Playlist) {
                 }
                 Text(playlist.title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 18.dp), maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 Text(
-                    org.nyao.music.data.sourceName(playlist.source) + (tracks?.let { " · ${it.size} треков" } ?: ""),
+                    (if (playlist.source == "mix") playlist.subtitle.ifEmpty { "Все сервисы" } else org.nyao.music.data.sourceName(playlist.source)) + (tracks?.let { " · ${it.size} треков" } ?: ""),
                     style = MaterialTheme.typography.bodyMedium,
                     color = NyaoColors.Muted,
                     modifier = Modifier.padding(top = 4.dp),

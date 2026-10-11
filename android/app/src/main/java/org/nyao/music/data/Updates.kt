@@ -12,6 +12,8 @@ data class UpdateInfo(
     val apkSize: Long,
     val pageUrl: String?,
     val notes: String,
+    /** Сервер Nyao требует обновиться: эта сборка ниже минимальной */
+    val required: Boolean = false,
 )
 
 /** Центр обновлений: последний релиз — с зеркала на сервере Nyao или с github.com/PersikPrime/nyao-music */
@@ -47,7 +49,9 @@ object Updates {
         val rel = latest() ?: return UpdateInfo(false, null, 0, null, 0, null, "")
         val tag = parseTag(rel.str("tag_name"))
         val apk = rel.arr("assets").objects().firstOrNull { it.optString("name").endsWith(".apk") }
+        val minBuild = rel.optInt("min_build", 0)
         return UpdateInfo(
+            required = minBuild > 0 && currentBuild < minBuild && tag != null && tag.second >= minBuild && apk != null,
             available = tag != null && tag.second > currentBuild && apk != null,
             label = tag?.let { "${it.first} (${it.second})" },
             build = tag?.second ?: 0,

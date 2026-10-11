@@ -43,6 +43,8 @@ function configureRpc() {
 
 // Что из настроек едет на другие устройства (остальное — своё у каждого компьютера)
 const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood'];
+// вид приложения и «Мне нравится» по сервисам — тоже общие для всех устройств
+const PREF_KEYS = ['layout', 'splitLiked', 'waveTab'];
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -71,6 +73,11 @@ async function syncCloud() {
       wave: {
         get: () => pick(settings.get(), WAVE_KEYS),
         set: (data) => data && settings.set(pick(data, WAVE_KEYS))
+      },
+      prefs: {
+        get: () => pick(settings.get(), PREF_KEYS),
+        // пустой вид с другого устройства не затирает выбор на этом
+        set: (data) => data && settings.set(Object.fromEntries(Object.entries(pick(data, PREF_KEYS)).filter(([, v]) => v !== null && v !== undefined)))
       }
     });
     if (changed.length) send('cloud:changed', changed);
@@ -91,6 +98,8 @@ function initProviders() {
     getToken: () => secrets.get('nyaoToken'),
     setToken: (t) => secrets.set('nyaoToken', t),
     openUrl: (url) => shell.openExternal(url),
+    build: readVersion().build,
+    onOutdated: (minBuild) => send('app:outdated', minBuild),
     device: `${os.hostname().replace(/\.local$/, '')} · ${process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux'}`,
     log: (m) => console.log(m)
   });
@@ -174,7 +183,7 @@ function writeMixes(list, push = true) {
   if (push && cloud) cloud.pushState('mixes', list).catch((e) => console.warn('[cloud] mixes', e.message));
 }
 function mixSummary(m) {
-  return { id: m.id, source: 'mix', title: m.title, count: m.tracks.length, cover: (m.tracks.find((t) => t.cover) || {}).cover || null, ya: m.tracks.filter((t) => t.source === 'ya').length, yt: m.tracks.filter((t) => t.source === 'yt').length };
+  return { id: m.id, source: 'mix', title: m.title, count: m.tracks.length, cover: (m.tracks.find((t) => t.cover) || {}).cover || null, ya: m.tracks.filter((t) => t.source === 'ya').length, yt: m.tracks.filter((t) => t.source === 'yt').length, sc: m.tracks.filter((t) => t.source === 'sc').length };
 }
 
 async function safe(promise, fallback) {
@@ -254,6 +263,7 @@ function registerIpc() {
     const next = settings.set(patch);
     if ('discordRpc' in patch) configureRpc();
     if (WAVE_KEYS.some((k) => k in patch) && cloud) cloud.pushState('wave', pick(next, WAVE_KEYS)).catch(() => {});
+    if (PREF_KEYS.some((k) => k in patch) && cloud) cloud.pushState('prefs', pick(next, PREF_KEYS)).catch(() => {});
     return next;
   });
   handle('rpc:update', (info) => rpc.update(info));
@@ -275,6 +285,7 @@ function registerIpc() {
   handle('cloud:now', (info) => cloud.setNow(info).catch(() => {}));
   handle('cloud:others', () => cloud.others());
   handle('cloud:history', () => cloud.history().slice(0, 200));
+  handle('cloud:top', (opts) => cloud.top(opts || {}));
   handle('cloud:sync', () => syncCloud());
   handle('sc:flush', () => flushScLikes());
 
@@ -391,6 +402,14 @@ function registerIpc() {
     const mix = list.find((m) => m.id === mixId);
     if (!mix) throw new Error('Микс не найден');
     if (!mix.tracks.some((t) => t.id === track.id)) mix.tracks.push(track);
+    writeMixes(list);
+    return mixSummary(mix);
+  });
+  handle('mix:addMany', (mixId, tracks) => {
+    const list = readMixes();
+    const mix = list.find((m) => m.id === mixId);
+    if (!mix) throw new Error('Микс не найден');
+    for (const t of tracks || []) if (t && t.id && !mix.tracks.some((x) => x.id === t.id)) mix.tracks.push(t);
     writeMixes(list);
     return mixSummary(mix);
   });

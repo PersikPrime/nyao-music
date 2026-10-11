@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   openExternal: (url) => call('open:external', url),
   version: () => call('app:version'),
+  onOutdated: (cb) => ipcRenderer.on('app:outdated', (_e, min) => cb(min)),
   updates: {
     check: () => call('update:check'),
     download: (asset) => call('update:download', asset),
@@ -41,6 +42,7 @@ contextBridge.exposeInMainWorld('nyao', {
   mix: {
     create: (title) => call('mix:create', title),
     add: (mixId, track) => call('mix:add', mixId, track),
+    addMany: (mixId, tracks) => call('mix:addMany', mixId, tracks),
     remove: (mixId, trackId) => call('mix:remove', mixId, trackId),
     delete: (mixId) => call('mix:delete', mixId)
   },
@@ -74,6 +76,7 @@ contextBridge.exposeInMainWorld('nyao', {
     now: (info) => call('cloud:now', info),
     others: () => call('cloud:others'),
     history: () => call('cloud:history'),
+    top: (opts) => call('cloud:top', opts),
     sync: () => call('cloud:sync'),
     onChanged: (cb) => ipcRenderer.on('cloud:changed', (_e, keys) => cb(keys))
   },

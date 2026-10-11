@@ -93,6 +93,12 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
     val cloudUser by Repo.cloud.user.collectAsState()
     val name = cloudUser?.name ?: (accounts[SOURCE_YA] ?: accounts[SOURCE_YT] ?: accounts[org.nyao.music.data.SOURCE_SC])?.name
     LaunchedEffect(cloudUser != null) { model.loadOthers() }
+    // режим «Плеер» (по умолчанию) — своя главная; «Моя волна» — как раньше, ниже
+    val homeSettings by Repo.prefs.settings.collectAsState()
+    if (!homeSettings.isWaveLayout) {
+        PlayerHome(model, name)
+        return
+    }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
         // Верхняя строка: бейдж приложения, поиск, аватар-печенька

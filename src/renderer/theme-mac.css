@@ -190,3 +190,11 @@ body.mac {
 /* Аккаунт Nyao и «продолжить» в стиле Liquid Glass */
 .mac .continue-card { background: linear-gradient(110deg, rgba(216, 206, 255, .22), rgba(255, 255, 255, .06) 70%); border-color: rgba(255, 255, 255, .14); backdrop-filter: blur(24px) saturate(160%); }
 .mac .dev { background: rgba(255, 255, 255, .07); }
+
+/* 0.5: режим «Плеер» и окна в стекле */
+.mac .qtile { background: rgba(255, 255, 255, .07); }
+.mac .qtile:hover { background: rgba(255, 255, 255, .12); }
+.mac .modal { background: rgba(28, 26, 38, .82); backdrop-filter: blur(40px) saturate(170%); border-color: rgba(255, 255, 255, .14); }
+.mac .mb-right { background: rgba(0, 0, 0, .2); }
+.mac .layout-card { background: rgba(255, 255, 255, .04); border-color: rgba(255, 255, 255, .1); }
+.mac .layout-card.on { border-color: #d8ceff; background: rgba(216, 206, 255, .1); }

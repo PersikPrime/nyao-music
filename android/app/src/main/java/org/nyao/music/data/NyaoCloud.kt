@@ -29,6 +29,10 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         private const val DAY = 86_400_000L
     }
 
+    /** Сервер сказал, что эта сборка устарела (426): здесь минимальная сборка, иначе 0 */
+    private val _outdated = MutableStateFlow(0)
+    val outdated: StateFlow<Int> = _outdated
+
     private val _user = MutableStateFlow(prefs.nyaoUser?.let { runCatching { parseUser(JSONObject(it)) }.getOrNull() })
     val user: StateFlow<CloudUser?> = _user
     val loggedIn: Boolean get() = prefs.nyaoToken != null
@@ -43,6 +47,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
 
     private suspend fun request(method: String, path: String, body: JSONObject? = null): JSONObject {
         val b = Request.Builder().url(BASE + path).header("User-Agent", "NyaoMusic-Android")
+            .header("X-Nyao-Build", org.nyao.music.BuildConfig.VERSION_CODE.toString())
         prefs.nyaoToken?.let { b.header("Authorization", "Bearer $it") }
         val rb = body?.toString()?.toRequestBody(JSON_TYPE)
         when (method) {
@@ -52,6 +57,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         }
         val (code, text) = Net.call(b.build())
         val json = runCatching { JSONObject(text) }.getOrNull() ?: JSONObject()
+        if (code == 426) _outdated.value = json.optInt("minBuild", 1).coerceAtLeast(1)
         if (code == 401 && prefs.nyaoToken != null) forget()
         if (code !in 200..299) throw ApiException(json.str("error") ?: "Сервер Nyao ответил $code", code)
         return json
@@ -168,6 +174,100 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
             ids += remoteRecent
         }
         return ids
+    }
+
+    /** Недавно слушал: уникальные треки из своей истории, без пропущенных */
+    suspend fun recent(limit: Int = 12): List<Track> {
+        val hist = fileLock.withLock { readArr(historyFile) }
+        val seen = HashSet<String>()
+        val out = ArrayList<Track>()
+        for (i in 0 until hist.length()) {
+            val p = hist.optJSONObject(i) ?: continue
+            if (p.optBoolean("skipped") || !seen.add(p.optString("trackId"))) continue
+            playToTrack(p)?.let { out += it }
+            if (out.size >= limit) break
+        }
+        return out
+    }
+
+    /**
+     * Самое прослушиваемое за days дней: сервер (все устройства) + своё неотправленное,
+     * без сервера — своя история. Пропущенное не считается. → пары (трек, сколько раз)
+     */
+    suspend fun top(days: Int = 30): List<Pair<Track, Int>> {
+        val since = System.currentTimeMillis() - days * DAY
+        val plays = ArrayList<JSONObject>()
+        var fromServer = false
+        if (loggedIn) {
+            runCatching {
+                val r = request("GET", "/history?days=${minOf(365, days)}&limit=2000")
+                r.arr("plays").objects().forEach { plays += it }
+                val out = fileLock.withLock { readArr(outboxFile) }
+                for (i in 0 until out.length()) out.optJSONObject(i)?.let { if (it.optLong("playedAt") >= since) plays += it }
+                fromServer = true
+            }
+        }
+        if (!fromServer) {
+            val hist = fileLock.withLock { readArr(historyFile) }
+            for (i in 0 until hist.length()) hist.optJSONObject(i)?.let { if (it.optLong("playedAt") >= since) plays += it }
+        }
+        val counts = LinkedHashMap<String, Pair<JSONObject, Int>>()
+        for (p in plays) {
+            if (p.optBoolean("skipped")) continue
+            val id = p.optString("trackId")
+            if (id.isEmpty()) continue
+            val cur = counts[id]
+            counts[id] = (cur?.first ?: p) to ((cur?.second ?: 0) + 1)
+        }
+        return counts.values.sortedByDescending { it.second }.mapNotNull { (p, n) -> playToTrack(p)?.let { it to n } }
+    }
+
+    private fun playToTrack(p: JSONObject): Track? {
+        val id = p.optString("trackId")
+        val i = id.indexOf(':')
+        if (i <= 0) return null
+        return Track(id = id, source = p.str("source") ?: id.substring(0, i), srcId = id.substring(i + 1), title = p.optString("title"), artist = p.optString("artist"), duration = p.optInt("duration"), cover = p.str("cover"))
+    }
+
+    // ---------- Синхронизация настроек и миксов ----------
+
+    class StateHandler(val get: () -> Any, val set: (Any) -> Unit, val merge: ((Any, Any) -> Any)? = null)
+
+    suspend fun pushState(key: String, data: Any) {
+        val at = System.currentTimeMillis()
+        prefs.setCloudStamp(key, at)
+        if (!loggedIn) return
+        request("PUT", "/state/$key", JSONObject().put("data", data).put("updatedAt", at))
+    }
+
+    /** Сверка с сервером: где свежее, оттуда и берём. Возвращает ключи, которые поменялись здесь */
+    suspend fun syncState(handlers: Map<String, StateHandler>): List<String> {
+        if (!loggedIn) return emptyList()
+        val remote = request("GET", "/state")
+        val changed = ArrayList<String>()
+        for ((key, h) in handlers) {
+            val r = remote.optJSONObject(key)
+            val rAt = r?.optLong("updatedAt") ?: 0L
+            val rData = r?.opt("data")
+            val localAt = prefs.cloudStamp(key)
+            when {
+                r != null && rData != null && localAt == 0L && h.merge != null -> {
+                    val merged = h.merge.invoke(h.get(), rData)
+                    h.set(merged)
+                    pushState(key, merged)
+                    changed += key
+                }
+                r != null && rData != null && rAt > localAt -> {
+                    h.set(rData)
+                    prefs.setCloudStamp(key, rAt)
+                    changed += key
+                }
+                localAt > 0 && (r == null || localAt > rAt) ->
+                    request("PUT", "/state/$key", JSONObject().put("data", h.get()).put("updatedAt", localAt))
+                r == null && localAt == 0L -> pushState(key, h.get())
+            }
+        }
+        return changed
     }
 
     // ---------- «Сейчас играет» ----------

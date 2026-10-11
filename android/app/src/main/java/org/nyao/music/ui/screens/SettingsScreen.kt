@@ -52,6 +52,7 @@ fun SettingsScreen(model: AppModel) {
     ) {
         Text("Настройки", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp))
         NyaoAccountCard(model)
+        ViewSettingsCard()
         Text("Сервисы", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         ServiceCard(model, SOURCE_YA)
         ServiceCard(model, SOURCE_YT)

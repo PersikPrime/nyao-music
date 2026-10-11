@@ -1,6 +1,7 @@
 import { Player } from './player.js';
 import { Ribbon } from './ribbon.js';
 import { Onboarding } from './onboarding.js';
+import { layoutChoiceHtml } from './layouts.js';
 
 const api = window.nyao;
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -20,6 +21,9 @@ const state = {
   status: { ya: null, yt: null, sc: null },
   update: { info: null, checking: false, progress: null, error: null },
   cloud: { loggedIn: false, user: null, logging: false, devices: null, others: [] },
+  recent: null, // недавно слушал (история)
+  top: null, // чаще всего за месяц
+  outdated: 0, // сервер требует сборку не ниже этой
   settings: null,
   home: null,
   lib: { lists: null, filter: 'all', selected: 'liked', tracks: null, counts: null },
@@ -197,6 +201,16 @@ function waveControlsHtml(compact = false) {
   </div>`;
 }
 
+// ---------- Вид приложения ----------
+/** 'player' — своя музыка на первом плане (по умолчанию), 'wave' — акцент на «Мою волну» */
+function layout() {
+  return (state.settings && state.settings.layout) || 'player';
+}
+function navItems() {
+  // в режиме «Плеер» вкладка волны прячется (волна — плитка на главной), если не вернуть её в настройках
+  return NAV.filter((n) => n[0] !== 'wave' || layout() === 'wave' || (state.settings && state.settings.waveTab));
+}
+
 // ---------- Навигация ----------
 function renderRail() {
   const btn = (route, label, d) => `<button class="nav-btn ${state.route === route ? 'active' : ''}" data-route="${route}" aria-label="${label}" title="${label}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg><span class="lbl">${label}</span></button>`;
@@ -210,7 +224,7 @@ function renderRail() {
     </div>`;
   }
   const accounts = IS_MAC ? `<div class="side-accounts">${accountButton()}</div>` : '';
-  $('#rail').innerHTML = NAV.map((n) => btn(...n)).join('') + extra + '<div class="spacer"></div>' + btn('settings', 'Настройки', SETTINGS_ICON) + accounts;
+  $('#rail').innerHTML = navItems().map((n) => btn(...n)).join('') + extra + '<div class="spacer"></div>' + btn('settings', 'Настройки', SETTINGS_ICON) + accounts;
 }
 // Подключаемые сервисы. Новый сервис (VK Музыка, SoundCloud…) добавляется сюда — кнопка аккаунта и меню подхватят его сами
 /** Название сервиса: в родительном падеже («из Яндекс Музыки») или обычное */
@@ -330,6 +344,7 @@ function greeting() {
 }
 
 function renderHome() {
+  if (layout() === 'player') return renderHomePlayer();
   const loggedAny = state.status.ya || state.status.yt;
   const name = (state.status.ya && state.status.ya.name) || '';
   const h = state.home;
@@ -367,6 +382,91 @@ function renderHome() {
   </div>`;
   if (ytSection) lists['home-section'] = ytSection.tracks;
   new Ribbon($('#home-ribbon'), { lines: 14, cy: 0.42, amp: 0.9, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+}
+
+// ---------- Главная в режиме «Плеер» ----------
+const Q_ICON = {
+  heart: 'M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z',
+  list: 'M5 7h14M5 12h14M5 17h9',
+  wave: 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0'
+};
+const SRC_TINT = { ya: ['#2A2208', '#FFD60A'], yt: ['#2A0E0C', '#FF6A5C'], sc: ['#2A1408', '#FF8A3D'], mix: ['#141220', 'var(--accent)'] };
+/** Плитки «Мне нравится»: общая и, если включено, по сервисам */
+function likedEntries() {
+  const c = state.lib.counts || {};
+  const total = (c.ya || 0) + (c.yt || 0) + (c.sc || 0);
+  const all = { id: 'liked', title: 'Мне нравится', source: 'mix', sub: state.lib.counts ? `Все сервисы · ${total}` : 'Все сервисы', count: total };
+  if (!state.settings || !state.settings.splitLiked) return [all];
+  const per = SERVICES.filter((x) => state.status[x.id] || c[x.id]).map((x) => ({ id: `liked:${x.id}`, title: `Мне нравится · ${x.id === 'ya' ? 'Яндекс' : x.name}`, source: x.id, sub: `${c[x.id] || 0} треков`, count: c[x.id] || 0 }));
+  return per.length > 1 ? [all, ...per] : [all];
+}
+function quickTile(q) {
+  const [bg, fg] = SRC_TINT[q.source] || SRC_TINT.mix;
+  const img = q.cover ? `<img src="${esc(q.cover)}" alt="" loading="lazy">` : `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${fg}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${q.icon}"/></svg>`;
+  return `<button class="qtile" ${q.attrs}><span class="qart" style="background:${bg}">${img}</span><span class="qmeta"><b>${esc(q.title)}</b><span>${esc(q.sub || '')}</span></span></button>`;
+}
+function homeName() {
+  const n = (state.cloud.loggedIn && state.cloud.user && state.cloud.user.name) || (state.status.ya && state.status.ya.name) || '';
+  return n.split(' ')[0];
+}
+function renderHomePlayer() {
+  const loggedAny = state.status.ya || state.status.yt || state.status.sc;
+  const waveOn = player.mode === 'wave' && player.playing;
+  const lists2 = (state.lib.lists || []).slice(0, 12);
+  const tiles = [
+    ...likedEntries().slice(0, 4).map((l) => ({ ...l, icon: Q_ICON.heart, attrs: `data-action="open-pl" data-id="${esc(l.id)}"` })),
+    { title: 'Моя волна', source: 'mix', sub: waveOn ? 'Играет' : SERVICES.filter((x) => state.status[x.id]).map((x) => x.short).join(' + ') || 'Нужен вход', icon: Q_ICON.wave, attrs: 'data-action="wave-toggle"' },
+    ...lists2.map((p) => ({ title: p.title, source: p.source, cover: p.cover, sub: p.source === 'mix' ? `Мой микс · ${p.count || 0}` : srcName(p.source), icon: Q_ICON.list, attrs: `data-action="open-pl" data-id="${esc(p.id)}"` }))
+  ].slice(0, 8);
+  const recent = state.recent || [];
+  lists['home-recent'] = recent;
+  const top = (state.top || []).slice(0, 5);
+  const h = state.home;
+  const ytSection = h && h.ytHome.find((x) => x.tracks.length);
+  if (ytSection) lists['home-section'] = ytSection.tracks;
+  view.innerHTML = `<div class="scroll home-player">
+    <div class="home-top">
+      <h1 class="page">${greeting()}${homeName() ? ', ' + esc(homeName()) : ''}</h1>
+      <form class="search-field" data-form="home-search">${ICONS.search}<input name="q" type="search" placeholder="Поиск в Яндексе, YouTube Music и SoundCloud" aria-label="Поиск"></form>
+    </div>
+    ${continueHtml()}
+    ${!loggedAny ? `<div class="card"><div class="field"><label>Подключи сервисы</label><div class="hint">Войди в Яндекс Музыку, YouTube Music или SoundCloud — здесь появятся лайки, плейлисты и волна.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Открыть настройки</button></div></div>` : ''}
+    ${loggedAny ? `<section class="qgrid">${tiles.map(quickTile).join('')}</section>` : ''}
+    ${recent.length ? `<section><div class="sec-head"><h2 class="sec">Недавно слушал</h2></div>
+      <div class="recent-row">${recent.slice(0, 12).map((t, i) => `<button class="rcard" data-action="play-row" data-list="home-recent" data-i="${i}">${coverHtml(t, '', true)}<b>${esc(t.title)}</b><span>${esc(t.artist)}</span></button>`).join('')}</div></section>` : ''}
+    <div class="home-split">
+      ${top.length ? `<section class="top-col"><div class="sec-head"><h2 class="sec">Чаще всего за месяц</h2><button class="link" data-action="mix-builder">Собрать микс из них</button></div>
+        ${tracksHtml(top.map((x) => x.track), 'home-top')}</section>` : ''}
+      <section class="mood-col"><h2 class="sec" style="margin-bottom:12px">Для настроения</h2>
+        <button class="mood-wave" data-action="wave-toggle"><canvas id="home-ribbon"></canvas>
+          <span class="eyebrow">${SERVICES.filter((x) => state.status[x.id]).map((x) => x.short).join(' + ') || 'Нужен вход'}</span>
+          <span class="mw-title">Моя волна</span><span class="mw-sub">Бесконечный поток по твоему вкусу</span>
+          <span class="mw-play">${waveOn ? ICONS.pause : ICONS.play}</span></button>
+      </section>
+    </div>
+    ${ytSection ? `<section><h2 class="sec" style="margin-bottom:12px">${esc(ytSection.title)}</h2>${tracksHtml(ytSection.tracks.slice(0, 8), 'home-yt')}</section>` : ''}
+  </div>`;
+  new Ribbon($('#home-ribbon'), { lines: 12, cy: 0.5, amp: 0.8, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+}
+/** История и «чаще всего» для главной */
+async function loadRecent() {
+  if (!api.cloud) return;
+  try {
+    const hist = await api.cloud.history();
+    const seen = new Set();
+    state.recent = [];
+    for (const p of hist) {
+      if (seen.has(p.trackId) || p.skipped) continue;
+      seen.add(p.trackId);
+      const i = p.trackId.indexOf(':');
+      state.recent.push({ id: p.trackId, source: p.source || p.trackId.slice(0, i), srcId: p.trackId.slice(i + 1), title: p.title, artist: p.artist, cover: p.cover, duration: p.duration });
+      if (state.recent.length >= 12) break;
+    }
+    state.top = (await api.cloud.top({ days: 30 })).filter((x) => x.plays >= 2);
+  } catch {
+    // без истории — просто без этих блоков
+  }
+  if (state.route === 'home') renderHome();
 }
 
 function renderWave() {
@@ -520,29 +620,33 @@ function libraryCounts() {
 function renderLibrary() {
   const lib = state.lib;
   const c = libraryCounts();
-  const liked = { id: 'liked', title: 'Мне нравится', source: 'mix', count: lib.counts ? lib.counts.ya + lib.counts.yt : 0, cover: null };
-  const all = lib.lists ? [liked, ...lib.lists] : null;
+  const likes = likedEntries();
+  const all = lib.lists ? [...likes, ...lib.lists] : null;
+  const isLiked = (p) => p.id === 'liked' || p.id.startsWith('liked:');
   const shown = all ? all.filter((p) => lib.filter === 'all' || p.source === lib.filter || (p.id === 'liked' && lib.filter === 'mix')) : null;
   const sel = all ? all.find((p) => p.id === lib.selected) : null;
   const f = (v, label, dot) => `<button class="chip solid ${lib.filter === v ? 'on' : ''}" data-action="lib-filter" data-v="${v}">${dot ? `<span class="d" style="background:${dot}"></span>` : ''}${label}</button>`;
-  const heart = (size) => `<div class="cover" style="background:#17142a">${ICONS.heartOn.replace('width="20" height="20"', `width="${size}" height="${size}" style="color:var(--accent)"`)}</div>`;
+  const heart = (size, src = 'mix') => `<div class="cover" style="background:${(SRC_TINT[src] || SRC_TINT.mix)[0]}">${ICONS.heartOn.replace('width="20" height="20"', `width="${size}" height="${size}" style="color:${(SRC_TINT[src] || SRC_TINT.mix)[1]}"`)}</div>`;
   view.innerHTML = `<div class="split">
     <div class="scroll">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
         <h1 class="page">Медиатека</h1>
-        <button class="btn" data-action="new-mix">${ICONS.plus}Новый микс</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div class="pill-seg" role="radiogroup" aria-label="Как показывать «Мне нравится»">${[[true, 'Лайки по сервисам'], [false, 'Одним списком']].map(([v, l]) => `<button role="radio" aria-checked="${!!state.settings.splitLiked === v}" class="${!!state.settings.splitLiked === v ? 'on' : ''}" data-action="split-liked" data-v="${v ? 1 : 0}">${l}</button>`).join('')}</div>
+          <button class="btn" data-action="mix-builder">${ICONS.plus}Новый микс</button>
+        </div>
       </div>
       <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}</div>
       ${shown ? `<div class="tiles">${shown.map((p) => `<button class="tile ${p.id === lib.selected ? 'sel' : ''}" data-action="lib-select" data-id="${esc(p.id)}">
-          ${p.id === 'liked' ? heart('40%') : coverHtml(p, '', true)}
-          <div class="t">${esc(p.title)}</div><div class="s">${p.id === 'liked' ? 'Все сервисы' : esc(p.source === 'ya' ? 'Яндекс' : srcName(p.source))}${p.count ? ' · ' + p.count : ''}</div>
+          ${isLiked(p) ? heart('40%', p.source) : coverHtml(p, '', true)}
+          <div class="t">${esc(p.title)}</div><div class="s">${isLiked(p) ? esc(p.sub) : esc(p.source === 'ya' ? 'Яндекс' : srcName(p.source)) + (p.count ? ' · ' + p.count : '')}</div>
         </button>`).join('')}</div>` : '<div class="tiles">' + '<div class="skeleton" style="aspect-ratio:1"></div>'.repeat(8) + '</div>'}
     </div>
     <aside class="aside">
       ${sel ? `<div class="aside-head">
         <div class="pl-head">
-          ${sel.id === 'liked' ? heart('50') : coverHtml(sel)}
-          <div style="min-width:0"><span class="muted" style="font-size:12px">${sel.id === 'liked' ? 'Общий список лайков' : sel.source === 'mix' ? 'Смешанный плейлист' : sel.source === 'ya' ? 'Плейлист Яндекса' : sel.source === 'sc' ? 'Плейлист SoundCloud' : 'Плейлист YouTube Music'}</span>
+          ${isLiked(sel) ? heart('50', sel.source) : coverHtml(sel)}
+          <div style="min-width:0"><span class="muted" style="font-size:12px">${sel.id === 'liked' ? 'Общий список лайков' : isLiked(sel) ? 'Лайки одного сервиса' : sel.source === 'mix' ? 'Смешанный плейлист' : sel.source === 'ya' ? 'Плейлист Яндекса' : sel.source === 'sc' ? 'Плейлист SoundCloud' : 'Плейлист YouTube Music'}</span>
           <h2>${esc(sel.title)}</h2>
           <span class="muted" style="font-size:12px">${lib.tracks ? `${lib.tracks.length} треков · ${fmt(lib.tracks.reduce((a, t) => a + (t.duration || 0), 0))}` : 'Загружаю…'}</span></div>
         </div>
@@ -551,10 +655,10 @@ function renderLibrary() {
           <button class="icbtn" data-action="pl-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
           <span class="grow"></span>
           ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}${lib.tracks.some((t) => t.source === 'sc') ? `<span class="dotsrc sc" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sc').length}` : ''}</span>` : ''}
-          ${sel.source === 'mix' && sel.id !== 'liked' ? `<button class="icbtn" data-action="del-mix" aria-label="Удалить микс">${ICONS.ban}</button>` : ''}
+          ${sel.source === 'mix' && !isLiked(sel) ? `<button class="icbtn" data-action="del-mix" aria-label="Удалить микс">${ICONS.ban}</button>` : ''}
         </div>
       </div>
-      <div class="aside-scroll">${lib.tracks ? (lib.tracks.length ? tracksHtml(lib.tracks, 'lib', { num: false }) : `<div class="empty">${sel.source === 'mix' ? 'Микс пустой. Добавляй треки через «⋯» в любом списке.' : 'Здесь пока пусто'}</div>`) : '<div class="skeleton" style="height:300px;margin:8px"></div>'}</div>` : '<div class="empty">Выбери плейлист</div>'}
+      <div class="aside-scroll">${lib.tracks ? (lib.tracks.length ? tracksHtml(lib.tracks, 'lib', { num: false }) : `<div class="empty">${isLiked(sel) ? 'В этом сервисе лайков пока нет.' : sel.source === 'mix' ? 'Микс пустой. Добавляй треки через «⋯» в любом списке.' : 'Здесь пока пусто'}</div>`) : '<div class="skeleton" style="height:300px;margin:8px"></div>'}</div>` : '<div class="empty">Выбери плейлист</div>'}
     </aside>
   </div>`;
 }
@@ -731,6 +835,7 @@ async function checkUpdates(silent = false) {
   if (state.route === 'settings') renderSettings();
   try {
     state.update.info = await api.updates.check();
+    if (state.update.info.required) showOutdated(state.update.info.minBuild);
     if (silent && state.update.info.available) toast(`Доступна Nyao Music ${state.update.info.latest.label} — обновить можно в Настройках`);
   } catch (e) {
     state.update.error = e.message;
@@ -865,6 +970,14 @@ function renderSettings() {
   view.innerHTML = `<div class="scroll settings">
     <h1 class="page">Настройки</h1>
     ${nyaoCardHtml()}
+    <section class="card">
+      <div><h2 class="sec">Вид приложения</h2><div class="hint">Что главное при запуске. Через аккаунт Nyao едет на все устройства.</div></div>
+      ${layoutChoiceHtml(layout(), 'data-action="set-layout"')}
+      <div class="pref-row"><span><b>«Мне нравится» по сервисам</b><span class="hint">Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud — плюс общий.</span></span>
+        <button class="switch ${state.settings.splitLiked ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.splitLiked}" aria-label="«Мне нравится» по сервисам" data-action="split-liked" data-v="${state.settings.splitLiked ? 0 : 1}"><span></span></button></div>
+      ${layout() === 'player' ? `<div class="pref-row"><span><b>Вкладка «Моя волна» в меню</b><span class="hint">В режиме «Плеер» волна живёт плиткой на главной. Можно вернуть её отдельной вкладкой.</span></span>
+        <button class="switch ${state.settings.waveTab ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.waveTab}" aria-label="Вкладка «Моя волна» в меню" data-action="toggle-wavetab"><span></span></button></div>` : ''}
+    </section>
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Аккаунты</h2>${SERVICES.map((x) => svcCard(x.id)).join('')}</section>
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Моя волна</h2>${waveControlsHtml()}</section>
     ${discordCardHtml()}
@@ -921,6 +1034,8 @@ async function loadStatus() {
   renderAccounts();
 }
 async function loadHome() {
+  loadRecent();
+  if (layout() === 'player' && !state.lib.lists) loadLibrary();
   if (!state.status.ya && !state.status.yt) return;
   try {
     state.home = await api.home();
@@ -956,7 +1071,7 @@ async function selectPlaylist(id) {
   state.lib.tracks = null;
   if (state.route === 'library') renderLibrary();
   try {
-    const tracks = id === 'liked' ? await loadLiked() : await api.library.tracks(id);
+    const tracks = id === 'liked' ? await loadLiked() : id.startsWith('liked:') ? (await loadLiked()).filter((t) => t.source === id.slice(6)) : await api.library.tracks(id);
     if (state.lib.selected !== id) return;
     state.lib.tracks = tracks;
   } catch (e) {
@@ -964,6 +1079,12 @@ async function selectPlaylist(id) {
     toast(e.message, true);
   }
   if (state.route === 'library') renderLibrary();
+}
+/** Название выбранного в медиатеке списка — для подписи «играет из …» */
+function libLabel() {
+  const id = state.lib.selected;
+  const l = likedEntries().find((x) => x.id === id) || (state.lib.lists || []).find((p) => p.id === id);
+  return l ? l.title : 'Мне нравится';
 }
 function openPlaylist(id) {
   state.lib.selected = id;
@@ -1128,7 +1249,7 @@ async function handleAction(el, e) {
       break;
     case 'play-row': {
       const list = lists[el.dataset.list];
-      const label = el.dataset.list === 'lib' ? ((state.lib.lists || []).find((p) => p.id === state.lib.selected) || { title: 'Мне нравится' }).title : el.dataset.list === 'search' ? 'Поиск' : '';
+      const label = el.dataset.list === 'lib' ? libLabel() : el.dataset.list === 'search' ? 'Поиск' : el.dataset.list === 'home-recent' ? 'Недавно слушал' : el.dataset.list === 'home-top' ? 'Чаще всего' : '';
       player.playList(list, Number(el.dataset.i), label);
       break;
     }
@@ -1261,13 +1382,30 @@ async function handleAction(el, e) {
       break;
     case 'pl-play':
     case 'pl-shuffle': {
-      const sel = state.lib.selected === 'liked' ? { title: 'Мне нравится' } : (state.lib.lists || []).find((p) => p.id === state.lib.selected) || {};
       if (a === 'pl-shuffle') player.shuffle = true;
       const start = player.shuffle ? Math.floor(Math.random() * state.lib.tracks.length) : 0;
-      player.playList(state.lib.tracks, start, sel.title);
+      player.playList(state.lib.tracks, start, libLabel());
       renderBar();
       break;
     }
+    case 'split-liked': {
+      const on = el.dataset.v === '1';
+      state.settings = await api.settings.set({ splitLiked: on });
+      if (!on && state.lib.selected.startsWith('liked:')) state.lib.selected = 'liked';
+      RENDER[state.route]();
+      break;
+    }
+    case 'set-layout':
+      await setLayout(el.dataset.v);
+      break;
+    case 'toggle-wavetab':
+      state.settings = await api.settings.set({ waveTab: !state.settings.waveTab });
+      renderRail();
+      renderSettings();
+      break;
+    case 'mix-builder':
+      openMixBuilder();
+      break;
     case 'new-mix': {
       const title = await askText('Название микса', 'Новый микс');
       if (!title) break;
@@ -1401,9 +1539,12 @@ function renderBar() {
   $('#pb-shuffle').innerHTML = wave ? ICONS.ban : ICONS.shuffle;
   $('#pb-shuffle').setAttribute('aria-label', wave ? 'Не нравится' : 'Перемешать');
   $('#pb-shuffle').classList.toggle('on', !wave && player.shuffle);
-  $('#pb-repeat').innerHTML = wave ? ICONS.tune : ICONS.repeat;
-  $('#pb-repeat').setAttribute('aria-label', wave ? 'Настроить волну' : 'Повтор');
-  $('#pb-repeat').classList.toggle('on', !wave && player.repeat);
+  // повтор: выкл → плейлист → трек (в волне — выкл ↔ трек); бейдж «1» — повтор одного трека
+  const REP = { off: 'Повтор выключен', all: 'Повтор плейлиста', one: 'Повтор трека' };
+  $('#pb-repeat').innerHTML = ICONS.repeat + (player.repeat === 'one' ? '<span class="rep1">1</span>' : '');
+  $('#pb-repeat').setAttribute('aria-label', REP[player.repeat]);
+  $('#pb-repeat').title = REP[player.repeat];
+  $('#pb-repeat').classList.toggle('on', player.repeat !== 'off');
   document.body.classList.toggle('src-ya', !!t && t.source === 'ya');
   document.body.classList.toggle('src-yt', !!t && t.source === 'yt');
   Ribbon.setPlaying(player.playing);
@@ -1430,8 +1571,8 @@ $('#pb-shuffle').onclick = () => {
   renderBar();
 };
 $('#pb-repeat').onclick = () => {
-  if (player.mode === 'wave') return go('wave');
-  player.repeat = !player.repeat;
+  const r = player.cycleRepeat();
+  toast({ off: 'Повтор выключен', all: 'Повтор плейлиста', one: 'Повтор трека' }[r]);
   renderBar();
 };
 $('#pb-like').onclick = () => player.toggleLike();
@@ -1593,6 +1734,195 @@ function openOnboarding() {
   obs.observe(document.body, { childList: true });
 }
 
+// ---------- Вид приложения: выбор и окно после обновления ----------
+async function setLayout(v) {
+  state.settings = await api.settings.set({ layout: v === 'wave' ? 'wave' : 'player' });
+  renderRail();
+  RENDER[state.route]();
+}
+/** Обновился с 0.4, где вид ещё не выбирали — один раз спрашиваем */
+function askLayout() {
+  const el = document.createElement('div');
+  el.className = 'modal-wrap';
+  el.innerHTML = `<section class="modal" role="dialog" aria-label="Новый вид Nyao Music">
+    <h2>Новый вид Nyao Music</h2>
+    <p class="hint">Теперь можно выбрать, что главное: обычный плеер с твоей музыкой на первом плане или, как раньше, «Моя волна». Поменять можно в «Настройках».</p>
+    ${layoutChoiceHtml('player', 'data-lay')}
+    <div class="modal-foot"><button class="btn primary" data-lay-ok>Готово</button></div>
+  </section>`;
+  document.body.appendChild(el);
+  let choice = 'player';
+  el.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-lay]');
+    if (b) {
+      choice = b.dataset.v;
+      el.querySelectorAll('.layout-card').forEach((c) => {
+        c.classList.toggle('on', c.dataset.v === choice);
+        c.setAttribute('aria-checked', String(c.dataset.v === choice));
+      });
+    }
+    if (e.target.closest('[data-lay-ok]')) {
+      el.remove();
+      await setLayout(choice);
+      if (choice === 'wave' && IS_MAC) go('wave');
+    }
+  });
+}
+
+// ---------- Обязательное обновление ----------
+function showOutdated(minBuild) {
+  if ($('.outdated-wrap')) return;
+  state.outdated = minBuild || 1;
+  const el = document.createElement('div');
+  el.className = 'modal-wrap outdated-wrap';
+  el.innerHTML = `<section class="modal" role="alertdialog" aria-label="Нужно обновить Nyao Music">
+    <h2>Нужно обновиться</h2>
+    <p class="hint">Эта версия Nyao Music (${esc(state.version || '')}) больше не поддерживается. Скачай свежую — займёт минуту, входы в сервисы сохранятся.</p>
+    <div class="update-bar" hidden><span style="width:0%"></span></div>
+    <div class="modal-foot"><button class="btn" data-out-page>Страница релиза</button><button class="btn primary" data-out-install>Скачать и установить</button></div>
+  </section>`;
+  document.body.appendChild(el);
+  el.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-out-page]')) {
+      const i = state.update.info;
+      api.openExternal((i && i.url) || 'https://github.com/PersikPrime/nyao-music/releases/latest');
+    }
+    const btn = e.target.closest('[data-out-install]');
+    if (btn) {
+      btn.disabled = true;
+      try {
+        if (!state.update.info || !state.update.info.asset) state.update.info = await api.updates.check();
+        if (!state.update.info.asset) throw new Error('В релизе нет файла для этой системы — открой страницу релиза');
+        el.querySelector('.update-bar').hidden = false;
+        await api.updates.download(state.update.info.asset);
+      } catch (err) {
+        toast(err.message, true);
+        btn.disabled = false;
+      }
+    }
+  });
+}
+
+// ---------- Новый микс: из самого прослушиваемого, по исполнителям или пустой ----------
+const MB = { mode: 'top', period: 30, src: { ya: true, yt: true, sc: true }, count: 20, noSkip: true, data: null, artists: null, off: new Set(), name: '' };
+function mbTracks() {
+  if (MB.mode === 'empty' || !MB.data) return [];
+  let rows = MB.data.filter((x) => MB.src[x.track.source] !== false);
+  if (MB.mode === 'artists') {
+    // лучшие исполнители по числу прослушиваний → их треки по очереди
+    const byArtist = new Map();
+    for (const x of rows) {
+      const a = (x.track.artist || '').split(/,|×| feat\.? | & /i)[0].trim() || '—';
+      if (!byArtist.has(a)) byArtist.set(a, { plays: 0, list: [] });
+      const g = byArtist.get(a);
+      g.plays += x.plays;
+      g.list.push(x);
+    }
+    const groups = [...byArtist.values()].sort((a, b) => b.plays - a.plays).slice(0, 8);
+    rows = [];
+    for (let i = 0; rows.length < MB.count && groups.some((g) => g.list[i]); i++) for (const g of groups) if (g.list[i]) rows.push(g.list[i]);
+  }
+  return rows.slice(0, MB.count);
+}
+function mbDefaultName() {
+  if (MB.mode === 'empty') return 'Новый микс';
+  if (MB.mode === 'artists') return 'Любимые исполнители';
+  return { 7: 'Топ недели', 30: 'Топ месяца', 365: 'Топ года' }[MB.period];
+}
+function renderMixBuilder(el) {
+  const list = mbTracks();
+  const pill = (on, attrs, label, dot) => `<button class="chip solid ${on ? 'on' : ''}" aria-pressed="${on}" ${attrs}>${dot ? `<span class="d" style="background:${dot}"></span>` : ''}${label}</button>`;
+  const modes = [['top', 'Из самого прослушиваемого', 'Nyao соберёт то, что ты слушаешь чаще всего'], ['artists', 'По любимым исполнителям', 'Треки тех, кого ты слушаешь больше всех'], ['empty', 'Пустой микс', 'Добавишь треки сам через «⋯» → «В микс»']];
+  const name = MB.name || mbDefaultName();
+  el.innerHTML = `<section class="modal mix-builder" role="dialog" aria-label="Новый микс">
+    <div class="mb-left">
+      <div class="mb-head"><h2>Новый микс</h2><button class="icbtn sm" data-mb="close" aria-label="Закрыть">✕</button></div>
+      <label class="mb-field"><span class="eyebrow">Название</span><input data-mb-name value="${esc(name)}"></label>
+      <div class="mb-field"><span class="eyebrow">Как собрать</span>
+        ${modes.map(([v, t, sub]) => `<button class="mb-mode ${MB.mode === v ? 'on' : ''}" role="radio" aria-checked="${MB.mode === v}" data-mb="mode" data-v="${v}"><span class="lc-radio"><span></span></span><span><b>${t}</b><span>${sub}</span></span></button>`).join('')}
+      </div>
+      ${MB.mode === 'empty' ? '' : `
+      <div class="mb-field"><span class="eyebrow">За какое время</span><div class="chips">${[[7, 'Неделя'], [30, 'Месяц'], [365, 'Год']].map(([v, l]) => pill(MB.period === v, `data-mb="period" data-v="${v}"`, l)).join('')}</div></div>
+      <div class="mb-field"><span class="eyebrow">Откуда</span><div class="chips">${SERVICES.map((x) => pill(MB.src[x.id] !== false, `data-mb="src" data-v="${x.id}"`, x.id === 'ya' ? 'Яндекс' : x.name, x.bg)).join('')}</div></div>
+      <div class="mb-field"><span class="eyebrow">Сколько треков</span><div class="chips">${[20, 30, 50].map((v) => pill(MB.count === v, `data-mb="count" data-v="${v}"`, String(v))).join('')}</div></div>`}
+    </div>
+    <div class="mb-right">
+      <div class="mb-head"><b>${MB.mode === 'empty' ? 'Пустой микс' : 'Что попадёт в микс'}</b><span class="muted">${MB.mode === 'empty' ? '' : MB.data ? `${list.filter((t) => !MB.off.has(t.track.id)).length} треков · можно снять галочки` : 'Считаю историю…'}</span></div>
+      <div class="mb-list">${MB.mode === 'empty' ? '<div class="empty">Микс создастся пустым — добавляй треки из любого списка через «⋯».</div>' : !MB.data ? '<div class="skeleton" style="height:240px"></div>' : list.length ? list.map((x) => `<label class="mb-row"><input type="checkbox" data-mb-off="${esc(x.track.id)}" ${MB.off.has(x.track.id) ? '' : 'checked'}>${coverHtml(x.track, 'xs')}<span class="meta"><b>${esc(x.track.title)}</b><span>${esc(x.track.artist)}</span></span>${badge(x.track.source)}<span class="muted">${x.plays} ×</span></label>`).join('') : '<div class="empty">Пока мало истории. Послушай что-нибудь — Nyao запоминает треки на всех устройствах с аккаунтом Nyao.</div>'}</div>
+      <div class="modal-foot"><button class="btn" data-mb="close">Отмена</button><button class="btn primary" data-mb="create" ${MB.mode !== 'empty' && !list.length ? 'disabled' : ''}>${MB.mode === 'empty' ? 'Создать' : `Собрать ${list.filter((t) => !MB.off.has(t.track.id)).length} треков`}</button></div>
+    </div>
+  </section>`;
+}
+async function mbLoad(el) {
+  MB.data = null;
+  renderMixBuilder(el);
+  try {
+    MB.data = await api.cloud.top({ days: MB.period });
+  } catch {
+    MB.data = [];
+  }
+  if (el.isConnected) renderMixBuilder(el);
+}
+function openMixBuilder() {
+  const el = document.createElement('div');
+  el.className = 'modal-wrap';
+  document.body.appendChild(el);
+  Object.assign(MB, { mode: 'top', off: new Set(), name: '' });
+  mbLoad(el);
+  el.addEventListener('input', (e) => {
+    if ('mbName' in e.target.dataset) MB.name = e.target.value;
+  });
+  el.addEventListener('change', (e) => {
+    const id = e.target.dataset.mbOff;
+    if (id === undefined) return;
+    if (e.target.checked) MB.off.delete(id);
+    else MB.off.add(id);
+    renderMixBuilder(el);
+  });
+  el.addEventListener('click', async (e) => {
+    if (e.target === el) return el.remove();
+    const b = e.target.closest('[data-mb]');
+    if (!b) return;
+    const v = b.dataset.v;
+    switch (b.dataset.mb) {
+      case 'close':
+        return el.remove();
+      case 'mode':
+        MB.mode = v;
+        MB.name = '';
+        return renderMixBuilder(el);
+      case 'period':
+        MB.period = Number(v);
+        MB.name = '';
+        return mbLoad(el);
+      case 'src':
+        MB.src[v] = MB.src[v] === false;
+        return renderMixBuilder(el);
+      case 'count':
+        MB.count = Number(v);
+        return renderMixBuilder(el);
+      case 'create': {
+        b.disabled = true;
+        try {
+          const title = (MB.name || mbDefaultName()).trim() || 'Новый микс';
+          const tracks = mbTracks().filter((x) => !MB.off.has(x.track.id)).map((x) => x.track);
+          const mix = await api.mix.create(title);
+          if (tracks.length) await api.mix.addMany(mix.id, tracks);
+          el.remove();
+          toast(`Создан микс «${title}»${tracks.length ? ` · ${tracks.length} треков` : ''}`);
+          state.lib.selected = mix.id;
+          state.lib.tracks = null;
+          await loadLibrary(true);
+          go('library');
+        } catch (err) {
+          toast(err.message, true);
+          b.disabled = false;
+        }
+      }
+    }
+  });
+}
+
 // ---------- Старт ----------
 (async function init() {
   if (IS_MAC) new Ribbon($('#bg-ribbon'), { lines: 20, cy: 0.58, amp: 1, width: 1.7, accent: '#D8CEFF', alpha: 0.9 });
@@ -1601,8 +1931,8 @@ function openOnboarding() {
   volEl.value = Math.round(state.settings.volume * 100);
   setRangeFill(volEl);
   renderBar();
-  // На Mac стартовый экран — «Моя волна» (как в макете Liquid Glass), на Windows — «Главная»
-  const start = IS_MAC ? 'wave' : 'home';
+  // Стартовый экран: в виде «Моя волна» на Mac — волна (как в макете Liquid Glass), иначе — главная
+  const start = IS_MAC && layout() === 'wave' ? 'wave' : 'home';
   go(start, {}, false);
   await loadStatus();
   RENDER[state.route]();
@@ -1615,12 +1945,13 @@ function openOnboarding() {
   if (api.cloud) {
     api.cloud.onChanged(async (keys) => {
       // другое устройство поменяло миксы или настройки волны
-      if (keys.includes('wave')) state.settings = await api.settings.get();
+      if (keys.includes('wave') || keys.includes('prefs')) state.settings = await api.settings.get();
+      if (keys.includes('prefs')) renderRail();
       if (keys.includes('mixes')) {
         loadHome();
         loadLibrary();
       }
-      if (state.route === 'settings' || state.route === 'wave') RENDER[state.route]();
+      if (['settings', 'wave', 'home', 'library'].includes(state.route)) RENDER[state.route]();
     });
     // вернулся к окну — вдруг на телефоне что-то играло
     window.addEventListener('focus', () => loadOthers());
@@ -1639,6 +1970,9 @@ function openOnboarding() {
     state.version = v.label;
     if (state.route === 'settings') renderSettings();
   }).catch(() => {});
+  if (api.onOutdated) api.onOutdated((min) => showOutdated(min));
+  // обновился с версии, где вида ещё не было: один раз предлагаем выбрать
+  if (state.settings.onboarded && !state.settings.layout) askLayout();
   if (!state.settings.onboarded) {
     // Кто уже входил в аккаунты в прошлых сборках — тому приветствие не показываем
     if (state.status.ya || state.status.yt) state.settings = await api.settings.set({ onboarded: true });

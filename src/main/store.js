@@ -13,7 +13,10 @@ const DEFAULT_SETTINGS = {
   quality: 'high',
   sourcePref: 'auto',
   discordRpc: true,      // статус в Discord включён сразу — приложение nyao.Music встроено
-  onboarded: false
+  onboarded: false,
+  layout: null,          // 'player' | 'wave'; null — ещё не выбран (предложим выбрать при запуске)
+  splitLiked: false,     // «Мне нравится» отдельно по сервисам
+  waveTab: false         // вкладка «Моя волна» в меню в режиме «Плеер»
 };
 
 function dataPath(name) {

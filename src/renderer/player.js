@@ -10,13 +10,23 @@ export class Player extends EventTarget {
     this.mode = null; // 'wave' | 'list'
     this.label = '';
     this.shuffle = false;
-    this.repeat = false;
+    this.repeat = 'off'; // 'off' | 'all' (плейлист) | 'one' (трек)
     this.liked = new Set();
     this.loadingMore = false;
     this.errors = 0;
     this.startedAt = 0;
 
-    audio.addEventListener('ended', () => this.next(false));
+    audio.addEventListener('ended', () => {
+      // повтор трека: тот же трек с начала (в историю — как полное прослушивание)
+      if (this.repeat === 'one' && this.current) {
+        this.reportLeave(false);
+        this.startedAt = Date.now();
+        this.audio.currentTime = 0;
+        this.audio.play().catch(() => {});
+        return;
+      }
+      this.next(false);
+    });
     audio.addEventListener('playing', () => {
       this.errors = 0;
       this.emit('state');
@@ -54,6 +64,7 @@ export class Player extends EventTarget {
     try {
       const tracks = await api.wave.start();
       this.mode = 'wave';
+      if (this.repeat === 'all') this.repeat = 'off'; // у волны нет конца — повтор плейлиста не имеет смысла
       this.label = 'Моя волна';
       this.queue = tracks;
       this.index = 0;
@@ -169,7 +180,7 @@ export class Player extends EventTarget {
       if (this.mode === 'wave') {
         await this.maybeMore();
         if (this.index + 1 >= this.queue.length) return;
-      } else if (this.repeat) {
+      } else if (this.repeat !== 'off') {
         this.index = -1;
       } else {
         this.audio.pause();
@@ -198,6 +209,15 @@ export class Player extends EventTarget {
 
   seek(sec) {
     if (Number.isFinite(sec)) this.audio.currentTime = Math.max(0, sec);
+  }
+
+  /** Кнопка повтора: выкл → плейлист → трек. В волне плейлист бесконечный — там только выкл ↔ трек */
+  cycleRepeat() {
+    const order = this.mode === 'wave' ? ['off', 'one'] : ['off', 'all', 'one'];
+    const i = order.indexOf(this.repeat);
+    this.repeat = order[(i + 1) % order.length];
+    this.emit('state');
+    return this.repeat;
   }
 
   setVolume(v) {

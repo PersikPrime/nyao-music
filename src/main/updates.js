@@ -47,10 +47,14 @@ export async function checkUpdate(current, fetchFn = globalThis.fetch) {
   if (!rel) return { available: false, current, note: 'Релизов пока нет' };
   const latest = parseTag(rel.tag_name);
   const asset = pickAsset(rel.assets);
+  // сервер Nyao может потребовать обновиться: сборки ниже min_build дальше не пускаем
+  const minBuild = Number(rel.min_build) || 0;
   return {
     current,
     latest: latest ? { ...latest, label: `${latest.name} (${latest.build})` } : null,
     available: !!latest && latest.build > current.build,
+    required: minBuild > 0 && current.build < minBuild && !!latest && latest.build >= minBuild,
+    minBuild,
     notes: rel.body || '',
     url: rel.html_url,
     asset: asset ? { name: asset.name, url: asset.browser_download_url, size: asset.size } : null

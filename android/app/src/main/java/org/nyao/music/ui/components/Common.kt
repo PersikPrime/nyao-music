@@ -59,6 +59,7 @@ import org.nyao.music.ui.theme.NyaoColors
 fun sourceColor(source: String): Color = when (source) {
     SOURCE_YA -> NyaoColors.Ya
     org.nyao.music.data.SOURCE_SC -> NyaoColors.Sc
+    "mix" -> NyaoColors.Lavender
     else -> NyaoColors.YtBadge
 }
 
@@ -66,6 +67,7 @@ fun sourceColor(source: String): Color = when (source) {
 fun sourceShort(source: String): String = when (source) {
     SOURCE_YA -> "Я"
     org.nyao.music.data.SOURCE_SC -> "SC"
+    "mix" -> "Микс"
     else -> "YT"
 }
 
@@ -85,7 +87,7 @@ fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCor
 fun SourceTag(source: String, modifier: Modifier = Modifier) {
     val ya = source == SOURCE_YA
     Box(modifier.clip(RoundedCornerShape(10.dp)).background(sourceColor(source)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-        Text(sourceShort(source), color = if (ya) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+        Text(sourceShort(source), color = if (ya || source == "mix") Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
     }
 }
 

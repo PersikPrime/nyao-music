@@ -31,13 +31,20 @@ export function slimTrack(t) {
   };
 }
 
+/** Запись истории → трек, который можно включить (id вида «ya:123» содержит и сервис, и id в нём) */
+export function playToTrack(p) {
+  const id = String(p.trackId);
+  const i = id.indexOf(':');
+  return { id, source: p.source || id.slice(0, i), srcId: id.slice(i + 1), title: p.title || '', artist: p.artist || '', album: '', duration: p.duration || 0, cover: p.cover || null };
+}
+
 export class NyaoCloud {
   /**
    * @param dir      папка userData
    * @param getToken / setToken — хранение токена Nyao (в зашифрованных секретах)
    * @param openUrl  открыть ссылку в браузере пользователя
    */
-  constructor({ dir, getToken, setToken, openUrl, fetch = globalThis.fetch, base = API_BASE, device = 'ПК', platform = process.platform, log = () => {} }) {
+  constructor({ dir, getToken, setToken, openUrl, fetch = globalThis.fetch, base = API_BASE, device = 'ПК', platform = process.platform, build = 0, log = () => {}, onOutdated = () => {} }) {
     this.dir = dir;
     this.getToken = getToken;
     this.setToken = setToken;
@@ -47,6 +54,8 @@ export class NyaoCloud {
     this.device = device;
     this.platform = platform;
     this.log = log;
+    this.build = build;
+    this.onOutdated = onOutdated;
     this.user = readJson(this.file('cloud-user.json'), null);
     this.loginAbort = null;
     this.lastNow = 0;
@@ -66,7 +75,7 @@ export class NyaoCloud {
     const token = this.getToken();
     const res = await this.fetch(this.base + p, {
       method,
-      headers: { 'Content-Type': 'application/json', 'User-Agent': 'NyaoMusic', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'NyaoMusic', ...(this.build ? { 'X-Nyao-Build': String(this.build) } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
     const text = await res.text();
@@ -76,6 +85,7 @@ export class NyaoCloud {
     } catch {
       // не JSON — значит, что-то посередине (прокси, страница ошибки)
     }
+    if (res.status === 426) this.onOutdated((json && json.minBuild) || 0);
     if (res.status === 401 && token) {
       // сессию удалили с другого устройства — выходим тихо
       this.forget();
@@ -219,6 +229,36 @@ export class NyaoCloud {
       for (const id of this.remoteRecent.ids) ids.add(id);
     }
     return ids;
+  }
+
+  /**
+   * Самое прослушиваемое за days дней: своя история + история всех устройств с сервера.
+   * Пропущенные прослушивания не считаются. → [{ track, plays, artist }] по убыванию
+   */
+  async top({ days = 30 } = {}) {
+    const since = Date.now() - days * 86_400_000;
+    let plays = this.history().filter((p) => p.playedAt >= since);
+    if (this.loggedIn) {
+      try {
+        const r = await this.request('GET', `/history?days=${Math.min(365, days)}&limit=2000`);
+        // на сервере уже есть всё отправленное со всех устройств; своё неотправленное (очередь) добавляем сверху
+        const unsent = readJson(this.file('cloud-outbox.json'), []).filter((p) => p.playedAt >= since);
+        plays = [...(r.plays || []).map((p) => ({ ...p, playedAt: new Date(p.playedAt).getTime() })), ...unsent];
+      } catch {
+        // без сервера — только своя история
+      }
+    }
+    const byId = new Map();
+    for (const p of plays) {
+      if (p.skipped || !p.trackId) continue;
+      const cur = byId.get(p.trackId) || { plays: 0, last: 0, p };
+      cur.plays++;
+      if (p.playedAt > cur.last) cur.last = p.playedAt;
+      byId.set(p.trackId, cur);
+    }
+    return [...byId.values()]
+      .sort((a, b) => b.plays - a.plays || b.last - a.last)
+      .map(({ plays: n, p }) => ({ plays: n, track: playToTrack(p) }));
   }
 
   // ---------- «Сейчас играет» ----------

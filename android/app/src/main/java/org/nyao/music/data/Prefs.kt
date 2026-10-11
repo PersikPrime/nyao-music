@@ -10,7 +10,15 @@ data class Settings(
     val diversity: String = "favorite",
     val mood: String? = null,
     val onboarded: Boolean = false,
-)
+    /** Вид приложения: "player" (своя музыка на первом плане) или "wave" (акцент на волну); null — ещё не выбран */
+    val layout: String? = null,
+    /** «Мне нравится» отдельно по сервисам */
+    val splitLiked: Boolean = false,
+    /** Вкладка «Волна» в панели в режиме «Плеер» */
+    val waveTab: Boolean = false,
+) {
+    val isWaveLayout: Boolean get() = layout == "wave"
+}
 
 /**
  * Настройки и токены. Хранятся в личных SharedPreferences приложения
@@ -26,7 +34,13 @@ class Prefs(context: Context) {
         diversity = sp.getString("diversity", "favorite") ?: "favorite",
         mood = sp.getString("mood", null),
         onboarded = sp.getBoolean("onboarded", false),
+        layout = sp.getString("layout", null),
+        splitLiked = sp.getBoolean("splitLiked", false),
+        waveTab = sp.getBoolean("waveTab", false),
     )
+
+    /** Вызывается, когда меняется то, что синхронизируется через аккаунт Nyao: "wave" или "prefs" */
+    var onSyncChange: ((String) -> Unit)? = null
 
     fun update(block: SharedPreferences.Editor.() -> Unit) {
         val e = sp.edit()
@@ -35,9 +49,16 @@ class Prefs(context: Context) {
         _settings.value = read()
     }
 
-    fun setShare(v: Int) = update { putInt("ytmShare", v.coerceIn(0, 100)) }
-    fun setDiversity(v: String) = update { putString("diversity", v) }
-    fun setMood(v: String?) = update { if (v == null) remove("mood") else putString("mood", v) }
+    fun setShare(v: Int) = update { putInt("ytmShare", v.coerceIn(0, 100)) }.also { onSyncChange?.invoke("wave") }
+    fun setDiversity(v: String) = update { putString("diversity", v) }.also { onSyncChange?.invoke("wave") }
+    fun setMood(v: String?) = update { if (v == null) remove("mood") else putString("mood", v) }.also { onSyncChange?.invoke("wave") }
+    fun setLayout(v: String) = update { putString("layout", if (v == "wave") "wave" else "player") }.also { onSyncChange?.invoke("prefs") }
+    fun setSplitLiked(v: Boolean) = update { putBoolean("splitLiked", v) }.also { onSyncChange?.invoke("prefs") }
+    fun setWaveTab(v: Boolean) = update { putBoolean("waveTab", v) }.also { onSyncChange?.invoke("prefs") }
+
+    /** Когда ключ синхронизации («wave», «prefs», «mixes») последний раз менялся на этом устройстве */
+    fun cloudStamp(key: String): Long = sp.getLong("cloudAt_$key", 0L)
+    fun setCloudStamp(key: String, at: Long) = sp.edit().putLong("cloudAt_$key", at).apply()
     fun setOnboarded(v: Boolean) = update { putBoolean("onboarded", v) }
 
     var yandexToken: String?

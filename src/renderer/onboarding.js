@@ -1,5 +1,6 @@
 // Приветствие при первом запуске: что это за плеер → вход в сервисы → характер волны → Discord → готово.
 // Показывается, пока в настройках не стоит onboarded: true. Повторно — кнопкой в «Настройках».
+import { layoutChoiceHtml } from './layouts.js';
 
 const LOGO = `<svg class="ob-logo" viewBox="0 0 120 120" aria-hidden="true">
   <rect width="120" height="120" rx="27" fill="#13111C"/>
@@ -62,7 +63,7 @@ export class Onboarding {
   }
 
   get steps() {
-    return ['welcome', 'accounts', 'wave', 'discord', 'done'];
+    return ['welcome', 'accounts', 'layout', 'wave', 'discord', 'done'];
   }
 
   render() {
@@ -91,7 +92,7 @@ export class Onboarding {
   welcome() {
     return `<div class="ob-hero">${LOGO}
       <h1>Nyao Music</h1>
-      <p>Одна «Моя волна» из Яндекс Музыки, YouTube Music и SoundCloud. Яндекс подбирает основу, остальные подмешивают треки, которых там нет.</p>
+      <p>Один плеер для Яндекс Музыки, YouTube Music и SoundCloud: все лайки, плейлисты и общая «Моя волна» в одном месте.</p>
       ${this.version ? `<span class="ob-ver">версия ${esc(this.version)}</span>` : ''}
     </div>`;
   }
@@ -119,6 +120,13 @@ export class Onboarding {
       <p class="ob-sub">Откроется обычное окно входа сервиса. Пароли в Nyao не попадают — сохраняется только токен, зашифрованный системой.</p>
       <div class="ob-list">${card('ya')}${card('yt')}${card('sc')}</div>
       <p class="ob-note">Можно подключить позже в «Настройках». Если Google не пускает в окне входа, там же есть вставка cookies вручную.</p>`;
+  }
+
+  layout() {
+    const s = this.ctx.getSettings();
+    return `<h2>Как тебе удобнее?</h2>
+      <p class="ob-sub">Можно поменять в любой момент в «Настройках» → «Вид приложения».</p>
+      ${layoutChoiceHtml(s.layout || 'player', 'data-ob="layout"')}`;
   }
 
   wave() {
@@ -172,6 +180,7 @@ export class Onboarding {
     try {
       if (act === 'next') {
         if (this.steps[this.step] === 'discord' && !(await this.saveDiscordStep())) return;
+        if (this.steps[this.step] === 'layout' && !this.ctx.getSettings().layout) await this.ctx.setSettings({ layout: 'player' });
         this.step = Math.min(this.step + 1, this.steps.length - 1);
         this.render();
       } else if (act === 'back') {
@@ -186,6 +195,9 @@ export class Onboarding {
           this.busy = null;
           if (this.el.isConnected) this.render();
         }
+      } else if (act === 'layout') {
+        await this.ctx.setSettings({ layout: b.dataset.v });
+        this.render();
       } else if (act === 'div') {
         await this.ctx.setSettings({ waveDiversity: b.dataset.v });
         this.render();

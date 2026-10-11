@@ -1,5 +1,7 @@
 package org.nyao.music.ui
 
+import androidx.compose.runtime.mutableStateOf
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -109,12 +111,28 @@ private val TABS = listOf(
     Tab(Route.Settings, "Настройки", Icons.Rounded.Settings),
 )
 
+/** Режим «Плеер»: вместо вкладки волны — поиск (волну можно вернуть в настройках) */
+private val PLAYER_TABS = listOf(
+    Tab(Route.Home, "Главная", Icons.Rounded.Home),
+    Tab(Route.Search, "Поиск", Icons.Rounded.Search),
+    Tab(Route.Library, "Медиатека", Icons.Rounded.LibraryMusic),
+    Tab(Route.Settings, "Настройки", Icons.Rounded.Settings),
+)
+
+private fun tabsFor(s: org.nyao.music.data.Settings): List<Tab> = when {
+    s.isWaveLayout -> TABS
+    s.waveTab -> listOf(PLAYER_TABS[0], TABS[1]) + PLAYER_TABS.drop(1)
+    else -> PLAYER_TABS
+}
+
 @Composable
 fun NyaoRoot() {
     val scope = rememberCoroutineScope()
     val model = remember { AppModel(scope) }
     val settings by Repo.prefs.settings.collectAsState()
     val snackbar = remember { SnackbarHostState() }
+    var requiredUpdate by remember { mutableStateOf<org.nyao.music.data.UpdateInfo?>(null) }
+    val outdated by Repo.cloud.outdated.collectAsState()
 
     LaunchedEffect(Unit) {
         Repo.refreshAccounts()
@@ -129,12 +147,17 @@ fun NyaoRoot() {
         // аккаунт Nyao: дослать историю, накопленную офлайн
         launch {
             delay(5000)
-            runCatching { Repo.cloud.flush() }
+            // сверка с сервером: история, настройки волны, вид приложения, миксы — и потом раз в 5 минут
+            while (true) {
+                runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.syncCloud() } }
+                delay(5 * 60_000L)
+            }
         }
         launch {
             delay(3000)
             runCatching { org.nyao.music.data.Updates.check(org.nyao.music.BuildConfig.VERSION_CODE) }.getOrNull()?.let { u ->
-                if (u.available) PlaybackEvents.emit("Доступна Nyao Music ${u.label} — обновить можно в Настройках")
+                if (u.required) requiredUpdate = u
+                else if (u.available) PlaybackEvents.emit("Доступна Nyao Music ${u.label} — обновить можно в Настройках")
             }
         }
         PlaybackEvents.messages.collect { snackbar.showSnackbar(it) }
@@ -165,6 +188,11 @@ fun NyaoRoot() {
         }
 
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 140.dp))
+
+        // режим «Плеер»: окно нового микса; после обновления с 0.4 — выбор вида; устаревшая сборка — обновиться
+        if (model.mixBuilderOpen) org.nyao.music.ui.screens.MixBuilderDialog(model)
+        if (settings.onboarded && settings.layout == null) org.nyao.music.ui.screens.LayoutAskDialog()
+        if (requiredUpdate != null || outdated > 0) org.nyao.music.ui.screens.OutdatedDialog(requiredUpdate?.apkUrl)
     }
     }
 }
@@ -222,10 +250,10 @@ private fun PhoneLayout(model: AppModel) {
 /** Плавающая панель из макета: выбранная вкладка раскрывается в «таблетку» с подписью */
 @Composable
 private fun FloatingToolbar(model: AppModel) {
-    val selectedRoute = if (model.route is Route.PlaylistPage || model.route == Route.Search) Route.Library else model.route
+    val selectedRoute = if (model.route is Route.PlaylistPage || (model.route == Route.Search && Repo.prefs.settings.value.isWaveLayout)) Route.Library else model.route
     Surface(shape = RoundedCornerShape(30.dp), color = NyaoColors.S3, shadowElevation = 12.dp) {
         Row(Modifier.height(60.dp).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            TABS.forEach { tab ->
+            tabsFor(Repo.prefs.settings.collectAsState().value).forEach { tab ->
                 val selected = selectedRoute == tab.route
                 Row(
                     Modifier
@@ -300,7 +328,7 @@ private fun WideLayout(model: AppModel, showPane: Boolean) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            TABS.forEach { tab ->
+            tabsFor(Repo.prefs.settings.collectAsState().value).forEach { tab ->
                 val selected = model.route == tab.route
                 Column(Modifier.bouncy().clip(RoundedCornerShape(16.dp)).clickable { model.go(tab.route) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box(Modifier.width(56.dp).height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (selected) NyaoColors.Primary else Color.Transparent), contentAlignment = Alignment.Center) {

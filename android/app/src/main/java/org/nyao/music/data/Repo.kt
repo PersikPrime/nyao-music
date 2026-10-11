@@ -6,6 +6,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,9 @@ object Repo {
         private set
     lateinit var cloud: NyaoCloud
         private set
+    lateinit var mixStore: MixStore
+        private set
+    private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     enum class Mode { LIST, WAVE }
 
@@ -52,10 +56,59 @@ object Repo {
         ytStreams = YtStreams(yt)
         sc = ScApi(prefs)
         cloud = NyaoCloud(prefs, context.applicationContext.filesDir)
+        mixStore = MixStore(context.applicationContext.filesDir)
+        // изменения настроек волны, вида и миксов уезжают на другие устройства
+        prefs.onSyncChange = { key -> bg.launch { runCatching { cloud.pushState(key, stateData(key)) } } }
+        mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
         wave = WaveMixer(ya, yt, sc, prefs) { cloud.recentIds() }
     }
 
     fun track(id: String): Track? = tracks[id]
+
+    // ---------- Синхронизация через аккаунт Nyao (тот же формат, что у десктопа) ----------
+
+    private fun stateData(key: String): Any {
+        val s = prefs.settings.value
+        return when (key) {
+            "wave" -> org.json.JSONObject().put("ytmShare", s.ytmShare).put("waveDiversity", s.diversity).put("waveMood", s.mood ?: org.json.JSONObject.NULL)
+            "prefs" -> org.json.JSONObject().put("layout", s.layout ?: org.json.JSONObject.NULL).put("splitLiked", s.splitLiked).put("waveTab", s.waveTab)
+            else -> mixStore.toJson()
+        }
+    }
+
+    /** Сверка с сервером: настройки волны, вид приложения и миксы. Возвращает поменявшиеся ключи */
+    suspend fun syncCloud(): List<String> {
+        if (!cloud.loggedIn) return emptyList()
+        runCatching { cloud.flush() }
+        val handlers = mapOf(
+            "wave" to NyaoCloud.StateHandler({ stateData("wave") }, { d ->
+                val o = d as? org.json.JSONObject ?: return@StateHandler
+                prefs.update {
+                    if (o.has("ytmShare")) putInt("ytmShare", o.optInt("ytmShare", 30).coerceIn(0, 100))
+                    o.str("waveDiversity")?.let { putString("diversity", it) }
+                    if (o.has("waveMood")) { val m = o.str("waveMood"); if (m == null) remove("mood") else putString("mood", m) }
+                }
+            }),
+            "prefs" to NyaoCloud.StateHandler({ stateData("prefs") }, { d ->
+                val o = d as? org.json.JSONObject ?: return@StateHandler
+                prefs.update {
+                    o.str("layout")?.let { putString("layout", if (it == "wave") "wave" else "player") }
+                    if (o.has("splitLiked")) putBoolean("splitLiked", o.optBoolean("splitLiked"))
+                    if (o.has("waveTab")) putBoolean("waveTab", o.optBoolean("waveTab"))
+                }
+            }),
+            "mixes" to NyaoCloud.StateHandler(
+                { mixStore.toJson() },
+                { d -> (d as? org.json.JSONArray)?.let { mixStore.set(mixStore.fromJson(it), push = false) } },
+                { local, remote ->
+                    val l = (local as? org.json.JSONArray)?.let { mixStore.fromJson(it) } ?: emptyList()
+                    val r = (remote as? org.json.JSONArray)?.let { mixStore.fromJson(it) } ?: emptyList()
+                    mixStore.toJson(mixStore.merge(l, r))
+                },
+            ),
+        )
+        return cloud.syncState(handlers)
+    }
 
     /** Трек пришёл с другого устройства — запоминаем, чтобы плеер нашёл его по id */
     fun rememberTrack(t: Track) {
@@ -122,6 +175,10 @@ object Repo {
 
     suspend fun playlistTracks(id: String): List<Track> = remember(
         when {
+            // «Мне нравится» одного сервиса и свои миксы
+            id == "liked" -> likedTracks()
+            id.startsWith("liked:") -> likedTracks().filter { it.source == id.removePrefix("liked:") }
+            id.startsWith("mix:") -> mixStore.get(id)?.tracks ?: emptyList()
             id.startsWith("ya:") -> ya.playlistTracks(id)
             id.startsWith("sc:") -> sc.playlistTracks(id)
             else -> yt.playlistTracks(id)

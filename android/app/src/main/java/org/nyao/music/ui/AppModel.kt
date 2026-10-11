@@ -118,7 +118,8 @@ class AppModel(private val scope: CoroutineScope) {
     }
 
     fun loadPlaylist(id: String) {
-        if (playlistTracks.containsKey(id)) return
+        // свои миксы меняются на лету — их перечитываем всегда
+        if (playlistTracks.containsKey(id) && !id.startsWith("mix:")) return
         scope.launch {
             val list = try {
                 Repo.playlistTracks(id)
@@ -204,6 +205,20 @@ class AppModel(private val scope: CoroutineScope) {
         scope.launch { PlayerConnection.dislike() }
     }
 
+    // ---- режим «Плеер»: история и миксы ----
+    var recent by mutableStateOf<List<Track>?>(null)
+    var top by mutableStateOf<List<Pair<Track, Int>>?>(null)
+    var mixBuilderOpen by mutableStateOf(false)
+
+    fun loadRecent() {
+        scope.launch {
+            recent = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.cloud.recent() } }.getOrNull()
+            recent?.forEach { Repo.rememberTrack(it) }
+            top = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.cloud.top(30) } }.getOrNull()?.filter { it.second >= 2 }
+            top?.forEach { Repo.rememberTrack(it.first) }
+        }
+    }
+
     // ---- аккаунт Nyao ----
     var cloudLogging by mutableStateOf(false)
     var others by mutableStateOf<List<RemoteNow>>(emptyList())
@@ -238,6 +253,7 @@ class AppModel(private val scope: CoroutineScope) {
                 if (user == null) throw org.nyao.music.data.ApiException("Время входа вышло — попробуй ещё раз")
                 message("Привет, ${user.name}! Синхронизация включена")
                 loadOthers()
+                runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.syncCloud() } }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {

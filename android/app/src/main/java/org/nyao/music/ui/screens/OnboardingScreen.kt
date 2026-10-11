@@ -54,7 +54,7 @@ import org.nyao.music.ui.components.NyaoWaves
 import org.nyao.music.ui.components.rememberMorphShape
 import org.nyao.music.ui.theme.NyaoColors
 
-private const val STEPS = 4
+private const val STEPS = 5
 
 /** Приветствие при первом запуске: что это → вход в сервисы → характер волны → готово */
 @Composable
@@ -91,6 +91,11 @@ fun OnboardingScreen(model: AppModel) {
                     0 -> Welcome()
                     1 -> Accounts(model)
                     2 -> {
+                        val st by Repo.prefs.settings.collectAsState()
+                        Title("Как тебе удобнее?", "Можно поменять в любой момент в «Настройках».")
+                        LayoutChoice(st.layout ?: "player", { Repo.prefs.setLayout(it) }, Modifier.padding(top = 16.dp))
+                    }
+                    3 -> {
                         Title("Настрой «Мою волну»", "Всё это меняется на экране волны в любой момент.")
                         WaveSettings(onChanged = {}, showMood = false, modifier = Modifier.padding(top = 16.dp))
                     }
@@ -105,7 +110,11 @@ fun OnboardingScreen(model: AppModel) {
                 }
                 Dots(step)
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                    Button(onClick = { step++ }) {
+                    Button(onClick = {
+                        // шаг выбора вида: если ничего не трогали — «Плеер»
+                        if (step == 2 && Repo.prefs.settings.value.layout == null) Repo.prefs.setLayout("player")
+                        step++
+                    }) {
                         Text(
                             when {
                                 step == 0 -> "Начать"
