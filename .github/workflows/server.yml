@@ -60,6 +60,8 @@ jobs:
             echo "TG_CLIENT_SECRET=$(q "$TG_SECRET")"
             echo "POSTGRES_PASSWORD=$(q "$DB_PASSWORD")"
             echo "TG_RELAY=$(q "$TG_RELAY")"
+            # минимальная сборка: Settings → Secrets and variables → Actions → Variables → NYAO_MIN_BUILD
+            echo "MIN_BUILD=${{ vars.NYAO_MIN_BUILD || '24' }}"
           } > server/.env
 
       - name: Копирование и запуск

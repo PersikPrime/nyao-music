@@ -23,6 +23,7 @@ services:
       TG_CLIENT_ID: ${TG_CLIENT_ID}
       TG_CLIENT_SECRET: ${TG_CLIENT_SECRET}
       TG_RELAY: ${TG_RELAY:-}
+      MIN_BUILD: ${MIN_BUILD:-0}
       MIRROR_DIR: /data/releases
     volumes:
       - releases:/data/releases

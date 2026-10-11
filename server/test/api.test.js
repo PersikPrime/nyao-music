@@ -116,3 +116,24 @@ test('ретранслятор: /token и ключи идут через Cloudfl
   assert.equal(urls[0], 'https://tg.example.com/token');
   assert.match(tg.authUrl({ state: 's', challenge: 'c' }), /^https:\/\/oauth\.telegram\.org\/auth\?/, 'браузер идёт к Telegram напрямую');
 });
+
+test('minBuild: старые сборки просят обновиться', async () => {
+  const { newDb } = await import('pg-mem');
+  const { Pool } = newDb().adapters.createPg();
+  const pool = new Pool();
+  await migrate(pool);
+  const tg = new TelegramOIDC({ clientId: '1', clientSecret: 's', redirectUri: 'https://x/cb', keys: () => {} });
+  const server = http.createServer(createApp({ db: pool, tg, mirror: { latest: () => ({ tag_name: 'v0.5.30', assets: [] }), file: () => null }, minBuild: 26, log: () => {} }));
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const old = await fetch(base + '/me', { headers: { Authorization: 'Bearer ' + 'x'.repeat(30) } });
+    assert.equal(old.status, 426, '0.4 без заголовка = сборка 24 < 26');
+    assert.equal((await old.json()).minBuild, 26);
+    const fresh = await fetch(base + '/me', { headers: { Authorization: 'Bearer ' + 'x'.repeat(30), 'X-Nyao-Build': '30' } });
+    assert.equal(fresh.status, 401, 'новая сборка проходит дальше, до проверки токена');
+    assert.equal((await (await fetch(base + '/updates/latest')).json()).min_build, 26);
+  } finally {
+    server.close();
+  }
+});

@@ -29,7 +29,10 @@ const mirror = new ReleaseMirror({ repo: env.GITHUB_REPO || 'PersikPrime/nyao-mu
 mirror.sync();
 setInterval(() => mirror.sync(), 15 * 60_000);
 
-const server = http.createServer(createApp({ db: pool, tg, mirror }));
+// MIN_BUILD — минимальная разрешённая сборка (задаётся переменной репозитория NYAO_MIN_BUILD)
+const minBuild = Number(env.MIN_BUILD) || 0;
+if (minBuild) console.log(`[nyao] минимальная сборка: ${minBuild}`);
+const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild }));
 server.listen(Number(env.PORT) || 8080, () => console.log(`[nyao] сервер слушает :${server.address().port}`));
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

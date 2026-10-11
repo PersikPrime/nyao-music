@@ -73,7 +73,17 @@ h1{margin:0 0 8px;font-size:24px}p{margin:0;color:var(--muted)}
 </style></head><body><div class="card"><div class="dot">${ok ? '✓' : '!'}</div><h1>${esc(title)}</h1><p>${esc(text)}</p></div></body></html>`;
 }
 
-export function createApp({ db, tg, mirror = null, log = console.log }) {
+/** Первая сборка, которая вообще разговаривает с сервером (0.4 (24)) — её считаем у клиентов без заголовка X-Nyao-Build */
+export const FIRST_SERVER_BUILD = 24;
+
+/** Номер сборки клиента: заголовок X-Nyao-Build (с 0.5), иначе — 0.4 (24/25) без заголовка */
+export function clientBuild(req) {
+  const n = Number(req.headers['x-nyao-build']);
+  return Number.isInteger(n) && n > 0 ? n : FIRST_SERVER_BUILD;
+}
+
+/** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0 }) {
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
   setInterval(() => {
     const now = Date.now();
@@ -118,7 +128,7 @@ export function createApp({ db, tg, mirror = null, log = console.log }) {
   }
 
   const routes = [
-    ['GET', /^\/health$/, async () => ({ ok: true, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
+    ['GET', /^\/health$/, async () => ({ ok: true, minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
 
     // ---------- Вход ----------
     ['POST', /^\/auth\/start$/, async ({ req, ip }) => {
@@ -271,7 +281,7 @@ export function createApp({ db, tg, mirror = null, log = console.log }) {
     ['GET', /^\/updates\/latest$/, async () => {
       const rel = mirror && mirror.latest();
       if (!rel) throw new HttpError(503, 'Сервер ещё не знает о релизах');
-      return rel;
+      return { ...rel, min_build: minBuild };
     }]
   ];
 
@@ -290,6 +300,12 @@ export function createApp({ db, tg, mirror = null, log = console.log }) {
         let s = null;
         if (needAuth) {
           apiLimit(ip);
+          // слишком старая сборка: синхронизацию не даём, просим обновиться
+          if (minBuild && clientBuild(req) < minBuild) {
+            const e = new HttpError(426, 'Эта версия Nyao Music устарела — обнови приложение в настройках');
+            e.extra = { minBuild };
+            throw e;
+          }
           s = await auth(req);
         }
         const out = await fn({ req, res, url, m, s, ip });
@@ -298,7 +314,7 @@ export function createApp({ db, tg, mirror = null, log = console.log }) {
       throw new HttpError(404, 'Нет такого адреса');
     } catch (e) {
       if (!(e instanceof HttpError)) log(`[api] ${req.method} ${url.pathname}: ${e.stack || e.message}`);
-      return send(res, e.status || 500, { error: e instanceof HttpError ? e.message : 'Ошибка сервера' });
+      return send(res, e.status || 500, { error: e instanceof HttpError ? e.message : 'Ошибка сервера', ...(e.extra || {}) });
     }
   };
 }
