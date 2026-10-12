@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,6 +58,7 @@ fun SettingsScreen(model: AppModel) {
         ServiceCard(model, SOURCE_YA)
         ServiceCard(model, SOURCE_YT)
         ServiceCard(model, org.nyao.music.data.SOURCE_SC)
+        ServiceCard(model, org.nyao.music.data.SOURCE_VK)
 
         Text("Моя волна", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         OutlinedButton(onClick = { model.go(Route.Wave) }, modifier = Modifier.fillMaxWidth()) { Text("Характер, настроение и баланс источников") }
@@ -94,8 +96,10 @@ private fun ServiceCard(model: AppModel, source: String) {
     val acc = accounts[source]
     val ya = source == SOURCE_YA
     val isSc = source == org.nyao.music.data.SOURCE_SC
+    val isVk = source == org.nyao.music.data.SOURCE_VK
     val scope = rememberCoroutineScope()
     var manual by remember { mutableStateOf(false) }
+    var vkLog by remember { mutableStateOf<String?>(null) }
     var value by remember { mutableStateOf("") }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
@@ -106,8 +110,8 @@ private fun ServiceCard(model: AppModel, source: String) {
             Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
                 Text(org.nyao.music.data.sourceName(source), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    if (acc != null) "Вход выполнен: ${acc.name}" + (if (ya && acc.plus == false) " · без Плюса треки могут не играть" else if (isSc) " · треки Go+ пропускаются" else "")
-                    else if (isSc) "Не подключено · поиск работает и без входа" else "Не подключено",
+                    if (acc != null) "Вход выполнен: ${acc.name}" + (if (ya && acc.plus == false) " · без Плюса треки могут не играть" else if (isSc) " · треки Go+ пропускаются" else if (isVk) " · бета" else "")
+                    else if (isSc) "Не подключено · поиск работает и без входа" else if (isVk) "Не подключено · бета" else "Не подключено",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -118,15 +122,38 @@ private fun ServiceCard(model: AppModel, source: String) {
                         when {
                             ya -> Repo.setYandexToken(null)
                             isSc -> Repo.setScToken(null)
+                            isVk -> Repo.setVk(null, null)
                             else -> Repo.setYtCookie(null)
                         }
-                        if (!ya) android.webkit.CookieManager.getInstance().removeAllCookies(null)
+                        // cookie только этого сервиса — чтобы не выкинуло из остальных
+                        if (isSc) Repo.clearCookies("https://soundcloud.com", "https://api-v2.soundcloud.com", "https://secure.soundcloud.com")
+                        else if (!ya && !isVk) Repo.clearCookies("https://music.youtube.com", "https://www.youtube.com", "https://youtube.com", "https://accounts.google.com", "https://www.google.com", "https://google.com")
                         model.accountsChanged()
                     }
                 }) { Text("Выйти") }
             } else {
                 Button(onClick = { model.loginFor = source }) { Text("Войти") }
             }
+        }
+        if (isVk) {
+            TextButton(onClick = { vkLog = Repo.vk.debugText().ifBlank { "Сбоев пока не было." } }) { Text("Что-то не работает?") }
+            vkLog?.let { log ->
+                val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { vkLog = null },
+                    title = { Text("Журнал VK") },
+                    text = {
+                        Text(
+                            log,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                        )
+                    },
+                    confirmButton = { TextButton(onClick = { clip.setText(androidx.compose.ui.text.AnnotatedString(log)); model.message("Скопировано") }) { Text("Скопировать") } },
+                    dismissButton = { TextButton(onClick = { vkLog = null }) { Text("Закрыть") } },
+                )
+            }
+            return@Column
         }
         TextButton(onClick = { manual = !manual }) {
             Text(if (ya) "Вставить OAuth-токен вручную" else if (isSc) "Вставить токен вручную (cookie oauth_token)" else "Вставить cookies вручную (если Google не пускает)")

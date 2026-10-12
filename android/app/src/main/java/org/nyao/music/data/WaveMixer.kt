@@ -17,6 +17,7 @@ class WaveMixer(
     private val ya: YandexApi,
     private val yt: YtMusicApi,
     private val sc: ScApi,
+    private val vk: VkApi,
     private val prefs: Prefs,
     /** id треков, звучавших недавно на всех устройствах — волна их пропускает */
     private val recentProvider: suspend () -> Set<String> = { emptySet() },
@@ -52,7 +53,7 @@ class WaveMixer(
     private var refill: Job? = null
 
     /** Есть ли что подмешивать: YouTube Music и/или SoundCloud */
-    private val hasExtras: Boolean get() = yt.loggedIn || sc.loggedIn
+    private val hasExtras: Boolean get() = yt.loggedIn || sc.loggedIn || vk.loggedIn
 
     private suspend fun refillPool() {
         if (!hasExtras) return
@@ -60,8 +61,11 @@ class WaveMixer(
         val exclude = lock.withLock { HashSet(seen).apply { addAll(recent) } }
         val a = if (yt.loggedIn) runCatching { yt.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
         val b = if (sc.loggedIn) runCatching { sc.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
-        val tracks = alternateAll(a, b)
-        lock.withLock { tracks.forEach { t -> if (t.id !in exclude && t.id !in seen && pool.none { it.id == t.id }) pool += t } }
+        val c = if (vk.loggedIn) runCatching { vk.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
+        // сервис дал только недавно звучавшее — лучше пара повторов, чем пропасть из волны
+        val lists = listOf(a, b, c).map { l -> l.filter { it.id !in exclude }.ifEmpty { l.filter { it.id !in seen }.take(2) } }
+        val tracks = alternateAll(*lists.toTypedArray())
+        lock.withLock { tracks.forEach { t -> if (t.id !in seen && pool.none { it.id == t.id }) pool += t } }
     }
 
     private fun refillInBackground() {

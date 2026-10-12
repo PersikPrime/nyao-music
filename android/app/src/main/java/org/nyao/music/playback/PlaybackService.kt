@@ -193,9 +193,12 @@ class PlaybackService : MediaSessionService() {
             .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
             .firstOrNull()
         Log.w("Nyao", "ошибка ${item.mediaId}: ${error.errorCodeName} ${http?.responseCode ?: ""} ${error.cause?.message}")
-        if (uri != null && http != null) Repo.forgetStream(uri)
-        // 403 от googlevideo — берём ссылку у другого клиента и продолжаем с того же места
-        if (http != null && (http.responseCode == 403 || http.responseCode == 410) && retries < 3) {
+        val api = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<org.nyao.music.data.ApiException>().firstOrNull()
+        val code = http?.responseCode ?: api?.code ?: 0
+        if (uri != null && (http != null || api != null)) Repo.forgetStream(uri)
+        // 403 от googlevideo — берём ссылку у другого клиента; 404 от SoundCloud — берём трек заново.
+        // Продолжаем с того же места.
+        if ((code == 403 || code == 410 || code == 404) && retries < 4) {
             retries++
             val pos = player.currentPosition
             player.prepare()

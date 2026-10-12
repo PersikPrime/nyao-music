@@ -18,15 +18,28 @@ class RoutingDataSource(private val cached: DataSource, private val direct: Data
     private fun isSoundCloud(uri: Uri): Boolean =
         uri.host == "sc" || uri.host?.endsWith("sndcdn.com") == true || uri.host?.endsWith("soundcloud.cloud") == true
 
+    /** Куски и ключи VK: временные ссылки, идут мимо кэша и с cookie сессии VK */
+    private fun isVk(uri: Uri): Boolean {
+        val h = uri.host ?: return false
+        return h == "vk" || h.endsWith("vkuseraudio.net") || h.endsWith("vkuseraudio.com") || h.endsWith("vk-cdn.net") ||
+            h.endsWith("userapi.com") || h.endsWith("vk.com") || h.endsWith("vk.ru") || h.endsWith("vkuser.net")
+    }
+
     override fun addTransferListener(transferListener: TransferListener) {
         cached.addTransferListener(transferListener)
         direct.addTransferListener(transferListener)
     }
 
     override fun open(dataSpec: DataSpec): Long {
-        val ds = if (isSoundCloud(dataSpec.uri)) direct else cached
+        val vk = isVk(dataSpec.uri)
+        val ds = if (vk || isSoundCloud(dataSpec.uri)) direct else cached
         current = ds
-        return ds.open(dataSpec)
+        if (!vk || dataSpec.uri.scheme == "nyao") return ds.open(dataSpec)
+        val headers = HashMap(dataSpec.httpRequestHeaders)
+        headers["User-Agent"] = org.nyao.music.data.VkApi.UA
+        org.nyao.music.data.Repo.vk.base.let { headers["Referer"] = "$it/"; headers["Origin"] = it }
+        org.nyao.music.data.Repo.vk.cookies(dataSpec.uri.scheme + "://" + dataSpec.uri.host)?.let { headers["Cookie"] = it }
+        return ds.open(dataSpec.buildUpon().setHttpRequestHeaders(headers).build())
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int = current?.read(buffer, offset, length) ?: -1

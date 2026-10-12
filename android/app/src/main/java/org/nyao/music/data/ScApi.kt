@@ -180,17 +180,54 @@ class ScApi(private val prefs: Prefs) {
         return pool.values.shuffled().take(size)
     }
 
-    /** Ссылка на HLS-плейлист трека (mp3-куски, если есть, иначе AAC). Блокирующий — из потока загрузки. */
-    fun hlsUrl(srcId: String): String = kotlinx.coroutines.runBlocking {
-        val t = raw[srcId] ?: (request("GET", "/tracks", mapOf("ids" to srcId)) as? JSONArray).objects().firstOrNull()?.also { raw[srcId] = it }
+    /** Забыть сохранённый трек: при следующем запросе возьмём свежий (с новым track_authorization) */
+    fun forget(srcId: String) {
+        raw.remove(srcId)
+    }
+
+    private suspend fun freshTrack(srcId: String): JSONObject =
+        (request("GET", "/tracks", mapOf("ids" to srcId)) as? JSONArray).objects().firstOrNull()?.also { raw[srcId] = it }
             ?: throw ApiException("SoundCloud не нашёл трек")
-        val list = t.obj("media")?.arr("transcodings").objects().filter {
-            val f = it.obj("format")
-            f?.optString("protocol") == "hls" && !it.optBoolean("snipped", false)
+
+    /**
+     * Ссылка на HLS-плейлист трека (mp3-куски, если есть, иначе AAC). Блокирующий — из потока загрузки.
+     * SoundCloud время от времени отвечает 404 на рабочие треки (протухший track_authorization, сбой CDN) —
+     * тогда берём трек заново, пробуем другие форматы, обновляем client_id и пробуем ещё раз.
+     */
+    fun hlsUrl(srcId: String): String = kotlinx.coroutines.runBlocking {
+        var last: Exception = ApiException("SoundCloud не отдал ссылку")
+        for (round in 0 until 4) {
+            if (round > 0) {
+                raw.remove(srcId)
+                kotlinx.coroutines.delay(300L * round)
+            }
+            if (round == 2) runCatching { clientId(force = true) }
+            val t = try {
+                raw[srcId]?.takeIf { it.obj("media") != null } ?: freshTrack(srcId)
+            } catch (e: ApiException) {
+                last = e
+                if (e.code == 0) throw e
+                continue
+            }
+            val list = t.obj("media")?.arr("transcodings").objects().filter {
+                val f = it.obj("format")
+                f?.optString("protocol") == "hls" && !it.optBoolean("snipped", false) &&
+                    f.optString("mime_type").let { m -> m.contains("mpeg") || m.contains("mp4") || m.contains("aac") }
+            }.sortedBy { if (it.obj("format")?.optString("mime_type")?.contains("mpeg") == true) 0 else 1 }
+            if (list.isEmpty()) throw ApiException(if (t.str("policy") == "SNIP") "Трек только для SoundCloud Go+" else "У трека нет доступного потока")
+            val q = t.str("track_authorization")?.let { mapOf("track_authorization" to it) } ?: emptyMap()
+            for (tr in list) {
+                try {
+                    val url = (request("GET", tr.optString("url"), q) as? JSONObject)?.str("url")
+                    if (url != null) return@runBlocking url
+                } catch (e: ApiException) {
+                    last = e
+                    // 404/401/403/429/5xx — повторяем, остальное (капча и т.п.) сразу наверх
+                    if (e.code != 404 && e.code != 401 && e.code != 403 && e.code != 429 && e.code < 500) throw e
+                    if (e.message?.contains("капч") == true) throw e
+                }
+            }
         }
-        val best = list.firstOrNull { it.obj("format")?.optString("mime_type")?.contains("mpeg") == true } ?: list.firstOrNull()
-            ?: throw ApiException(if (t.str("policy") == "SNIP") "Трек только для SoundCloud Go+" else "У трека нет доступного потока")
-        val q = t.str("track_authorization")?.let { mapOf("track_authorization" to it) } ?: emptyMap()
-        (request("GET", best.optString("url"), q) as? JSONObject)?.str("url") ?: throw ApiException("SoundCloud не отдал ссылку")
+        throw last
     }
 }

@@ -191,7 +191,7 @@ private fun Accounts(model: AppModel) {
                 Text(org.nyao.music.data.sourceName(svc), style = MaterialTheme.typography.titleMedium)
                 Text(
                     acc?.let { "Вход выполнен: ${it.name}" }
-                        ?: when (svc) { SOURCE_YA -> "Даёт «Мою волну», лайки и плейлисты"; SOURCE_YT -> "Подмешивает треки в волну"; else -> "Ремиксы и андеграунд в волну" },
+                        ?: when (svc) { SOURCE_YA -> "Даёт «Мою волну», лайки и плейлисты"; SOURCE_YT -> "Подмешивает треки в волну"; org.nyao.music.data.SOURCE_VK -> "Бета: «Моя музыка», поиск и рекомендации VK"; else -> "Ремиксы и андеграунд в волну" },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

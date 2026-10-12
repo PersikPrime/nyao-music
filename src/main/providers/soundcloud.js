@@ -206,18 +206,44 @@ export class SoundCloudProvider {
    * Возвращает { url, hls, mime, ttl }.
    */
   async streamUrl(srcId) {
-    let t = this.raw.get(String(srcId));
-    if (!t || !t.media) {
-      t = (await this.request('GET', '/tracks', { query: { ids: srcId } }))[0];
-      if (t) this.raw.set(String(srcId), t);
+    // SoundCloud иногда отвечает 404 на рабочие треки (протухший track_authorization, сбой CDN):
+    // берём трек заново, пробуем другие форматы, потом свежий client_id
+    let last = new Error('SoundCloud не отдал ссылку');
+    for (let round = 0; round < 4; round++) {
+      if (round > 0) {
+        this.raw.delete(String(srcId));
+        await new Promise((r) => setTimeout(r, 300 * round));
+      }
+      if (round === 2) await this.getClientId(true).catch(() => {});
+      let t = this.raw.get(String(srcId));
+      if (!t || !t.media) {
+        try {
+          t = (await this.request('GET', '/tracks', { query: { ids: srcId } }))[0];
+        } catch (e) {
+          last = e;
+          if (e instanceof CaptchaError) throw e;
+          continue;
+        }
+        if (t) this.raw.set(String(srcId), t);
+      }
+      if (!t) throw new Error('SoundCloud не нашёл трек');
+      const list = ((t.media && t.media.transcodings) || []).filter((x) => x.format && !/encrypted/.test(x.format.protocol) && !x.snipped);
+      const score = (x) => (x.format.protocol === 'progressive' ? 3 : /mpeg/.test(x.format.mime_type) ? 2 : 1);
+      list.sort((a, b) => score(b) - score(a));
+      if (!list.length) throw new Error(t.policy === 'SNIP' ? 'Трек доступен только с подпиской SoundCloud Go+' : 'У трека нет доступного потока');
+      for (const best of list) {
+        try {
+          const res = await this.request('GET', best.url, { query: t.track_authorization ? { track_authorization: t.track_authorization } : {} });
+          if (!res || !res.url) continue;
+          const hls = best.format.protocol !== 'progressive';
+          return { url: res.url, hls, mime: hls ? (/mpeg/.test(best.format.mime_type) ? 'audio/mpeg' : 'audio/mp4') : 'audio/mpeg', headers: { 'User-Agent': UA }, ttl: 20 * 60_000 };
+        } catch (e) {
+          last = e;
+          if (e instanceof CaptchaError || !/: (40[134]|429|5\d\d)\b/.test(e.message)) throw e;
+        }
+      }
     }
-    if (!t) throw new Error('SoundCloud не нашёл трек');
-    const list = ((t.media && t.media.transcodings) || []).filter((x) => x.format && !/encrypted/.test(x.format.protocol) && !x.snipped);
-    const score = (x) => (x.format.protocol === 'progressive' ? 3 : /mpeg/.test(x.format.mime_type) ? 2 : 1);
-    const best = list.sort((a, b) => score(b) - score(a))[0];
-    if (!best) throw new Error(t.policy === 'SNIP' ? 'Трек доступен только с подпиской SoundCloud Go+' : 'У трека нет доступного потока');
-    const res = await this.request('GET', best.url, { query: t.track_authorization ? { track_authorization: t.track_authorization } : {} });
-    const hls = best.format.protocol !== 'progressive';
-    return { url: res.url, hls, mime: hls ? (/mpeg/.test(best.format.mime_type) ? 'audio/mpeg' : 'audio/mp4') : 'audio/mpeg', headers: { 'User-Agent': UA }, ttl: 20 * 60_000 };
+    throw last;
   }
+
 }
