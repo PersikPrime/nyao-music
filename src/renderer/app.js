@@ -790,14 +790,14 @@ const SVC_HELP = {
     input: `<div class="hint" style="margin-bottom:8px">1. <button class="link-plain" data-action="open-url" data-url="https://soundcloud.com/signin" style="color:var(--accent)">Открой soundcloud.com</button> в своём браузере и войди.<br>2. Нажми F12 (на Mac — ⌥⌘I) → вкладка «Application» / «Хранилище» → Cookies → https://soundcloud.com.<br>3. Скопируй значение <b>oauth_token</b> и вставь сюда.</div><input type="text" data-manual="sc" placeholder="2-123456-…">`
   },
   vk: {
-    manual: 'Что-то не работает? (dev)',
+    manual: 'Что-то не работает?',
     input: `<div class="hint">VK Музыка в этой сборке экспериментальная: у VK нет открытого API, Nyao работает через сайт vk.com от имени твоей сессии. Если что-то не грузится — открой лог и пришли его разработчику.</div><button class="btn" data-action="vk-log">Открыть vk-debug.log</button>`
   }
 };
 function svcCard(svc) {
   const st = state.status[svc];
   const meta = SERVICES.find((x) => x.id === svc);
-  const extra = svc === 'ya' && st && st.plus === false ? ' · без Плюса полные треки могут не играть' : svc === 'sc' && st ? ' · треки Go+ играют только отрывком' : svc === 'vk' ? ' · экспериментально (dev)' : '';
+  const extra = svc === 'ya' && st && st.plus === false ? ' · без Плюса полные треки могут не играть' : svc === 'sc' && st ? ' · треки Go+ играют только отрывком' : svc === 'vk' ? ' · бета, только на ПК' : '';
   return `<div class="card">
     <div class="svc">
       <div class="logo" style="background:${meta.bg};color:${meta.fg}">${meta.short}</div>
