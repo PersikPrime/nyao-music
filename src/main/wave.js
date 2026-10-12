@@ -66,11 +66,16 @@ export class WaveMixer {
     const { diversity } = this.opts();
     const exclude = new Set([...this.seen, ...this.recent]);
     this.refilling = Promise.all(extras.map((p) => p.wavePool({ diversity, exclude }).catch(() => [])))
-      .then((lists) => {
+      .then((raw) => {
+        // сервис дал только недавно звучавшее — лучше пара повторов, чем пропасть из волны
+        const lists = raw.map((l) => {
+          const fresh = l.filter((t) => !exclude.has(t.id));
+          return fresh.length ? fresh : l.filter((t) => !this.seen.has(t.id)).slice(0, 2);
+        });
         // чередуем сервисы, чтобы YouTube и SoundCloud шли вперемешку
         const mixed = [];
         for (let i = 0; i < Math.max(0, ...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) mixed.push(l[i]);
-        for (const t of mixed) if (!exclude.has(t.id) && !this.seen.has(t.id) && !this.pool.some((p) => p.id === t.id)) this.pool.push(t);
+        for (const t of mixed) if (!this.seen.has(t.id) && !this.pool.some((p) => p.id === t.id)) this.pool.push(t);
       })
       .catch(() => {})
       .finally(() => {

@@ -115,16 +115,44 @@ export function collectAudios(node, out = [], depth = 0) {
     for (const x of node) collectAudios(x, out, depth + 1);
   } else if (typeof node === 'object') {
     for (const v of Object.values(node)) collectAudios(v, out, depth + 1);
-  } else if (typeof node === 'string' && node.includes('data-audio=')) {
-    for (const m of node.matchAll(/data-audio="([^"]+)"/g)) {
-      try {
-        collectAudios(JSON.parse(unescapeHtml(m[1])), out, depth + 1);
-      } catch {
-        // не JSON — пропускаем
-      }
+  } else if (typeof node === 'string' && /^\s*[[{]/.test(node) && node.length > 20) {
+    // VK иногда кладёт JSON строкой внутрь ответа
+    try {
+      collectAudios(JSON.parse(node), out, depth + 1);
+    } catch {
+      // не JSON — может, HTML
+      htmlAudios(node, out, depth);
     }
+  } else if (typeof node === 'string') {
+    htmlAudios(node, out, depth);
   }
   return out;
+}
+
+function htmlAudios(html, out, depth) {
+  if (!html.includes('data-audio=')) return;
+  for (const m of html.matchAll(/data-audio="([^"]+)"/g)) {
+    try {
+      collectAudios(JSON.parse(unescapeHtml(m[1])), out, depth + 1);
+    } catch {
+      // не JSON — пропускаем
+    }
+  }
+}
+
+/** Трек из api.vk.com (audio.search и т.п.) → такой же массив, как на сайте, чтобы дальше всё работало одинаково */
+export function apiAudioToItem(o) {
+  const a = new Array(15).fill('');
+  const th = (o.album && o.album.thumb) || {};
+  a[I.id] = o.id;
+  a[I.owner] = o.owner_id;
+  a[I.url] = o.url || '';
+  a[I.title] = String(o.title || '');
+  a[I.performer] = String(o.artist || '');
+  a[I.duration] = Number(o.duration) || 0;
+  a[I.hashes] = '';
+  a[I.cover] = th.photo_1200 || th.photo_600 || th.photo_300 || th.photo_270 || '';
+  return a;
 }
 
 /** Объект плейлиста в ответе load_section: { list: [...], hasMore, nextOffset } */
@@ -150,6 +178,8 @@ export class VKProvider {
     this.debug = debug;
     this.uid = null;
     this.account = null;
+    this.works = {}; // какой способ поиска/рекомендаций сработал
+    this.token = null;
     this.raw = new Map(); // srcId → исходный массив трека (нужны хеши для ссылки и лайка)
   }
 
@@ -247,18 +277,112 @@ export class VKProvider {
   }
 
   async section(name, extra = {}) {
-    const data = await this.post('section', { section: name, claim: 0, is_layer: 0, ...extra });
+    if (!this.uid) await this.refresh();
+    const data = await this.post('section', { owner_id: this.uid, section: name, claim: 0, is_layer: 0, ...extra });
     const items = collectAudios(data);
     if (!items.length) this.debug(`section ${name} ${JSON.stringify(extra)}: треков не нашлось:\n${JSON.stringify(data).slice(0, 3000)}`);
     return this.remember(items);
   }
 
+  /**
+   * Токен api.vk.com, который выдаёт сам vk.com своей веб-версии (как делает сайт).
+   * Живёт только в памяти, никуда не сохраняется и не уходит.
+   */
+  async webToken() {
+    if (this.token && this.token.until > Date.now()) return this.token.value;
+    const base = this.getBase() || BASE;
+    const host = base.includes('vk.ru') ? 'https://login.vk.ru' : 'https://login.vk.com';
+    const res = await this.fetch(`${host}/?act=web_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: base, Referer: `${base}/` },
+      body: 'version=1&app_id=6287487'
+    });
+    const text = decodeVk(Buffer.from(await res.arrayBuffer()), res.headers.get('content-type'));
+    let j;
+    try {
+      j = JSON.parse(text);
+    } catch {
+      throw new Error(`web_token: HTTP ${res.status}, не JSON: ${text.slice(0, 300)}`);
+    }
+    const t = j && j.data && j.data.access_token;
+    if (!t) throw new Error(`web_token: нет токена: ${text.slice(0, 300)}`);
+    const exp = Number(j.data.expires) || 0;
+    this.token = { value: t, until: exp > 1e9 ? exp * 1000 - 60_000 : Date.now() + 30 * 60_000 };
+    return t;
+  }
+
+  async api(method, params = {}) {
+    const token = await this.webToken();
+    const base = this.getBase() || BASE;
+    const host = base.includes('vk.ru') ? 'https://api.vk.ru' : 'https://api.vk.com';
+    const res = await this.fetch(`${host}/method/${method}?v=5.199&client_id=6287487`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: base, Referer: `${base}/` },
+      body: new URLSearchParams({ access_token: token, ...params }).toString()
+    });
+    const j = JSON.parse(decodeVk(Buffer.from(await res.arrayBuffer()), res.headers.get('content-type')));
+    if (j.error) {
+      if (j.error.error_code === 5) this.token = null;
+      throw new Error(`${method}: ${j.error.error_code} ${j.error.error_msg}`);
+    }
+    return j.response;
+  }
+
+  apiTracks(resp) {
+    const items = (resp && (resp.items || (Array.isArray(resp) ? resp : resp.audios))) || [];
+    return this.remember(items.filter((o) => o && o.owner_id != null && o.id != null).map(apiAudioToItem));
+  }
+
+  /** Мобильная версия отдаёт треки прямо в HTML (data-audio) */
+  async mobile(path) {
+    const base = (this.getBase() || BASE).replace('://', '://m.');
+    const res = await this.fetch(`${base}${path}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    const text = decodeVk(Buffer.from(await res.arrayBuffer()), res.headers.get('content-type'));
+    const items = collectAudios(text.replace(/^\s*<!--/, ''));
+    if (!items.length) this.debug(`m${path}: треков не нашлось (HTTP ${res.status}):\n${text.slice(0, 1500)}`);
+    return this.remember(items);
+  }
+
+  /** Пробует способы по очереди, пока какой-то не вернёт треки; каждый сбой — в vk-debug.log */
+  async firstOf(what, tries) {
+    for (const [name, fn] of tries) {
+      try {
+        const list = await fn();
+        if (list.length) {
+          if (this.works[what] !== name) this.debug(`${what}: сработал способ «${name}» (${list.length} треков)`);
+          this.works[what] = name;
+          return list;
+        }
+      } catch (e) {
+        this.debug(`${what} / ${name}: ${e.message}`);
+        if (/войди заново|Нужен вход/.test(e.message)) throw e;
+      }
+    }
+    return [];
+  }
+
   search(q) {
-    return this.section('search', { q });
+    const tries = [
+      ['section', () => this.section('search', { q })],
+      ['api audio.search', async () => this.apiTracks(await this.api('audio.search', { q, count: 100, auto_complete: 1, sort: 2 }))],
+      ['m.vk', () => this.mobile(`/audio?act=search&q=${encodeURIComponent(q)}`)]
+    ];
+    return this.firstOf('search', this.preferWorking('search', tries));
   }
 
   recommendations() {
-    return this.section('recoms');
+    const tries = [
+      ['section recoms', () => this.section('recoms')],
+      ['api audio.getRecommendations', async () => this.apiTracks(await this.api('audio.getRecommendations', { count: 100, shuffle: 1 }))],
+      ['section explore', () => this.section('explore')]
+    ];
+    return this.firstOf('recoms', this.preferWorking('recoms', tries));
+  }
+
+  /** Тот способ, что сработал в прошлый раз, пробуем первым */
+  preferWorking(what, tries) {
+    const w = this.works[what];
+    return w ? [...tries.filter((t) => t[0] === w), ...tries.filter((t) => t[0] !== w)] : tries;
   }
 
   hashes(srcId) {
@@ -281,19 +405,20 @@ export class VKProvider {
   /** Пул для «Моей волны»: рекомендации VK + немного своих лайков (для «Любимого») */
   async wavePool({ diversity = 'favorite', exclude = new Set(), size = 20 } = {}) {
     const pool = new Map();
+    for (const t of await this.recommendations().catch(() => [])) if (!exclude.has(t.id)) pool.set(t.id, t);
+    let liked = [];
     try {
-      for (const t of await this.recommendations()) if (!exclude.has(t.id)) pool.set(t.id, t);
+      liked = (await this.likedTracks(200)).sort(() => Math.random() - 0.5);
     } catch (e) {
-      this.debug(`wavePool recoms: ${e.message}`);
+      this.debug(`wavePool liked: ${e.message}`);
     }
-    if (diversity !== 'discover') {
-      try {
-        const liked = (await this.likedTracks(200)).filter((t) => !exclude.has(t.id));
-        for (const t of liked.sort(() => Math.random() - 0.5).slice(0, Math.ceil(size / 3))) pool.set(t.id, t);
-      } catch {
-        // без лайков — только рекомендации
-      }
+    if (diversity !== 'discover' || !pool.size) {
+      const fresh = liked.filter((t) => !exclude.has(t.id));
+      for (const t of fresh.slice(0, pool.size ? Math.ceil(size / 3) : size)) pool.set(t.id, t);
     }
+    // рекомендаций нет, а все лайки недавно звучали — всё равно даём пару своих, чтобы VK не пропадал из волны
+    if (!pool.size) for (const t of liked.slice(0, 3)) pool.set(t.id, t);
+    if (!pool.size) this.debug('wavePool: пусто — ни рекомендаций, ни «Моей музыки»');
     return [...pool.values()].sort(() => Math.random() - 0.5).slice(0, size);
   }
 
@@ -305,8 +430,24 @@ export class VKProvider {
     if (!url) {
       const h = a ? String(a[I.hashes] || '').split('/') : [];
       const full = h.length > 5 ? `${srcId}_${h[2]}_${h[5]}` : String(srcId);
-      const data = await this.post('reload_audio', { ids: full });
-      const found = collectAudios(data).find((x) => `${x[I.owner]}_${x[I.id]}` === String(srcId)) || collectAudios(data)[0];
+      let found = null;
+      let data = null;
+      try {
+        data = await this.post('reload_audio', { ids: full });
+        found = collectAudios(data).find((x) => `${x[I.owner]}_${x[I.id]}` === String(srcId)) || collectAudios(data)[0];
+      } catch (e) {
+        this.debug(`reload_audio ${full}: ${e.message}`);
+      }
+      if (!found || !found[I.url]) {
+        // трек пришёл из api.vk.com без хешей — спрашиваем ссылку там же
+        try {
+          const r = await this.api('audio.getById', { audios: String(srcId) });
+          const o = (Array.isArray(r) ? r : (r && r.items) || [])[0];
+          if (o && o.url) found = apiAudioToItem(o);
+        } catch (e) {
+          this.debug(`audio.getById ${srcId}: ${e.message}`);
+        }
+      }
       if (!found || !found[I.url]) {
         this.debug(`reload_audio ${full}: ссылки нет:\n${JSON.stringify(data).slice(0, 2000)}`);
         throw new Error('VK не дал ссылку на трек (возможно, он недоступен в твоей стране или нужна подписка)');
