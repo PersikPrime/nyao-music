@@ -11,8 +11,14 @@ export function parseTag(tag) {
 }
 
 /** Подходящий файл релиза для текущей системы */
-export function pickAsset(assets, platform = process.platform, arch = process.arch) {
-  const list = assets || [];
+export function pickAsset(assets, platform = process.platform, arch = process.arch, tag = '') {
+  let list = assets || [];
+  const v = parseTag(tag);
+  // файлы именно этой сборки — если в релиз случайно попали чужие
+  if (v) {
+    const own = list.filter((a) => a.name.includes(`${v.name}.${v.build}`));
+    if (own.length) list = own;
+  }
   if (platform === 'win32') return list.find((a) => /win.*\.exe$/i.test(a.name));
   if (platform === 'darwin') {
     const want = arch === 'arm64' ? /arm64\.dmg$/i : /x64\.dmg$/i;
@@ -46,7 +52,7 @@ export async function checkUpdate(current, fetchFn = globalThis.fetch) {
   const rel = await latestRelease(fetchFn);
   if (!rel) return { available: false, current, note: 'Релизов пока нет' };
   const latest = parseTag(rel.tag_name);
-  const asset = pickAsset(rel.assets);
+  const asset = pickAsset(rel.assets, process.platform, process.arch, rel.tag_name);
   // сервер Nyao может потребовать обновиться: сборки ниже min_build дальше не пускаем
   const minBuild = Number(rel.min_build) || 0;
   return {

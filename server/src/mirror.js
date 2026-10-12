@@ -56,6 +56,12 @@ export class ReleaseMirror {
       const rel = await res.json();
       if (!SAFE.test(rel.tag_name || '')) throw new Error('странный тег релиза');
       rel.assets = (rel.assets || []).filter((a) => SAFE.test(a.name));
+      // в релиз могли попасть файлы чужой сборки (например, 0.5.30 в v0.6.31) — отдаём только свои
+      const ver = /^v?(\d+\.\d+)\.(\d+)$/.exec(rel.tag_name);
+      if (ver) {
+        const own = rel.assets.filter((a) => a.name.includes(`${ver[1]}.${ver[2]}`) || a.name.includes(`${ver[1]}-${ver[2]}`));
+        if (own.length) rel.assets = own;
+      }
       this.release = rel;
       const tagDir = path.join(this.dir, rel.tag_name);
       fs.mkdirSync(tagDir, { recursive: true });
