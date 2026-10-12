@@ -9,6 +9,8 @@ val versionFile = rootProject.file("../version.json")
 val versionJson = if (versionFile.exists()) versionFile.readText() else "{}"
 val nyaoName = Regex("\"name\"\\s*:\\s*\"([^\"]+)\"").find(versionJson)?.groupValues?.get(1) ?: "0.2"
 val nyaoBuild = Regex("\"build\"\\s*:\\s*(\\d+)").find(versionJson)?.groupValues?.get(1)?.toInt() ?: 1
+// "channel": "dev" — сборка из dev-ветки
+val nyaoChannel = Regex("\"channel\"\\s*:\\s*\"([^\"]+)\"").find(versionJson)?.groupValues?.get(1)
 
 android {
     namespace = "org.nyao.music"
@@ -19,7 +21,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = nyaoBuild
-        versionName = "$nyaoName ($nyaoBuild)"
+        versionName = "$nyaoName ($nyaoBuild)" + (nyaoChannel?.let { " $it" } ?: "")
     }
 
     // Постоянный ключ подписи: без него каждая сборка на GitHub подписывалась новым случайным debug-ключом,

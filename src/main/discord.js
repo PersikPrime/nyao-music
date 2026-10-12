@@ -31,13 +31,15 @@ export const DISCORD_APP_ID = '1557846947933593682';
 const SOURCES = {
   ya: { name: 'Яндекс Музыка', icon: 'yandex', open: 'Открыть в Яндекс Музыке' },
   yt: { name: 'YouTube Music', icon: 'youtube', open: 'Открыть в YouTube Music' },
-  sc: { name: 'SoundCloud', icon: 'soundcloud', open: 'Открыть в SoundCloud' }
+  sc: { name: 'SoundCloud', icon: 'soundcloud', open: 'Открыть в SoundCloud' },
+  vk: { name: 'VK Музыка', icon: 'logo', open: 'Открыть во VK' }
 };
 
 export function trackLink(track) {
   if (track.source === 'ya') {
     return track.albumId ? `https://music.yandex.ru/album/${track.albumId}/track/${track.srcId}` : `https://music.yandex.ru/track/${track.srcId}`;
   }
+  if (track.source === 'vk') return `https://vk.com/audio${track.srcId}`;
   if (track.source === 'sc') return track.url && /^https:\/\/soundcloud\.com\//.test(track.url) ? track.url : null;
   return `https://music.youtube.com/watch?v=${track.srcId}`;
 }

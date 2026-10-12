@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('nyao', {
     onState: (cb) => ipcRenderer.on('win:state', (_e, s) => cb(s))
   },
   openExternal: (url) => call('open:external', url),
+  vkLog: () => call('vk:openLog'),
   version: () => call('app:version'),
   onOutdated: (cb) => ipcRenderer.on('app:outdated', (_e, min) => cb(min)),
   updates: {
