@@ -73,6 +73,15 @@ class Prefs(context: Context) {
         get() = sp.getString("scToken", null)
         set(v) = sp.edit().apply { if (v == null) remove("scToken") else putString("scToken", v) }.apply()
 
+    /** VK: id вошедшего пользователя и адрес сайта (vk.com или vk.ru). Сама сессия — cookie WebView */
+    var vkUid: Long?
+        get() = sp.getLong("vkUid", 0L).takeIf { it != 0L }
+        set(v) = sp.edit().apply { if (v == null) remove("vkUid") else putLong("vkUid", v) }.apply()
+
+    var vkOrigin: String?
+        get() = sp.getString("vkOrigin", null)
+        set(v) = sp.edit().apply { if (v == null) remove("vkOrigin") else putString("vkOrigin", v) }.apply()
+
     /** Аккаунт Nyao (свой сервер). Токены музыкальных сервисов на сервер не уходят */
     var nyaoToken: String?
         get() = sp.getString("nyaoToken", null)

@@ -25,6 +25,8 @@ object Repo {
         private set
     lateinit var sc: ScApi
         private set
+    lateinit var vk: VkApi
+        private set
     lateinit var wave: WaveMixer
         private set
     lateinit var cloud: NyaoCloud
@@ -42,7 +44,7 @@ object Repo {
     private val tracks = ConcurrentHashMap<String, Track>()
     private val yaStreamCache = ConcurrentHashMap<String, Pair<String, Long>>()
 
-    private val _accounts = MutableStateFlow<Map<String, Account?>>(mapOf(SOURCE_YA to null, SOURCE_YT to null, SOURCE_SC to null))
+    private val _accounts = MutableStateFlow<Map<String, Account?>>(mapOf(SOURCE_YA to null, SOURCE_YT to null, SOURCE_SC to null, SOURCE_VK to null))
     val accounts: StateFlow<Map<String, Account?>> = _accounts
 
     private val _liked = MutableStateFlow<Set<String>>(emptySet())
@@ -55,12 +57,13 @@ object Repo {
         yt = YtMusicApi(prefs)
         ytStreams = YtStreams(yt)
         sc = ScApi(prefs)
+        vk = VkApi(prefs)
         cloud = NyaoCloud(prefs, context.applicationContext.filesDir)
         mixStore = MixStore(context.applicationContext.filesDir)
         // изменения настроек волны, вида и миксов уезжают на другие устройства
         prefs.onSyncChange = { key -> bg.launch { runCatching { cloud.pushState(key, stateData(key)) } } }
         mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
-        wave = WaveMixer(ya, yt, sc, prefs) { cloud.recentIds() }
+        wave = WaveMixer(ya, yt, sc, vk, prefs) { cloud.recentIds() }
     }
 
     fun track(id: String): Track? = tracks[id]
@@ -121,7 +124,30 @@ object Repo {
         val a = if (ya.loggedIn) runCatching { ya.account() }.getOrElse { Account("Яндекс (токен не принят)") } else null
         val b = if (yt.loggedIn) runCatching { yt.account() }.getOrElse { Account("YouTube Music") } else null
         val c = if (sc.loggedIn) runCatching { sc.account() }.getOrElse { Account("SoundCloud (токен не принят)") } else null
-        _accounts.value = mapOf(SOURCE_YA to a, SOURCE_YT to b, SOURCE_SC to c)
+        val d = if (vk.loggedIn) vk.account() else null
+        _accounts.value = mapOf(SOURCE_YA to a, SOURCE_YT to b, SOURCE_SC to c, SOURCE_VK to d)
+    }
+
+    /** Удаляет cookie только указанных сайтов (выход из одного сервиса не выкидывает из остальных) */
+    fun clearCookies(vararg urls: String) = runCatching {
+        android.webkit.CookieManager.getInstance().apply {
+            urls.forEach { u ->
+                getCookie(u)?.split(";")?.map { it.substringBefore("=").trim() }?.filter { it.isNotEmpty() }?.forEach { name ->
+                    setCookie(u, "$name=; Max-Age=0")
+                    setCookie(u, "$name=; Max-Age=0; Domain=" + Uri.parse(u).host?.split(".")?.takeLast(2)?.joinToString(".", prefix = "."))
+                }
+            }
+            flush()
+        }
+    }
+
+    /** Вход во VK: uid и адрес сайта из окна входа (cookie сессии уже в WebView). null — выход */
+    suspend fun setVk(uid: Long?, origin: String?) {
+        prefs.vkUid = uid
+        prefs.vkOrigin = origin
+        vk.reset()
+        if (uid == null) clearCookies("https://vk.com", "https://vk.ru", "https://m.vk.com", "https://login.vk.com", "https://id.vk.com", "https://login.vk.ru", "https://id.vk.ru")
+        refreshAccounts()
     }
 
     suspend fun setScToken(token: String?) {
@@ -161,7 +187,8 @@ object Repo {
         val a = async { if (ya.loggedIn) runCatching { ya.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
         val b = async { if (yt.loggedIn) runCatching { yt.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (sc.loggedIn) runCatching { sc.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val all = alternateAll(a.await(), b.await(), c.await())
+        val d = async { if (vk.loggedIn) runCatching { vk.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
+        val all = alternateAll(a.await(), b.await(), c.await(), d.await())
         _liked.value = _liked.value + all.map { it.id }
         remember(all)
     }
@@ -190,7 +217,8 @@ object Repo {
         val a = async { if (ya.loggedIn) runCatching { ya.search(q) }.getOrDefault(emptyList()) else emptyList() }
         val b = async { runCatching { yt.search(q) }.getOrDefault(emptyList()) }
         val c = async { runCatching { sc.search(q) }.getOrDefault(emptyList()) }
-        SearchResult(remember(a.await()), remember(b.await()), remember(c.await()))
+        val d = async { if (vk.loggedIn) runCatching { vk.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()))
     }
 
     suspend fun waveStart(): List<Track> = remember(wave.start())
@@ -199,6 +227,7 @@ object Repo {
     suspend fun like(track: Track, on: Boolean) {
         when (track.source) {
             SOURCE_YA -> ya.like(track, on)
+            SOURCE_VK -> vk.like(track, on)
             SOURCE_SC -> try {
                 sc.like(track.srcId, on)
                 flushScLikes()
@@ -248,7 +277,8 @@ object Repo {
             .setUri("nyao://${t.source}/${Uri.encode(t.srcId)}")
             .setMediaMetadata(meta)
             // SoundCloud играет через HLS: тип нужно знать заранее, до получения ссылки
-            .apply { if (t.source == SOURCE_SC) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            // VK тоже отдаёт HLS (.m3u8, куски с AES-128 — ExoPlayer расшифровывает сам)
+            .apply { if (t.source == SOURCE_SC || t.source == SOURCE_VK) setMimeType(MimeTypes.APPLICATION_M3U8) }
             .build()
     }
 
@@ -268,6 +298,8 @@ object Repo {
             Resolved(url, null, -1)
         } else if (source == SOURCE_SC) {
             Resolved(sc.hlsUrl(id), ScApi.UA, -1)
+        } else if (source == SOURCE_VK) {
+            Resolved(vk.streamUrl(id), VkApi.UA, -1)
         } else {
             val s = ytStreams.resolve(id)
             Resolved(s.url, s.userAgent, s.contentLength)
@@ -278,7 +310,8 @@ object Repo {
         val id = uri.pathSegments.firstOrNull() ?: return
         when (uri.host) {
             SOURCE_YA -> yaStreamCache.remove(id)
-            SOURCE_SC -> Unit
+            SOURCE_SC -> sc.forget(id)
+            SOURCE_VK -> vk.forget(id)
             else -> ytStreams.invalidate(id)
         }
     }

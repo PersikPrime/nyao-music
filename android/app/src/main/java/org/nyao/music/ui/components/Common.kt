@@ -59,14 +59,16 @@ import org.nyao.music.ui.theme.NyaoColors
 fun sourceColor(source: String): Color = when (source) {
     SOURCE_YA -> NyaoColors.Ya
     org.nyao.music.data.SOURCE_SC -> NyaoColors.Sc
+    org.nyao.music.data.SOURCE_VK -> NyaoColors.Vk
     "mix" -> NyaoColors.Lavender
     else -> NyaoColors.YtBadge
 }
 
-/** Короткая метка сервиса: Я / YT / SC */
+/** Короткая метка сервиса: Я / YT / SC / VK */
 fun sourceShort(source: String): String = when (source) {
     SOURCE_YA -> "Я"
     org.nyao.music.data.SOURCE_SC -> "SC"
+    org.nyao.music.data.SOURCE_VK -> "VK"
     "mix" -> "Микс"
     else -> "YT"
 }

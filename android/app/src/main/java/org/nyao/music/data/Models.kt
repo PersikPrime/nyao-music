@@ -38,18 +38,20 @@ data class HomeData(
     val ytSections: List<HomeSection> = emptyList(),
 )
 
-data class SearchResult(val ya: List<Track> = emptyList(), val yt: List<Track> = emptyList(), val sc: List<Track> = emptyList())
+data class SearchResult(val ya: List<Track> = emptyList(), val yt: List<Track> = emptyList(), val sc: List<Track> = emptyList(), val vk: List<Track> = emptyList())
 
 const val SOURCE_YA = "ya"
 const val SOURCE_YT = "yt"
 const val SOURCE_SC = "sc"
+const val SOURCE_VK = "vk"
 
-val ALL_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC)
+val ALL_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC, SOURCE_VK)
 
 /** Название сервиса; genitive = true — для «из Яндекс Музыки» */
 fun sourceName(source: String, genitive: Boolean = false): String = when (source) {
     SOURCE_YA -> if (genitive) "Яндекс Музыки" else "Яндекс Музыка"
     SOURCE_SC -> "SoundCloud"
+    SOURCE_VK -> if (genitive) "VK Музыки" else "VK Музыка"
     else -> "YouTube Music"
 }
 

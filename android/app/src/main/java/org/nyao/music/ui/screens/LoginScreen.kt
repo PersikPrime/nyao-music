@@ -56,7 +56,9 @@ private const val FIREFOX_UA = "Mozilla/5.0 (Android 14; Mobile; rv:140.0) Gecko
 fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
     val ya = source == SOURCE_YA
     val isSc = source == org.nyao.music.data.SOURCE_SC
+    val isVk = source == org.nyao.music.data.SOURCE_VK
     val scope = rememberCoroutineScope()
+    var web by remember { mutableStateOf<WebView?>(null) }
     val close by rememberUpdatedState(onClose)
     var loading by remember { mutableStateOf(true) }
     var done by remember { mutableStateOf(false) }
@@ -99,6 +101,34 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
         return false
     }
 
+    // VK: после входа в глобальном объекте страницы vk лежит id пользователя — так не зависим от имён cookie
+    fun checkVk() {
+        val w = web ?: return
+        if (done) return
+        w.evaluateJavascript("JSON.stringify({ uid: (window.vk && Number(window.vk.id)) || 0, origin: location.origin })") { res ->
+            if (done || res == null || res == "null") return@evaluateJavascript
+            val o = runCatching { org.json.JSONObject(org.json.JSONTokener(res).nextValue() as String) }.getOrNull() ?: return@evaluateJavascript
+            val uid = o.optLong("uid")
+            if (uid <= 0) return@evaluateJavascript
+            val origin = o.optString("origin").let {
+                if (Regex("^https://([a-z0-9-]+\\.)?vk\\.(com|ru)$").matches(it)) it.replace(Regex("//(m|new)\\."), "//") else "https://vk.com"
+            }
+            done = true
+            CookieManager.getInstance().flush()
+            scope.launch {
+                Repo.setVk(uid, origin)
+                close(true)
+            }
+        }
+    }
+
+    if (isVk) androidx.compose.runtime.LaunchedEffect(Unit) {
+        while (!done) {
+            kotlinx.coroutines.delay(1500)
+            checkVk()
+        }
+    }
+
     // Вход SoundCloud — одностраничный, поэтому cookie проверяем ещё и по таймеру
     if (isSc) androidx.compose.runtime.LaunchedEffect(Unit) {
         while (!done) {
@@ -111,7 +141,7 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { close(false) }) { Icon(Icons.Rounded.Close, "Закрыть") }
             Text(
-                if (ya) "Вход в Яндекс Музыку" else if (isSc) "Вход в SoundCloud" else "Вход в YouTube Music",
+                if (ya) "Вход в Яндекс Музыку" else if (isSc) "Вход в SoundCloud" else if (isVk) "Вход во VK" else "Вход в YouTube Music",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
             )
@@ -127,8 +157,10 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
                     settings.loadWithOverviewMode = true
                     settings.textZoom = 100
                     layoutParams = android.view.ViewGroup.LayoutParams(-1, -1)
+                    web = this
                     if (!ya) {
-                        settings.userAgentString = FIREFOX_UA
+                        // VK: десктопная версия сайта (в мобильной нет window.vk.id), тот же UA, что у запросов VkApi
+                        settings.userAgentString = if (isVk) org.nyao.music.data.VkApi.UA else FIREFOX_UA
                         if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
                             WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, emptySet())
                         }
@@ -137,22 +169,25 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean =
-                            check(request?.url?.toString())
+                            if (isVk) false else check(request?.url?.toString())
 
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             loading = true
-                            check(url)
+                            if (!isVk) check(url)
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             loading = false
-                            check(url)
+                            if (isVk) checkVk() else check(url)
                         }
                     }
-                    loadUrl(if (ya) YandexApi.OAUTH_URL else if (isSc) "https://soundcloud.com/signin" else YT_LOGIN)
+                    loadUrl(if (ya) YandexApi.OAUTH_URL else if (isSc) "https://soundcloud.com/signin" else if (isVk) "https://vk.com/login" else YT_LOGIN)
                 }
             },
-            onRelease = { it.destroy() },
+            onRelease = {
+                web = null
+                it.destroy()
+            },
         )
     }
 }
