@@ -7,6 +7,7 @@ import { settings, secrets } from './store.js';
 import { YandexProvider } from './providers/yandex.js';
 import { YTMusicProvider } from './providers/ytmusic.js';
 import { SoundCloudProvider } from './providers/soundcloud.js';
+import { VKProvider } from './providers/vk.js';
 import { checkUpdate, downloadAsset } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
@@ -15,7 +16,7 @@ import { Catalog } from './catalog.js';
 import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
 import { NyaoCloud } from './cloud.js';
 import os from 'node:os';
-import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha } from './auth.js';
+import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch, vkUserId } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(__dirname, '..', 'renderer');
@@ -24,7 +25,7 @@ const RENDERER = path.join(__dirname, '..', 'renderer');
 function readVersion() {
   try {
     const v = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'version.json'), 'utf8'));
-    return { name: v.name, build: v.build, label: `${v.name} (${v.build})` };
+    return { name: v.name, build: v.build, channel: v.channel || null, label: `${v.name} (${v.build})${v.channel ? ' ' + v.channel : ''}` };
   } catch {
     return { name: app.getVersion(), build: 0, label: app.getVersion() };
   }
@@ -35,7 +36,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const fetchFn = (url, opts) => net.fetch(url, opts);
-let ya, yt, sc, wave, streams, catalog, win, cloud;
+let ya, yt, sc, vk, wave, streams, catalog, win, cloud;
 const rpc = new DiscordRPC({ log: (m) => console.log(m) });
 function configureRpc() {
   rpc.configure({ enabled: settings.get().discordRpc, clientId: DISCORD_APP_ID });
@@ -93,6 +94,19 @@ function initProviders() {
   const nodeFetch = globalThis.fetch.bind(globalThis);
   yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch });
   sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch });
+  // VK Музыка (dev): всё через сессию окна входа VK; сырые ответы при сбоях — в vk-debug.log
+  const vkLog = path.join(app.getPath('userData'), 'vk-debug.log');
+  vk = new VKProvider({
+    fetch: vkSessionFetch,
+    getUserId: vkUserId,
+    debug: (msg) => {
+      try {
+        fs.appendFileSync(vkLog, `[${new Date().toISOString()}] ${msg}\n\n`);
+      } catch {
+        // лог не критичен
+      }
+    }
+  });
   cloud = new NyaoCloud({
     dir: app.getPath('userData'),
     getToken: () => secrets.get('nyaoToken'),
@@ -105,7 +119,7 @@ function initProviders() {
   });
   const waveMemFile = path.join(app.getPath('userData'), 'wave-memory.json');
   wave = new WaveMixer({
-    ya, yt, sc,
+    ya, yt, sc, vk,
     getSettings: () => settings.get(),
     getRecent: () => cloud.recentIds(),
     memory: {
@@ -119,7 +133,7 @@ function initProviders() {
       set: (v) => fs.writeFileSync(waveMemFile, JSON.stringify(v))
     }
   });
-  streams = new StreamService({ ya, yt, sc, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch } });
+  streams = new StreamService({ ya, yt, sc, vk, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch, vk: vkSessionFetch } });
   catalog = new Catalog({ ya, yt });
 }
 
@@ -269,6 +283,7 @@ function registerIpc() {
   handle('rpc:update', (info) => rpc.update(info));
   handle('rpc:status', () => rpc.status);
   handle('sc:pending', () => readPending());
+  handle('vk:openLog', () => shell.openPath(path.join(app.getPath('userData'), 'vk-debug.log')));
 
   // ---------- Аккаунт Nyao ----------
   handle('cloud:status', () => cloud.status());
@@ -290,12 +305,14 @@ function registerIpc() {
   handle('sc:flush', () => flushScLikes());
 
   handle('auth:status', async () => {
-    const [yaAcc, ytAcc, scAcc] = await Promise.all([
+    await vk.refresh();
+    const [yaAcc, ytAcc, scAcc, vkAcc] = await Promise.all([
       ya.loggedIn ? safe(ya.getAccount(), { name: 'Яндекс', error: true }) : null,
       yt.loggedIn ? safe(yt.getAccount(), { name: 'YouTube Music' }) : null,
-      sc.loggedIn ? safe(sc.getAccount(), { name: 'SoundCloud', error: true }) : null
+      sc.loggedIn ? safe(sc.getAccount(), { name: 'SoundCloud', error: true }) : null,
+      vk.loggedIn ? safe(vk.getAccount(), { name: 'VK', error: true }) : null
     ]);
-    return { ya: yaAcc, yt: ytAcc, sc: scAcc };
+    return { ya: yaAcc, yt: ytAcc, sc: scAcc, vk: vkAcc };
   });
   handle('auth:login', async (service) => {
     if (service === 'ya') {
@@ -303,6 +320,11 @@ function registerIpc() {
       secrets.set('yandexToken', token);
       ya.setToken(token);
       return ya.getAccount();
+    }
+    if (service === 'vk') {
+      await loginVK(win);
+      await vk.refresh();
+      return vk.getAccount();
     }
     if (service === 'sc') {
       const token = await loginSoundCloud(win);
@@ -337,6 +359,9 @@ function registerIpc() {
       secrets.set('yandexToken', null);
       ya.setToken(null);
       await logoutYandex();
+    } else if (service === 'vk') {
+      vk.setLoggedOut();
+      await logoutVK();
     } else if (service === 'sc') {
       secrets.set('scToken', null);
       sc.setToken(null);
@@ -367,19 +392,18 @@ function registerIpc() {
   });
 
   handle('library:liked', async () => {
-    const [a, b, c] = await Promise.all([
+    const [a, b, c, d] = await Promise.all([
       ya.loggedIn ? safe(ya.likedTracks(), []) : [],
       yt.loggedIn ? safe(yt.likedTracks(), []) : [],
-      sc.loggedIn ? safe(sc.likedTracks(), []) : []
+      sc.loggedIn ? safe(sc.likedTracks(), []) : [],
+      vk.loggedIn ? safe(vk.likedTracks(), []) : []
     ]);
     // Чередуем, чтобы общий список не был «сначала весь Яндекс, потом весь YT»
     const out = [];
-    for (let i = 0; i < Math.max(a.length, b.length, c.length); i++) {
-      if (a[i]) out.push(a[i]);
-      if (b[i]) out.push(b[i]);
-      if (c[i]) out.push(c[i]);
+    for (let i = 0; i < Math.max(a.length, b.length, c.length, d.length); i++) {
+      for (const l of [a, b, c, d]) if (l[i]) out.push(l[i]);
     }
-    return { tracks: out, ya: a.length, yt: b.length, sc: c.length };
+    return { tracks: out, ya: a.length, yt: b.length, sc: c.length, vk: d.length };
   });
 
   handle('library:tracks', async (playlistId) => {
@@ -428,8 +452,8 @@ function registerIpc() {
   handle('search', async (q) => {
     // Поиск YouTube Music работает и без входа — аккаунт нужен только для лайков и библиотеки
     // SoundCloud тоже ищет без входа
-    const [a, b, c] = await Promise.all([ya.loggedIn ? safe(ya.search(q), []) : [], safe(yt.search(q), []), safe(sc.search(q), [])]);
-    return { ya: a, yt: b, sc: c };
+    const [a, b, c, d] = await Promise.all([ya.loggedIn ? safe(ya.search(q), []) : [], safe(yt.search(q), []), safe(sc.search(q), []), vk.loggedIn ? safe(vk.search(q), []) : []]);
+    return { ya: a, yt: b, sc: c, vk: d };
   });
 
   handle('wave:start', () => wave.start());
@@ -445,6 +469,7 @@ function registerIpc() {
     if (track.source === 'ya') await ya.like(track, on);
     else if (track.source === 'yt') await yt.like(track, on);
     else if (track.source === 'sc') return likeSoundCloud(track, on);
+    else if (track.source === 'vk') await vk.like(track, on);
     return on;
   });
 }

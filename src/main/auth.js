@@ -181,3 +181,49 @@ export function solveScCaptcha(parent, url) {
     win.loadURL(url);
   });
 }
+
+// ---------- VK Музыка (dev): вход в обычном окне vk.com, дальше работаем cookie этой сессии ----------
+const VK_PARTITION = 'persist:vk-login';
+
+/** id пользователя VK из cookie сессии (cookie «l» на .vk.com) или null, если не вошёл */
+export async function vkUserId() {
+  const ses = session.fromPartition(VK_PARTITION);
+  const all = await ses.cookies.get({ domain: 'vk.com' });
+  const sid = all.find((c) => /^remix(n)?sid$/.test(c.name) && c.value && c.value !== 'DELETED');
+  const l = all.find((c) => c.name === 'l' && /^\d+$/.test(c.value));
+  return sid && l ? Number(l.value) : null;
+}
+
+export function loginVK(parent) {
+  return new Promise((resolve, reject) => {
+    const win = loginWindow(parent, 'Вход во VK', VK_PARTITION, FIREFOX_UA);
+    let done = false;
+    const inspect = async () => {
+      if (done) return;
+      const uid = await vkUserId();
+      if (!uid || done) return;
+      done = true;
+      clearInterval(timer);
+      resolve(uid);
+      win.close();
+    };
+    const timer = setInterval(inspect, 1000);
+    win.webContents.on('did-navigate', inspect);
+    win.on('closed', () => {
+      clearInterval(timer);
+      if (!done) reject(new Error('Вход во VK отменён'));
+    });
+    win.loadURL('https://vk.com/login');
+  });
+}
+
+export async function logoutVK() {
+  await session.fromPartition(VK_PARTITION).clearStorageData();
+}
+
+/** fetch через сессию окна входа VK — с её cookie и тем же User-Agent */
+export function vkSessionFetch(url, opts = {}) {
+  const ses = session.fromPartition(VK_PARTITION);
+  ses.setUserAgent(FIREFOX_UA);
+  return ses.fetch(url, opts);
+}

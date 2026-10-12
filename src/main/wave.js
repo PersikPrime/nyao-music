@@ -35,10 +35,11 @@ export class WaveMixer {
    * getRecent — async () => Set id треков, звучавших недавно (на всех устройствах), чтобы волна не повторялась.
    * memory — { get(), set(v) }: что волна помнит между запусками (какими треками она начиналась).
    */
-  constructor({ ya, yt, sc, getSettings, getRecent = async () => new Set(), memory = null }) {
+  constructor({ ya, yt, sc, vk = null, getSettings, getRecent = async () => new Set(), memory = null }) {
     this.ya = ya;
     this.yt = yt;
     this.sc = sc;
+    this.vk = vk;
     this.getSettings = getSettings;
     this.getRecent = getRecent;
     this.memory = memory;
@@ -55,7 +56,7 @@ export class WaveMixer {
 
   /** «Дополнительные» сервисы волны: YouTube Music и SoundCloud — что подключено */
   get extras() {
-    return [this.yt, this.sc].filter((p) => p && p.loggedIn);
+    return [this.yt, this.sc, this.vk].filter((p) => p && p.loggedIn);
   }
 
   async refillPool() {

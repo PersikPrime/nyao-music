@@ -18,7 +18,7 @@ const state = {
   route: 'home',
   params: {},
   stack: [],
-  status: { ya: null, yt: null, sc: null },
+  status: { ya: null, yt: null, sc: null, vk: null },
   update: { info: null, checking: false, progress: null, error: null },
   cloud: { loggedIn: false, user: null, logging: false, devices: null, others: [] },
   recent: null, // недавно слушал (история)
@@ -54,13 +54,14 @@ function badge(source, extra = '') {
   if (source === 'ya') return `<span class="badge ya ${extra}">Я</span>`;
   if (source === 'yt') return `<span class="badge yt ${extra}">YT</span>`;
   if (source === 'sc') return `<span class="badge sc ${extra}">SC</span>`;
+  if (source === 'vk') return `<span class="badge vk ${extra}">VK</span>`;
   if (source === 'mix') return '<span class="badge mix">Я+YT</span>';
   return '';
 }
-const RING = { ya: '#FFD60A', yt: '#FF6A5C', sc: '#FF8A3D', mix: '#C6B8FF' };
+const RING = { ya: '#FFD60A', yt: '#FF6A5C', sc: '#FF8A3D', vk: '#5AA9FF', mix: '#C6B8FF' };
 function coverHtml(item, cls = '', withBadge = false) {
   const src = item && item.source;
-  const bgCls = src === 'ya' ? 'ya-bg' : src === 'yt' ? 'yt-bg' : src === 'sc' ? 'sc-bg' : '';
+  const bgCls = src === 'ya' ? 'ya-bg' : src === 'yt' ? 'yt-bg' : src === 'sc' ? 'sc-bg' : src === 'vk' ? 'vk-bg' : '';
   const ring = `<svg width="45%" height="45%" viewBox="0 0 72 72" fill="none" stroke="${RING[src] || RING.mix}" stroke-width="3"><circle cx="36" cy="36" r="26"/><circle cx="36" cy="36" r="12"/></svg>`;
   const img = item && item.cover ? `<img src="${esc(item.cover)}" alt="" loading="lazy">` : '';
   return `<div class="cover ${cls} ${bgCls}">${ring}${img}${withBadge ? badge(src) : ''}</div>`;
@@ -173,7 +174,7 @@ function balanceTrack(share) {
   return `linear-gradient(90deg, #FFD60A 0%, #FFD60A ${Math.max(0, mid - 9)}%, var(--accent) ${mid}%, ${ytc} ${Math.min(100, mid + 9)}%, ${ytc} 100%)`;
 }
 function shareLabel(share) {
-  const extra = [state.status.yt && 'YT', state.status.sc && 'SC'].filter(Boolean).join('+');
+  const extra = [state.status.yt && 'YT', state.status.sc && 'SC', state.status.vk && 'VK'].filter(Boolean).join('+');
   if (!extra) return 'YouTube Music и SoundCloud не подключены';
   if (!state.status.ya) return `только ${extra}`;
   if (share === 0) return 'только Яндекс';
@@ -197,7 +198,7 @@ function waveControlsHtml(compact = false) {
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="eyebrow">Баланс источников</span><span style="font-size:12px;color:var(--accent)" id="share-label">${shareLabel(share)}</span></div>
     <div class="balance"><div class="track" id="share-track" style="background:${balanceTrack(share)}"></div><input type="range" min="0" max="100" step="5" value="${share}" data-input="share" aria-label="Доля YouTube Music"></div>
-    <div class="balance-legend"><span>${badge('ya')}<b id="share-ya">${100 - share}%</b></span><span><b id="share-yt">${share}%</b>${badge('yt')}${state.status.sc ? badge('sc') : ''}</span></div>
+    <div class="balance-legend"><span>${badge('ya')}<b id="share-ya">${100 - share}%</b></span><span><b id="share-yt">${share}%</b>${badge('yt')}${state.status.sc ? badge('sc') : ''}${state.status.vk ? badge('vk') : ''}</span></div>
   </div>`;
 }
 
@@ -217,7 +218,7 @@ function renderRail() {
   let extra = '';
   if (IS_MAC) {
     const pls = (state.lib.lists || []).slice(0, 7);
-    const colors = { ya: '#FFD60A', yt: '#FF453A', sc: '#FF5500', mix: '#7A6CFF' };
+    const colors = { ya: '#FFD60A', yt: '#FF453A', sc: '#FF5500', vk: '#0077FF', mix: '#7A6CFF' };
     extra = `<div class="side-extra">
       ${pls.length ? '<div class="side-title">Плейлисты</div>' : ''}
       ${pls.map((p) => `<button class="side-pl" data-open-pl="${esc(p.id)}"><span class="sw" style="background:${colors[p.source] || '#7A6CFF'}"></span><span class="nm">${esc(p.title)}</span></button>`).join('')}
@@ -231,13 +232,15 @@ function renderRail() {
 function srcName(source, gen = false) {
   if (source === 'ya') return gen ? 'Яндекс Музыки' : 'Яндекс Музыка';
   if (source === 'sc') return 'SoundCloud';
+  if (source === 'vk') return 'VK Музыка';
   if (source === 'mix') return gen ? 'моего микса' : 'Мой микс';
   return 'YouTube Music';
 }
 const SERVICES = [
   { id: 'ya', short: 'Я', name: 'Яндекс Музыка', bg: 'var(--ya)', fg: '#000' },
   { id: 'yt', short: 'YT', name: 'YouTube Music', bg: 'var(--yt-bright)', fg: '#fff' },
-  { id: 'sc', short: 'SC', name: 'SoundCloud', bg: 'var(--sc)', fg: '#fff' }
+  { id: 'sc', short: 'SC', name: 'SoundCloud', bg: 'var(--sc)', fg: '#fff' },
+  { id: 'vk', short: 'VK', name: 'VK Музыка', bg: 'var(--vk)', fg: '#fff', dev: true }
 ];
 function svcDot(s, on = true) {
   return `<span class="dot ${on ? '' : 'off'}" style="background:${s.bg};color:${s.fg}">${s.short}</span>`;
@@ -390,11 +393,11 @@ const Q_ICON = {
   list: 'M5 7h14M5 12h14M5 17h9',
   wave: 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0'
 };
-const SRC_TINT = { ya: ['#2A2208', '#FFD60A'], yt: ['#2A0E0C', '#FF6A5C'], sc: ['#2A1408', '#FF8A3D'], mix: ['#141220', 'var(--accent)'] };
+const SRC_TINT = { ya: ['#2A2208', '#FFD60A'], yt: ['#2A0E0C', '#FF6A5C'], sc: ['#2A1408', '#FF8A3D'], vk: ['#0A1E36', '#5AA9FF'], mix: ['#141220', 'var(--accent)'] };
 /** Плитки «Мне нравится»: общая и, если включено, по сервисам */
 function likedEntries() {
   const c = state.lib.counts || {};
-  const total = (c.ya || 0) + (c.yt || 0) + (c.sc || 0);
+  const total = (c.ya || 0) + (c.yt || 0) + (c.sc || 0) + (c.vk || 0);
   const all = { id: 'liked', title: 'Мне нравится', source: 'mix', sub: state.lib.counts ? `Все сервисы · ${total}` : 'Все сервисы', count: total };
   if (!state.settings || !state.settings.splitLiked) return [all];
   const per = SERVICES.filter((x) => state.status[x.id] || c[x.id]).map((x) => ({ id: `liked:${x.id}`, title: `Мне нравится · ${x.id === 'ya' ? 'Яндекс' : x.name}`, source: x.id, sub: `${c[x.id] || 0} треков`, count: c[x.id] || 0 }));
@@ -410,7 +413,7 @@ function homeName() {
   return n.split(' ')[0];
 }
 function renderHomePlayer() {
-  const loggedAny = state.status.ya || state.status.yt || state.status.sc;
+  const loggedAny = state.status.ya || state.status.yt || state.status.sc || state.status.vk;
   const waveOn = player.mode === 'wave' && player.playing;
   const lists2 = (state.lib.lists || []).slice(0, 12);
   const tiles = [
@@ -614,7 +617,7 @@ function syncLyrics(force) {
 
 function libraryCounts() {
   const l = state.lib.lists || [];
-  return { all: l.length + 1, ya: l.filter((p) => p.source === 'ya').length, yt: l.filter((p) => p.source === 'yt').length, sc: l.filter((p) => p.source === 'sc').length, mix: l.filter((p) => p.source === 'mix').length };
+  return { all: l.length + 1, ya: l.filter((p) => p.source === 'ya').length, yt: l.filter((p) => p.source === 'yt').length, sc: l.filter((p) => p.source === 'sc').length, vk: l.filter((p) => p.source === 'vk').length, mix: l.filter((p) => p.source === 'mix').length };
 }
 
 function renderLibrary() {
@@ -636,7 +639,7 @@ function renderLibrary() {
           <button class="btn" data-action="mix-builder">${ICONS.plus}Новый микс</button>
         </div>
       </div>
-      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}</div>
+      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${state.status.vk ? f('vk', 'VK', 'var(--vk)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}</div>
       ${shown ? `<div class="tiles">${shown.map((p) => `<button class="tile ${p.id === lib.selected ? 'sel' : ''}" data-action="lib-select" data-id="${esc(p.id)}">
           ${isLiked(p) ? heart('40%', p.source) : coverHtml(p, '', true)}
           <div class="t">${esc(p.title)}</div><div class="s">${isLiked(p) ? esc(p.sub) : esc(p.source === 'ya' ? 'Яндекс' : srcName(p.source)) + (p.count ? ' · ' + p.count : '')}</div>
@@ -646,7 +649,7 @@ function renderLibrary() {
       ${sel ? `<div class="aside-head">
         <div class="pl-head">
           ${isLiked(sel) ? heart('50', sel.source) : coverHtml(sel)}
-          <div style="min-width:0"><span class="muted" style="font-size:12px">${sel.id === 'liked' ? 'Общий список лайков' : isLiked(sel) ? 'Лайки одного сервиса' : sel.source === 'mix' ? 'Смешанный плейлист' : sel.source === 'ya' ? 'Плейлист Яндекса' : sel.source === 'sc' ? 'Плейлист SoundCloud' : 'Плейлист YouTube Music'}</span>
+          <div style="min-width:0"><span class="muted" style="font-size:12px">${sel.id === 'liked' ? 'Общий список лайков' : isLiked(sel) ? 'Лайки одного сервиса' : sel.source === 'mix' ? 'Смешанный плейлист' : sel.source === 'ya' ? 'Плейлист Яндекса' : sel.source === 'sc' ? 'Плейлист SoundCloud' : sel.source === 'vk' ? 'Плейлист VK' : 'Плейлист YouTube Music'}</span>
           <h2>${esc(sel.title)}</h2>
           <span class="muted" style="font-size:12px">${lib.tracks ? `${lib.tracks.length} треков · ${fmt(lib.tracks.reduce((a, t) => a + (t.duration || 0), 0))}` : 'Загружаю…'}</span></div>
         </div>
@@ -654,7 +657,7 @@ function renderLibrary() {
           <button class="btn primary" data-action="pl-play" ${lib.tracks && lib.tracks.length ? '' : 'disabled'}>${ICONS.play}Слушать</button>
           <button class="icbtn" data-action="pl-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
           <span class="grow"></span>
-          ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}${lib.tracks.some((t) => t.source === 'sc') ? `<span class="dotsrc sc" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sc').length}` : ''}</span>` : ''}
+          ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}${lib.tracks.some((t) => t.source === 'sc') ? `<span class="dotsrc sc" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sc').length}` : ''}${lib.tracks.some((t) => t.source === 'vk') ? `<span class="dotsrc vk" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'vk').length}` : ''}</span>` : ''}
           ${sel.source === 'mix' && !isLiked(sel) ? `<button class="icbtn" data-action="del-mix" aria-label="Удалить микс">${ICONS.ban}</button>` : ''}
         </div>
       </div>
@@ -667,7 +670,7 @@ function renderSearch() {
   const s = state.search;
   let merged = [];
   if (s.res) {
-    const lists = [s.res.ya, s.res.yt, s.res.sc || []];
+    const lists = [s.res.ya, s.res.yt, s.res.sc || [], s.res.vk || []];
     for (let i = 0; i < Math.max(...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) merged.push(l[i]);
     if (s.filter !== 'all') merged = merged.filter((t) => t.source === s.filter);
   }
@@ -675,7 +678,7 @@ function renderSearch() {
   view.innerHTML = `<div class="scroll">
     <h1 class="page">Поиск</h1>
     <form class="search-field" data-form="search" style="max-width:640px">${ICONS.search}<input name="q" type="search" value="${esc(s.q)}" placeholder="Трек или исполнитель" aria-label="Поиск"></form>
-    ${s.res ? `<div class="chips">${f('all', 'Все')}${f('ya', `Яндекс · ${s.res.ya.length}`, 'var(--ya)')}${f('yt', `YouTube Music · ${s.res.yt.length}`, 'var(--yt-bright)')}${f('sc', `SoundCloud · ${(s.res.sc || []).length}`, 'var(--sc)')}</div>` : ''}
+    ${s.res ? `<div class="chips">${f('all', 'Все')}${f('ya', `Яндекс · ${s.res.ya.length}`, 'var(--ya)')}${f('yt', `YouTube Music · ${s.res.yt.length}`, 'var(--yt-bright)')}${f('sc', `SoundCloud · ${(s.res.sc || []).length}`, 'var(--sc)')}${(s.res.vk || []).length ? f('vk', `VK · ${s.res.vk.length}`, 'var(--vk)') : ''}</div>` : ''}
     ${s.loading ? '<div class="skeleton" style="height:300px"></div>' : s.res ? (merged.length ? tracksHtml(merged, 'search') : '<div class="empty">Ничего не нашлось</div>') : ''}
   </div>`;
   const input = $('input[name=q]', view);
@@ -785,12 +788,16 @@ const SVC_HELP = {
   sc: {
     manual: 'Войти через свой браузер (если окно входа не пускает)',
     input: `<div class="hint" style="margin-bottom:8px">1. <button class="link-plain" data-action="open-url" data-url="https://soundcloud.com/signin" style="color:var(--accent)">Открой soundcloud.com</button> в своём браузере и войди.<br>2. Нажми F12 (на Mac — ⌥⌘I) → вкладка «Application» / «Хранилище» → Cookies → https://soundcloud.com.<br>3. Скопируй значение <b>oauth_token</b> и вставь сюда.</div><input type="text" data-manual="sc" placeholder="2-123456-…">`
+  },
+  vk: {
+    manual: 'Что-то не работает? (dev)',
+    input: `<div class="hint">VK Музыка в этой сборке экспериментальная: у VK нет открытого API, Nyao работает через сайт vk.com от имени твоей сессии. Если что-то не грузится — открой лог и пришли его разработчику.</div><button class="btn" data-action="vk-log">Открыть vk-debug.log</button>`
   }
 };
 function svcCard(svc) {
   const st = state.status[svc];
   const meta = SERVICES.find((x) => x.id === svc);
-  const extra = svc === 'ya' && st && st.plus === false ? ' · без Плюса полные треки могут не играть' : svc === 'sc' && st ? ' · треки Go+ играют только отрывком' : '';
+  const extra = svc === 'ya' && st && st.plus === false ? ' · без Плюса полные треки могут не играть' : svc === 'sc' && st ? ' · треки Go+ играют только отрывком' : svc === 'vk' ? ' · экспериментально (dev)' : '';
   return `<div class="card">
     <div class="svc">
       <div class="logo" style="background:${meta.bg};color:${meta.fg}">${meta.short}</div>
@@ -800,7 +807,7 @@ function svcCard(svc) {
     </div>
     <details><summary>${SVC_HELP[svc].manual}</summary>
       <div class="manual">${SVC_HELP[svc].input}
-      <button class="btn" data-action="manual-save" data-svc="${svc}">Сохранить</button></div>
+      ${svc === 'vk' ? '' : `<button class="btn" data-action="manual-save" data-svc="${svc}">Сохранить</button>`}</div>
     </details>
   </div>`;
 }
@@ -1030,7 +1037,7 @@ const RENDER = { home: renderHome, wave: renderWave, player: renderPlayer, libra
 
 // ---------- Загрузка данных ----------
 async function loadStatus() {
-  state.status = await api.auth.status().catch(() => ({ ya: null, yt: null, sc: null }));
+  state.status = await api.auth.status().catch(() => ({ ya: null, yt: null, sc: null, vk: null }));
   renderAccounts();
 }
 async function loadHome() {
@@ -1058,7 +1065,7 @@ let likedPromise = null;
 function loadLiked(force = false) {
   if (!likedPromise || force) {
     likedPromise = api.library.liked().then((r) => {
-      state.lib.counts = { ya: r.ya, yt: r.yt, sc: r.sc || 0 };
+      state.lib.counts = { ya: r.ya, yt: r.yt, sc: r.sc || 0, vk: r.vk || 0 };
       state.lib.liked = r.tracks;
       r.tracks.forEach((t) => player.liked.add(t.id));
       return r.tracks;
@@ -1448,6 +1455,9 @@ async function handleAction(el, e) {
       await api.auth.logout(el.dataset.svc);
       await afterAuthChange();
       break;
+    case 'vk-log':
+      api.vkLog && api.vkLog();
+      break;
     case 'manual-save': {
       const svc = el.dataset.svc;
       const input = $(`[data-manual="${svc}"]`, view);
@@ -1483,7 +1493,7 @@ view.addEventListener('submit', async (e) => {
     state.search.res = res;
   } catch (err) {
     toast(err.message, true);
-    state.search.res = { ya: [], yt: [], sc: [] };
+    state.search.res = { ya: [], yt: [], sc: [], vk: [] };
   }
   state.search.loading = false;
   if (state.route === 'search') renderSearch();
@@ -1804,7 +1814,7 @@ function showOutdated(minBuild) {
 }
 
 // ---------- Новый микс: из самого прослушиваемого, по исполнителям или пустой ----------
-const MB = { mode: 'top', period: 30, src: { ya: true, yt: true, sc: true }, count: 20, noSkip: true, data: null, artists: null, off: new Set(), name: '' };
+const MB = { mode: 'top', period: 30, src: { ya: true, yt: true, sc: true, vk: true }, count: 20, noSkip: true, data: null, artists: null, off: new Set(), name: '' };
 function mbTracks() {
   if (MB.mode === 'empty' || !MB.data) return [];
   let rows = MB.data.filter((x) => MB.src[x.track.source] !== false);
