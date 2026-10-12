@@ -120,9 +120,10 @@ export class VKProvider {
    * fetch — запросы через сессию окна входа VK (cookie); getUserId — async () => id или null;
    * debug — запись сырых ответов в vk-debug.log, чтобы чинить, когда VK что-то поменяет
    */
-  constructor({ fetch, getUserId, debug = () => {} }) {
+  constructor({ fetch, getUserId, getBase = () => BASE, debug = () => {} }) {
     this.fetch = fetch;
     this.getUserId = getUserId;
+    this.getBase = getBase;
     this.debug = debug;
     this.uid = null;
     this.account = null;
@@ -148,13 +149,14 @@ export class VKProvider {
     if (!this.uid) await this.refresh();
     if (!this.uid) throw new Error('Нужен вход во VK');
     const body = new URLSearchParams({ al: '1', act, ...params });
-    const res = await this.fetch(`${BASE}/al_audio.php?act=${encodeURIComponent(act)}`, {
+    const base = this.getBase() || BASE;
+    const res = await this.fetch(`${base}/al_audio.php?act=${encodeURIComponent(act)}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'X-Requested-With': 'XMLHttpRequest',
-        Origin: BASE,
-        Referer: `${BASE}/audios${this.uid}`
+        Origin: base,
+        Referer: `${base}/audios${this.uid}`
       },
       body: body.toString()
     });
@@ -292,6 +294,7 @@ export class VKProvider {
     }
     const real = unmaskUrl(url, this.uid);
     const hls = /\.m3u8(\?|$)/.test(real);
-    return { url: real, hls, mime: 'audio/mpeg', headers: { Referer: `${BASE}/`, Origin: BASE }, ttl: 20 * 60_000 };
+    const base = this.getBase() || BASE;
+    return { url: real, hls, mime: 'audio/mpeg', headers: { Referer: `${base}/`, Origin: base }, ttl: 20 * 60_000 };
   }
 }

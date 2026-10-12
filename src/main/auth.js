@@ -185,30 +185,32 @@ export function solveScCaptcha(parent, url) {
 // ---------- VK Музыка (dev): вход в обычном окне vk.com, дальше работаем cookie этой сессии ----------
 const VK_PARTITION = 'persist:vk-login';
 
-/** id пользователя VK из cookie сессии (cookie «l» на .vk.com) или null, если не вошёл */
-export async function vkUserId() {
-  const ses = session.fromPartition(VK_PARTITION);
-  const all = await ses.cookies.get({ domain: 'vk.com' });
-  const sid = all.find((c) => /^remix(n)?sid$/.test(c.name) && c.value && c.value !== 'DELETED');
-  const l = all.find((c) => c.name === 'l' && /^\d+$/.test(c.value));
-  return sid && l ? Number(l.value) : null;
-}
-
+/**
+ * Вход во VK: обычное окно сайта. Вошёл ли человек — спрашиваем саму страницу: у веб-версии VK
+ * в глобальном объекте vk лежит id вошедшего пользователя (vk.id). Так не зависим от имён cookie
+ * и от домена (vk.com или vk.ru). Возвращает { uid, origin }.
+ */
 export function loginVK(parent) {
   return new Promise((resolve, reject) => {
     const win = loginWindow(parent, 'Вход во VK', VK_PARTITION, FIREFOX_UA);
     let done = false;
     const inspect = async () => {
-      if (done) return;
-      const uid = await vkUserId();
-      if (!uid || done) return;
+      if (done || win.isDestroyed()) return;
+      let r = null;
+      try {
+        r = await win.webContents.executeJavaScript('({ uid: (window.vk && Number(window.vk.id)) || 0, origin: location.origin })', true);
+      } catch {
+        return; // страница ещё грузится
+      }
+      if (!r || !r.uid || done) return;
       done = true;
       clearInterval(timer);
-      resolve(uid);
+      resolve({ uid: r.uid, origin: /^https:\/\/([a-z0-9-]+\.)?vk\.(com|ru)$/.test(r.origin) ? r.origin.replace(/\/\/(m|new)\./, '//') : 'https://vk.com' });
       win.close();
     };
-    const timer = setInterval(inspect, 1000);
-    win.webContents.on('did-navigate', inspect);
+    const timer = setInterval(inspect, 1500);
+    win.webContents.on('did-finish-load', inspect);
+    win.webContents.on('did-navigate-in-page', inspect);
     win.on('closed', () => {
       clearInterval(timer);
       if (!done) reject(new Error('Вход во VK отменён'));

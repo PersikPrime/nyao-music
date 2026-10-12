@@ -16,7 +16,7 @@ import { Catalog } from './catalog.js';
 import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
 import { NyaoCloud } from './cloud.js';
 import os from 'node:os';
-import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch, vkUserId } from './auth.js';
+import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(__dirname, '..', 'renderer');
@@ -98,7 +98,9 @@ function initProviders() {
   const vkLog = path.join(app.getPath('userData'), 'vk-debug.log');
   vk = new VKProvider({
     fetch: vkSessionFetch,
-    getUserId: vkUserId,
+    // id и домен (vk.com / vk.ru) запоминаем при входе — это не токен, сама сессия живёт в cookie окна входа
+    getUserId: async () => Number(secrets.get('vkUid')) || null,
+    getBase: () => secrets.get('vkOrigin') || 'https://vk.com',
     debug: (msg) => {
       try {
         fs.appendFileSync(vkLog, `[${new Date().toISOString()}] ${msg}\n\n`);
@@ -322,7 +324,9 @@ function registerIpc() {
       return ya.getAccount();
     }
     if (service === 'vk') {
-      await loginVK(win);
+      const r = await loginVK(win);
+      secrets.set('vkUid', r.uid);
+      secrets.set('vkOrigin', r.origin);
       await vk.refresh();
       return vk.getAccount();
     }
@@ -360,6 +364,8 @@ function registerIpc() {
       ya.setToken(null);
       await logoutYandex();
     } else if (service === 'vk') {
+      secrets.set('vkUid', null);
+      secrets.set('vkOrigin', null);
       vk.setLoggedOut();
       await logoutVK();
     } else if (service === 'sc') {
