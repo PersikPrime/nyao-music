@@ -57,6 +57,24 @@ const unescapeHtml = (s) => String(s || '')
   .replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
   .replace(/<[^>]+>/g, '');
 
+/**
+ * Ответы vk.com часто в windows-1251, а не в UTF-8 — отсюда «�����» вместо русских названий.
+ * Берём кодировку из заголовка, а если её нет и UTF-8 не сходится — читаем как windows-1251.
+ */
+export function decodeVk(buf, contentType = '') {
+  const cs = (/charset=([\w-]+)/i.exec(contentType || '') || [])[1];
+  if (cs && !/utf-?8/i.test(cs)) {
+    try {
+      return new TextDecoder(cs.toLowerCase()).decode(buf);
+    } catch {
+      // неизвестная кодировка — пробуем дальше
+    }
+  }
+  const utf = new TextDecoder('utf-8').decode(buf);
+  if (!utf.includes('\uFFFD')) return utf;
+  return new TextDecoder('windows-1251').decode(buf);
+}
+
 export function isAudioItem(a) {
   return Array.isArray(a) && a.length > I.hashes && /^-?\d+$/.test(String(a[I.id])) && /^-?\d+$/.test(String(a[I.owner])) && typeof a[I.title] === 'string' && typeof a[I.performer] === 'string';
 }
@@ -64,7 +82,12 @@ export function isAudioItem(a) {
 export function mapAudio(a) {
   const owner = String(a[I.owner]);
   const id = String(a[I.id]);
-  const covers = String(a[I.cover] || '').split(',').filter((u) => /^https?:/.test(u));
+  let covers = String(a[I.cover] || '').split(',').filter((u) => /^https?:/.test(u));
+  // обложка могла переехать в другое поле — ищем любую ссылку на картинку в массиве трека
+  if (!covers.length) {
+    const any = a.find((x) => typeof x === 'string' && /^https:\/\/[^\s"]+\.(jpe?g|png|webp)/i.test(x));
+    if (any) covers = any.split(',').filter((u) => /^https?:/.test(u));
+  }
   return {
     id: `vk:${owner}_${id}`,
     source: 'vk',
@@ -160,7 +183,7 @@ export class VKProvider {
       },
       body: body.toString()
     });
-    const text = await res.text();
+    const text = decodeVk(Buffer.from(await res.arrayBuffer()), res.headers.get('content-type'));
     let json;
     try {
       json = JSON.parse(text.replace(/^\s*<!--/, ''));
