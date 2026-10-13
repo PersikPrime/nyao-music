@@ -186,7 +186,7 @@ class VkApi(private val prefs: Prefs) {
     /** Последние сбои — показываются в настройках («Что-то не работает?») */
     val debugLog = ArrayDeque<String>()
 
-    private fun debug(msg: String) {
+    fun debug(msg: String) {
         Log.w(TAG, msg)
         synchronized(debugLog) {
             debugLog.addLast("${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} ${msg.take(1500)}")

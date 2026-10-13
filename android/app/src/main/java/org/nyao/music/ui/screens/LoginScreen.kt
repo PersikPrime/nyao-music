@@ -44,6 +44,9 @@ import org.nyao.music.data.YandexApi
 private const val YT_LOGIN =
     "https://accounts.google.com/ServiceLogin?service=youtube&hl=ru&continue=https%3A%2F%2Fmusic.youtube.com%2F"
 
+// VK (эксперимент): вход начинаем в мобильной версии — только там есть «Войти через приложение VK»
+private const val VK_MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
+
 // Google не пускает во встроенный браузер с «обычным» отпечатком WebView — представляемся Firefox
 private const val FIREFOX_UA = "Mozilla/5.0 (Android 14; Mobile; rv:140.0) Gecko/140.0 Firefox/140.0"
 
@@ -59,6 +62,8 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
     val isVk = source == org.nyao.music.data.SOURCE_VK
     val scope = rememberCoroutineScope()
     var web by remember { mutableStateOf<WebView?>(null) }
+    // VK: сначала мобильная версия (кнопка входа через приложение), после входа — компьютерная (там виден id)
+    var vkDesktop by remember { mutableStateOf(false) }
     val close by rememberUpdatedState(onClose)
     var loading by remember { mutableStateOf(true) }
     var done by remember { mutableStateOf(false) }
@@ -122,10 +127,61 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
         }
     }
 
+    /** Вход в мобильной версии уже состоялся? (адрес ленты/профиля или cookie сессии) */
+    fun vkLooksLoggedIn(url: String?): Boolean {
+        val u = Uri.parse(url ?: return false)
+        val host = u.host ?: return false
+        if (!Regex("^(m\\.)?vk\\.(com|ru)$").matches(host)) return false
+        val path = u.path ?: ""
+        if (Regex("^/(login|join|restore|auth|challenge|blank)").containsMatchIn(path)) return false
+        if (Regex("^/(feed|im|audio|friends|id\\d+|menu)").containsMatchIn(path)) return true
+        val c = CookieManager.getInstance().getCookie("https://${host}") ?: return false
+        return Regex("(^|;\\s*)remix(n?sid|msid)=(?!DELETED)[^;]{6,}").containsMatchIn(c)
+    }
+
+    /** После входа переключаемся на компьютерную версию vk.com: там в странице лежит window.vk.id */
+    fun vkSwitchToDesktop() {
+        val w = web ?: return
+        if (vkDesktop || done) return
+        vkDesktop = true
+        Repo.vk.debug("Вход: мобильная версия пройдена, перехожу на компьютерную vk.com")
+        CookieManager.getInstance().flush()
+        w.settings.userAgentString = org.nyao.music.data.VkApi.UA
+        w.loadUrl("https://vk.com/feed")
+    }
+
+    /** Ссылки вида intent://, vkontakte://, vk:// — отдаём приложению VK (сама WebView их не открывает) */
+    fun vkOpenExternal(view: WebView?, url: String): Boolean {
+        val ctx = view?.context ?: return false
+        Repo.vk.debug("Вход: ссылка на приложение ${url.take(300)}")
+        return try {
+            val intent = if (url.startsWith("intent:")) {
+                android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME).apply {
+                    addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+                    component = null
+                    selector = null
+                }
+            } else android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))
+            try {
+                ctx.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                Repo.vk.debug("Вход: открыл приложение (${intent.`package` ?: intent.data?.scheme})")
+            } catch (e: android.content.ActivityNotFoundException) {
+                // приложения VK нет — запасная ссылка, если сайт её дал
+                val fallback = intent.getStringExtra("browser_fallback_url")
+                Repo.vk.debug("Вход: приложение не нашлось" + (fallback?.let { ", открываю запасную ссылку" } ?: ""))
+                if (fallback != null) view.loadUrl(fallback)
+            }
+            true
+        } catch (e: Exception) {
+            Repo.vk.debug("Вход: не смог открыть ссылку: ${e.message}")
+            true
+        }
+    }
+
     if (isVk) androidx.compose.runtime.LaunchedEffect(Unit) {
         while (!done) {
             kotlinx.coroutines.delay(1500)
-            checkVk()
+            if (vkDesktop) checkVk() else if (vkLooksLoggedIn(web?.url)) vkSwitchToDesktop()
         }
     }
 
@@ -147,6 +203,12 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
             )
             if (loading) CircularProgressIndicator(Modifier.padding(end = 16.dp).size(20.dp), strokeWidth = 2.dp)
         }
+        if (isVk && !vkDesktop) Text(
+            "Можно войти через приложение VK: после подтверждения вернись в Nyao. Не вышло — войди по номеру телефона, VK пришлёт запрос в приложение или код по SMS.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
         AndroidView(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             factory = { ctx ->
@@ -160,7 +222,7 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
                     web = this
                     if (!ya) {
                         // VK: десктопная версия сайта (в мобильной нет window.vk.id), тот же UA, что у запросов VkApi
-                        settings.userAgentString = if (isVk) org.nyao.music.data.VkApi.UA else FIREFOX_UA
+                        settings.userAgentString = if (isVk) VK_MOBILE_UA else FIREFOX_UA
                         if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
                             WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, emptySet())
                         }
@@ -168,8 +230,14 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
                     CookieManager.getInstance().setAcceptCookie(true)
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                     webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean =
-                            if (isVk) false else check(request?.url?.toString())
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            val url = request?.url?.toString()
+                            if (!isVk) return check(url)
+                            if (url == null) return false
+                            val scheme = request.url.scheme?.lowercase()
+                            if (scheme != "http" && scheme != "https") return vkOpenExternal(view, url)
+                            return false
+                        }
 
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             loading = true
@@ -178,7 +246,9 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             loading = false
-                            if (isVk) checkVk() else check(url)
+                            if (!isVk) check(url)
+                            else if (vkDesktop) checkVk()
+                            else if (vkLooksLoggedIn(url)) vkSwitchToDesktop()
                         }
                     }
                     loadUrl(if (ya) YandexApi.OAUTH_URL else if (isSc) "https://soundcloud.com/signin" else if (isVk) "https://vk.com/login" else YT_LOGIN)
