@@ -274,13 +274,25 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         context: clip(body.context, 32),
         ...(body.volume != null ? { volume: Math.max(0, Math.min(1, Number(body.volume) || 0)) } : {})
       };
+      // очередь (откуда играет и что дальше) присылают только при смене трека — иначе оставляем прежнюю
+      let queue;
+      if (body.queue && Array.isArray(body.queue.tracks)) {
+        const tracks = body.queue.tracks.slice(0, 100).map(cleanTrack).filter(Boolean);
+        queue = { tracks, index: Math.max(0, Math.min(tracks.length - 1, Number(body.queue.index) || 0)), label: clip(body.queue.label, 128), mode: ['wave', 'radio', 'list'].includes(body.queue.mode) ? body.queue.mode : 'list' };
+      } else {
+        const cur = await q('SELECT data FROM now_playing WHERE session_id = $1', [s.sid]);
+        const old = cur.rows[0] && (typeof cur.rows[0].data === 'string' ? JSON.parse(cur.rows[0].data) : cur.rows[0].data);
+        if (old && old.queue && old.track && data.track && old.track.id === data.track.id) queue = old.queue;
+      }
+      if (queue) data.queue = queue;
       await q(
         `INSERT INTO now_playing (session_id, user_id, data, updated_at) VALUES ($1, $2, $3, now())
          ON CONFLICT (session_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
         [s.sid, s.uid, JSON.stringify(data)]
       );
       // пульт на других устройствах видит изменения сразу
-      hub.pushUser(s.uid, { type: 'now', deviceId: String(s.sid), device: s.device, platform: s.platform, updatedAt: Date.now(), ...data }, s.sid);
+      const { queue: _q, ...light } = data; // очередь в живые события не кладём — её берут из /connect/devices
+      hub.pushUser(s.uid, { type: 'now', deviceId: String(s.sid), device: s.device, platform: s.platform, updatedAt: Date.now(), ...light }, s.sid);
       return { ok: true };
     }, true],
     ['GET', /^\/now$/, async ({ s }) => {

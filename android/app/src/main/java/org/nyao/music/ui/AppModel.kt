@@ -325,8 +325,8 @@ class AppModel(private val scope: CoroutineScope) {
 
     fun resume(r: RemoteNow) {
         val pos = if (r.playing) r.positionSec + (System.currentTimeMillis() - r.updatedAt) / 1000.0 else r.positionSec
-        val ms = if (r.track.duration > 0 && pos > r.track.duration - 5) 0L else (pos * 1000).toLong()
-        PlayerConnection.resume(r.track, ms, "С устройства «${r.device}»")
+        if (org.nyao.music.playback.Together.room.value?.isHost == false) org.nyao.music.playback.Together.leave(silent = true)
+        PlayerConnection.handoff(r.track, pos, r.queue, "С устройства «${r.device}»")
         others = others - r
     }
 

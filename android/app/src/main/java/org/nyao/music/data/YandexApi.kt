@@ -399,6 +399,26 @@ class YandexApi(private val prefs: Prefs) {
         })
     }
 
+    suspend fun searchArtists(text: String): List<SearchArtist> {
+        val res = obj("GET", "/search", query = mapOf("text" to text, "type" to "artist", "page" to "0"))
+        return res.path("artists")?.arr("results").objects().mapNotNull { a ->
+            val id = a.opt("id")?.toString() ?: return@mapNotNull null
+            SearchArtist(SOURCE_YA, id, a.optString("name"), cover(a.obj("cover")?.str("uri"), 200))
+        }.take(10)
+    }
+
+    suspend fun searchAlbums(text: String): List<Playlist> {
+        val res = obj("GET", "/search", query = mapOf("text" to text, "type" to "album", "page" to "0"))
+        return res.path("albums")?.arr("results").objects().map { al ->
+            Playlist(
+                id = "yaalbum:${al.opt("id")}", source = SOURCE_YA,
+                title = al.optString("title") + (al.str("version")?.let { " ($it)" } ?: ""),
+                count = al.optInt("trackCount"), cover = cover(al.str("coverUri"), 300),
+                subtitle = listOfNotNull(al.arr("artists").objects().mapNotNull { it.str("name") }.joinToString(", ").ifBlank { null }, al.optInt("year").takeIf { it > 0 }?.toString()).joinToString(" · "),
+            )
+        }.take(12)
+    }
+
     suspend fun search(text: String): List<Track> {
         val res = obj("GET", "/search", query = mapOf("text" to text, "type" to "track", "page" to "0", "nocorrect" to "false"))
         return res.path("tracks")?.arr("results").objects().mapNotNull { mapTrack(it) }

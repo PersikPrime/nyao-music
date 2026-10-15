@@ -35,6 +35,29 @@ export function roomSyncPlan(local, remote, { tolerance = 4 } = {}) {
   };
 }
 
+/**
+ * Что включить, забирая музыку с другого устройства: весь его список (или волну) с того же трека и места.
+ * d — запись «сейчас играет» ({ track, position, playing, updatedAt, queue? }).
+ */
+export function handoffPlan(d, now = Date.now()) {
+  if (!d || !d.track) return null;
+  let pos = livePosition(d, now);
+  if (d.track.duration && pos > d.track.duration - 5) pos = 0;
+  const q = d.queue;
+  if (q && Array.isArray(q.tracks) && q.tracks.length) {
+    let index = q.tracks.findIndex((t) => t.id === d.track.id);
+    if (index < 0) return { tracks: [d.track, ...q.tracks], index: 0, position: pos, label: q.label || '', mode: q.mode || 'list' };
+    return { tracks: q.tracks, index, position: pos, label: q.label || '', mode: q.mode || 'list' };
+  }
+  return { tracks: [d.track], index: 0, position: pos, label: '', mode: 'list' };
+}
+
+/** Очередь «откуда играет и что дальше» для сервера: текущий трек и до 99 следующих */
+export function queueSnapshot(queue, index, label, mode) {
+  if (!Array.isArray(queue) || index < 0 || index >= queue.length) return null;
+  return { tracks: queue.slice(index, index + 100), index: 0, label: label || '', mode: mode === 'wave' || mode === 'radio' ? mode : 'list' };
+}
+
 /** Очередь для отправки на другое устройство: текущий трек и дальше (не больше 300) */
 export function queueForTransfer(queue, index, max = 300) {
   if (!Array.isArray(queue) || index < 0 || index >= queue.length) return { tracks: [], index: 0 };

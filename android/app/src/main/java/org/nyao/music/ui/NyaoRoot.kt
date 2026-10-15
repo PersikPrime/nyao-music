@@ -346,6 +346,18 @@ private fun PhoneLayout(model: AppModel) {
             },
         ) { Content(model, wide = false) }
         BottomBlur(shot, barsTop)
+        // вся нижняя зона (вокруг плеера и панели) забирает касания себе — иначе тап мимо кнопок попадал в список под ней
+        if (!barsTop.isNaN()) {
+            val topDp = with(androidx.compose.ui.platform.LocalDensity.current) { barsTop.toDp() } - 10.dp
+            Box(
+                Modifier.fillMaxSize().padding(top = topDp.coerceAtLeast(0.dp))
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                        }
+                    },
+            )
+        }
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)
                 .onGloballyPositioned { barsTop = it.positionInParent().y },

@@ -250,7 +250,15 @@ object Repo {
         val b = async { if (up(SOURCE_YT)) runCatching { yt.search(q) }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (up(SOURCE_SC)) runCatching { sc.search(q) }.getOrDefault(emptyList()) else emptyList() }
         val d = async { if (vk.loggedIn && up(SOURCE_VK)) runCatching { vk.search(q) }.getOrDefault(emptyList()) else emptyList() }
-        SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()))
+        // исполнители и альбомы: Яндекс и YouTube Music
+        val arYa = async { if (ya.loggedIn && up(SOURCE_YA)) runCatching { ya.searchArtists(q) }.getOrDefault(emptyList()) else emptyList() }
+        val arYt = async { if (up(SOURCE_YT)) runCatching { yt.searchArtists(q) }.getOrDefault(emptyList()) else emptyList() }
+        val alYa = async { if (ya.loggedIn && up(SOURCE_YA)) runCatching { ya.searchAlbums(q) }.getOrDefault(emptyList()) else emptyList() }
+        val alYt = async { if (up(SOURCE_YT)) runCatching { yt.searchAlbums(q) }.getOrDefault(emptyList()) else emptyList() }
+        val nq = Search.norm(q)
+        val artists = alternateAll(arYa.await(), arYt.await()).distinctBy { Search.norm(it.name) }.sortedByDescending { Search.norm(it.name) == nq }.take(10)
+        val albums = alternateAll(alYa.await(), alYt.await()).take(12)
+        SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()), artists, albums)
     }
 
     /** Страница исполнителя: у Яндекса и YouTube — настоящая, у SoundCloud и VK — его треки из поиска */

@@ -225,6 +225,27 @@ class YtMusicApi(private val prefs: Prefs) {
         return Account(name ?: "YouTube Music").also { account = it }
     }
 
+    /** Исполнители и альбомы в поиске (фильтры «Исполнители»/«Альбомы» YouTube Music) */
+    suspend fun searchArtists(q: String): List<SearchArtist> {
+        val r = post("search", JSONObject().put("query", q).put("params", "EgWKAQIgAWoMEA4QChADEAQQCRAF"))
+        return findAll(r, "musicResponsiveListItemRenderer").mapNotNull { it ->
+            val bid = it.path("navigationEndpoint", "browseEndpoint")?.str("browseId") ?: return@mapNotNull null
+            if (!bid.startsWith("UC")) return@mapNotNull null
+            val name = runsText(it.arr("flexColumns").objects().firstOrNull()?.path("musicResponsiveListItemFlexColumnRenderer", "text"))
+            SearchArtist(SOURCE_YT, bid, name, thumb(it.obj("thumbnail")))
+        }.distinctBy { it.id }.take(10)
+    }
+
+    suspend fun searchAlbums(q: String): List<Playlist> {
+        val r = post("search", JSONObject().put("query", q).put("params", "EgWKAQIYAWoMEA4QChADEAQQCRAF"))
+        return findAll(r, "musicResponsiveListItemRenderer").mapNotNull { it ->
+            val bid = it.path("navigationEndpoint", "browseEndpoint")?.str("browseId") ?: return@mapNotNull null
+            if (!bid.startsWith("MPRE")) return@mapNotNull null
+            val cols = it.arr("flexColumns").objects().map { c -> c.path("musicResponsiveListItemFlexColumnRenderer", "text") }
+            Playlist("yt:$bid", SOURCE_YT, runsText(cols.firstOrNull()), cover = thumb(it.obj("thumbnail")), subtitle = runsText(cols.getOrNull(1)))
+        }.distinctBy { it.id }.take(12)
+    }
+
     suspend fun search(q: String): List<Track> {
         val r = post("search", JSONObject().put("query", q).put("params", SONGS_PARAMS))
         return tracksIn(r)

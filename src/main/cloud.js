@@ -263,15 +263,16 @@ export class NyaoCloud {
 
   // ---------- «Сейчас играет» ----------
   /** Шлём не чаще раза в 20 секунд, но смену трека и паузу — сразу */
-  async setNow({ track, position = 0, playing = false, context = '', volume = null, force = false }) {
+  async setNow({ track, position = 0, playing = false, context = '', volume = null, force = false, queue = null }) {
     if (!this.loggedIn) return;
     const t = slimTrack(track);
     const key = `${t ? t.id : '-'}|${playing}`;
     const now = Date.now();
-    if (!force && key === this.lastNowKey && now - this.lastNow < 20_000) return;
+    if (!force && !queue && key === this.lastNowKey && now - this.lastNow < 20_000) return;
     this.lastNowKey = key;
     this.lastNow = now;
-    await this.request('PUT', '/now', { track: t, position, playing, context, ...(volume != null ? { volume } : {}) });
+    const q = queue && Array.isArray(queue.tracks) ? { ...queue, tracks: queue.tracks.map(slimTrack).filter(Boolean).slice(0, 100) } : null;
+    await this.request('PUT', '/now', { track: t, position, playing, context, ...(volume != null ? { volume } : {}), ...(q ? { queue: q } : {}) });
   }
 
   async others() {

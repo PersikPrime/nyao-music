@@ -44,7 +44,13 @@ data class HomeData(
     val ytSections: List<HomeSection> = emptyList(),
 )
 
-data class SearchResult(val ya: List<Track> = emptyList(), val yt: List<Track> = emptyList(), val sc: List<Track> = emptyList(), val vk: List<Track> = emptyList())
+data class SearchResult(
+    val ya: List<Track> = emptyList(), val yt: List<Track> = emptyList(), val sc: List<Track> = emptyList(), val vk: List<Track> = emptyList(),
+    val artists: List<SearchArtist> = emptyList(), val albums: List<Playlist> = emptyList(),
+)
+
+/** Исполнитель в результатах поиска (Яндекс или YouTube Music) */
+data class SearchArtist(val source: String, val id: String, val name: String, val cover: String?)
 
 const val SOURCE_YA = "ya"
 const val SOURCE_YT = "yt"

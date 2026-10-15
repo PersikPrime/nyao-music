@@ -763,3 +763,18 @@ body.fs-on .toast { z-index: 1000; }
   .tg-now { flex-direction: column; align-items: flex-start; }
   .connect-pop { right: 8px; left: 8px; width: auto; }
 }
+
+/* ---------- Поиск: исполнители и альбомы ---------- */
+.cover.round { border-radius: 50%; }
+.best-artist { width: 100%; max-width: 760px; display: flex; align-items: center; gap: 18px; margin-top: 18px; padding: 16px 20px 16px 16px; border-radius: 24px; border: 1px solid var(--accent-line); background: linear-gradient(110deg, var(--accent-soft), var(--s1) 70%); color: var(--text); text-align: left; }
+.best-artist .cover { width: 96px; height: 96px; flex-shrink: 0; }
+.best-artist .ba-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.best-artist b { font-family: var(--display); font-size: 26px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.best-artist .ba-go { width: 48px; height: 48px; border-radius: 50%; background: var(--text); color: #000; display: grid; place-items: center; flex-shrink: 0; }
+.best-artist:hover { border-color: var(--accent); }
+.artist-row { display: grid; grid-auto-flow: column; grid-auto-columns: 120px; gap: 16px; overflow-x: auto; padding-bottom: 6px; }
+.artist-chip { display: flex; flex-direction: column; align-items: center; gap: 6px; border: 0; background: none; color: var(--text); padding: 0; min-width: 0; }
+.artist-chip .cover { width: 112px; height: 112px; }
+.artist-chip b { font-size: 13px; font-weight: 600; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sec-head .grow, .grow { flex: 1; }
+.btn.sm { height: 34px; padding: 0 14px; font-size: 13px; }

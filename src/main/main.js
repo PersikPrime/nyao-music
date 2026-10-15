@@ -20,6 +20,7 @@ import { Radio } from './radio.js';
 import { LiveEvents } from './live.js';
 import { transferPlaylist, TARGETS } from './transfer.js';
 import { findMatch } from './match.js';
+import { mergeArtists } from '../renderer/search.js';
 import os from 'node:os';
 import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch } from './auth.js';
 
@@ -639,8 +640,16 @@ function registerIpc() {
   handle('search', async (q) => {
     // Поиск YouTube Music работает и без входа — аккаунт нужен только для лайков и библиотеки
     // SoundCloud тоже ищет без входа
-    const [a, b, c, d] = await Promise.all([ya.loggedIn && up('ya') ? safe(ya.search(q), []) : [], up('yt') ? safe(yt.search(q), []) : [], up('sc') ? safe(sc.search(q), []) : [], vk.loggedIn && up('vk') ? safe(vk.search(q), []) : []]);
-    return { ya: a, yt: b, sc: c, vk: d };
+    const yaOn = ya.loggedIn && up('ya');
+    const [a, b, c, d, arYa, arYt, alYa, alYt] = await Promise.all([
+      yaOn ? safe(ya.search(q), []) : [], up('yt') ? safe(yt.search(q), []) : [], up('sc') ? safe(sc.search(q), []) : [], vk.loggedIn && up('vk') ? safe(vk.search(q), []) : [],
+      // исполнители и альбомы: Яндекс и YouTube Music
+      yaOn ? safe(ya.searchArtist(q), []) : [], up('yt') ? safe(yt.searchArtist(q), []) : [],
+      yaOn ? safe(ya.searchAlbum(q), []) : [], up('yt') ? safe(yt.searchAlbum(q), []) : []
+    ]);
+    const albums = [];
+    for (let i = 0; i < Math.max(alYa.length, alYt.length) && albums.length < 12; i++) for (const l of [alYa, alYt]) if (l[i] && albums.length < 12) albums.push(l[i]);
+    return { ya: a, yt: b, sc: c, vk: d, artists: mergeArtists([arYa, arYt], q), albums };
   });
 
   handle('wave:start', () => wave.start());

@@ -132,13 +132,23 @@ object PlayerConnection {
         mainScope.launch { pushNowMain(force) }
     }
 
+    private var lastQueueKey = ""
+
     private fun pushNowMain(force: Boolean = false) {
         val c = controller ?: return
         val t = c.currentMediaItem?.mediaId?.let { Repo.track(it) }
         val pos = c.currentPosition / 1000.0
         val playing = c.isPlaying
         Together.push()
-        ioScope.launch { runCatching { Repo.cloud.setNow(t, pos, playing, Live.volume(), force) } }
+        // очередь «откуда играет и что дальше» — только когда она поменялась (в порядке воспроизведения, с учётом перемешивания)
+        val next = _upNext.value
+        val key = "${t?.id}|${c.currentMediaItemIndex}|${c.mediaItemCount}|${Repo.mode.value}|${Repo.queueLabel.value}|${c.shuffleModeEnabled}"
+        val queue = if (t != null && key != lastQueueKey) org.nyao.music.data.HandoffQueue(
+            listOf(t) + next.map { it.second }.take(99), 0, Repo.queueLabel.value,
+            when (Repo.mode.value) { Repo.Mode.WAVE -> "wave"; Repo.Mode.RADIO -> "radio"; else -> "list" },
+        ) else null
+        lastQueueKey = key
+        ioScope.launch { runCatching { Repo.cloud.setNow(t, pos, playing, Live.volume(), force, queue) } }
         if (playing && t != null) ioScope.launch { runCatching { Repo.lastfm.nowPlaying(t) } }
     }
 
@@ -171,6 +181,34 @@ object PlayerConnection {
             c.prepare()
             if (play) c.play() else c.pause()
         }
+    }
+
+    /** Весь список (результаты поиска) — сразу после текущего трека или в конец очереди. Ничего не играет — просто включает */
+    fun enqueueAll(list: List<Track>, next: Boolean, label: String) {
+        val playable = list.filter { it.available }
+        if (playable.isEmpty()) return
+        if (_current.value == null) return playList(playable, 0, label)
+        val cur = _current.value?.id
+        val items = playable.filter { it.id != cur }
+        items.forEach { Repo.rememberTrack(it) }
+        withController { c ->
+            val at = if (next) c.currentMediaItemIndex + 1 else c.mediaItemCount
+            c.addMediaItems(at.coerceIn(0, c.mediaItemCount), items.map { Repo.mediaItem(it) })
+        }
+    }
+
+    /** Забрать музыку с другого устройства: весь его список (или волну) с того же трека и места */
+    fun handoff(track: Track, positionSec: Double, queue: org.nyao.music.data.HandoffQueue?, fallbackLabel: String) {
+        val ms = if (track.duration > 0 && positionSec > track.duration - 5) 0L else (positionSec * 1000).toLong()
+        if (queue == null) return resume(track, ms, fallbackLabel)
+        var list = queue.tracks
+        var i = list.indexOfFirst { it.id == track.id }
+        if (i < 0) {
+            list = listOf(track) + list
+            i = 0
+        }
+        playListAt(list, i, queue.label.ifBlank { fallbackLabel }, ms)
+        if (queue.mode == "wave") Repo.mode.value = Repo.Mode.WAVE
     }
 
     /** «Продолжить с другого устройства»: включает трек с нужного места */

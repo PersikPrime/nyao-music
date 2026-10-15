@@ -14,7 +14,10 @@ import java.io.File
 data class CloudUser(val name: String, val username: String?, val picture: String?)
 data class CloudDevice(val id: String, val device: String, val platform: String, val current: Boolean, val lastSeen: String)
 /** Что играет на другом устройстве — для «Продолжить» */
-data class RemoteNow(val deviceId: String, val device: String, val platform: String, val track: Track, val positionSec: Double, val playing: Boolean, val updatedAt: Long)
+data class RemoteNow(val deviceId: String, val device: String, val platform: String, val track: Track, val positionSec: Double, val playing: Boolean, val updatedAt: Long, val queue: HandoffQueue? = null)
+
+/** Откуда играл трек на другом устройстве и что дальше — чтобы «Забрать сюда» и «Продолжить» брали весь список */
+data class HandoffQueue(val tracks: List<Track>, val index: Int, val label: String, val mode: String)
 
 /**
  * Аккаунт Nyao на своём сервере (api.nmusic.bixtl.cc): вход через Telegram, история, «сейчас играет».
@@ -288,16 +291,21 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
     // ---------- «Сейчас играет» ----------
 
     /** Смену трека и паузу шлём сразу, остальное — не чаще раза в 20 секунд */
-    suspend fun setNow(t: Track?, positionSec: Double, playing: Boolean, volume: Double? = null, force: Boolean = false) {
+    suspend fun setNow(t: Track?, positionSec: Double, playing: Boolean, volume: Double? = null, force: Boolean = false, queue: HandoffQueue? = null) {
         if (!loggedIn) return
         val key = "${t?.id ?: "-"}|$playing"
         val now = System.currentTimeMillis()
-        if (!force && key == lastNowKey && now - lastNowAt < 20_000) return
+        if (!force && queue == null && key == lastNowKey && now - lastNowAt < 20_000) return
         lastNowKey = key
         lastNowAt = now
         val body = JSONObject().put("position", positionSec).put("playing", playing).put("context", Repo.mode.value.name.lowercase())
         if (volume != null) body.put("volume", volume)
         if (t != null) body.put("track", trackJson(t))
+        if (queue != null) body.put(
+            "queue",
+            JSONObject().put("tracks", JSONArray().apply { queue.tracks.take(100).forEach { put(trackJson(it)) } })
+                .put("index", queue.index).put("label", queue.label).put("mode", queue.mode),
+        )
         request("PUT", "/now", body)
     }
 
@@ -311,12 +319,20 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
 
     suspend fun connectDevices(): List<ConnectDevice> = request("GET", "/connect/devices").arr("devices").objects().map { parseDevice(it) }
 
+    fun parseQueue(q: JSONObject?): HandoffQueue? {
+        q ?: return null
+        val tracks = q.arr("tracks").objects().mapNotNull { parseTrack(it) }
+        if (tracks.isEmpty()) return null
+        return HandoffQueue(tracks, q.optInt("index").coerceIn(0, tracks.lastIndex), q.optString("label"), q.optString("mode", "list"))
+    }
+
     fun parseDevice(d: JSONObject) = ConnectDevice(
         deviceId = d.optString("deviceId"), device = d.optString("device"), platform = d.optString("platform"),
         current = d.optBoolean("current"), online = d.optBoolean("online", true),
         track = d.obj("track")?.let { parseTrack(it) }, positionSec = d.optDouble("position", 0.0), playing = d.optBoolean("playing"),
         updatedAt = d.optLong("updatedAt", System.currentTimeMillis()), volume = if (d.has("volume") && !d.isNull("volume")) d.optDouble("volume") else null,
         lastSeen = d.str("lastSeen"),
+        queue = parseQueue(d.obj("queue")),
     )
 
     suspend fun connectCmd(deviceId: String, cmd: String, args: JSONObject = JSONObject()) {
@@ -377,7 +393,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
                 albumId = t.str("albumId"), duration = t.optInt("duration"), cover = t.str("cover"),
             )
             if (track.id.isEmpty() || track.srcId.isEmpty()) return@mapNotNull null
-            RemoteNow(d.optString("deviceId"), d.optString("device"), d.optString("platform"), track, d.optDouble("position", 0.0), d.optBoolean("playing"), d.optLong("updatedAt"))
+            RemoteNow(d.optString("deviceId"), d.optString("device"), d.optString("platform"), track, d.optDouble("position", 0.0), d.optBoolean("playing"), d.optLong("updatedAt"), parseQueue(d.obj("queue")))
         }
     }
 }
@@ -386,6 +402,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
 data class ConnectDevice(
     val deviceId: String, val device: String, val platform: String, val current: Boolean, val online: Boolean,
     val track: Track?, val positionSec: Double, val playing: Boolean, val updatedAt: Long, val volume: Double?, val lastSeen: String?,
+    val queue: HandoffQueue? = null,
 ) {
     /** Где сейчас трек: позиция + сколько прошло с последнего сообщения */
     fun livePosition(now: Long = System.currentTimeMillis()): Double {

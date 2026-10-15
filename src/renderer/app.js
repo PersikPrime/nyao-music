@@ -5,7 +5,8 @@ import { layoutChoiceHtml } from './layouts.js';
 import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain } from './eq.js';
 import { FullScreen } from './fullscreen.js';
 import { releaseAgo } from './releases.js';
-import { REACTIONS, JOIN_BASE, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
+import { arrangeSearch } from './search.js';
+import { handoffPlan, queueSnapshot, REACTIONS, JOIN_BASE, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
 
 const api = window.nyao;
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -600,16 +601,19 @@ async function loadTrackFacts(t) {
   el.innerHTML = rows.map(([k, v]) => `<span>${k}</span><span>${esc(v)}</span>`).join('');
 }
 
-async function ensureLyrics() {
+/** Текст текущего трека. Один запрос на трек: все, кто спросил (экран, полный экран), ждут его же */
+function ensureLyrics() {
   const t = player.current;
-  if (!t) return null;
-  if (state.lyrics.id !== t.id) {
-    state.lyrics = { id: t.id, data: undefined };
-    const data = await api.lyrics(t).catch(() => null);
-    if (state.lyrics.id !== t.id) return null;
-    state.lyrics.data = data;
+  if (!t) return Promise.resolve(null);
+  if (state.lyrics.id !== t.id || !state.lyrics.promise) {
+    const id = t.id;
+    const promise = api.lyrics(t).catch(() => null).then((data) => {
+      if (state.lyrics.id === id) state.lyrics.data = data;
+      return data;
+    });
+    state.lyrics = { id, data: undefined, promise };
   }
-  return state.lyrics.data;
+  return state.lyrics.promise;
 }
 
 async function renderLyrics() {
@@ -715,18 +719,23 @@ function renderLibrary() {
 
 function renderSearch() {
   const s = state.search;
-  let merged = [];
-  if (s.res) {
-    const lists = [s.res.ya, s.res.yt, s.res.sc || [], s.res.vk || []];
-    for (let i = 0; i < Math.max(...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) merged.push(l[i]);
-    if (s.filter !== 'all') merged = merged.filter((t) => t.source === s.filter);
-  }
+  const arranged = arrangeSearch(s.res, s.filter, s.q);
+  const merged = arranged.tracks;
+  const { best, albums } = arranged;
+  const artists = arranged.artists.filter((a) => a !== best);
+  const srcLabel = (x) => (x === 'ya' ? 'Яндекс Музыка' : x === 'yt' ? 'YouTube Music' : srcName(x));
+  const extra = s.loading || !s.res ? '' : `
+    ${best ? `<button class="best-artist" data-action="open-artist" data-ref="${esc(best.ref)}">${coverHtml(best, 'round')}<span class="ba-meta"><span class="eyebrow">Исполнитель · ${esc(srcLabel(best.source))}</span><b>${esc(best.name)}</b><span class="muted">Популярное, альбомы и все треки</span></span><span class="ba-go">${ICONS.play}</span></button>` : ''}
+    ${artists.length ? `<section><h2 class="sec" style="margin:18px 0 12px">Исполнители</h2><div class="artist-row">${artists.map((a) => `<button class="artist-chip" data-action="open-artist" data-ref="${esc(a.ref)}">${coverHtml(a, 'round')}<b>${esc(a.name)}</b><span>${badge(a.source)}</span></button>`).join('')}</div></section>` : ''}
+    ${albums.length ? `<section><h2 class="sec" style="margin:18px 0 12px">Альбомы</h2><div class="recent-row">${albums.map((al) => `<button class="rcard" data-action="open-album" data-ref="${esc(al.ref)}">${coverHtml(al, '', true)}<b>${esc(al.title)}</b><span>${esc(al.artist || '')}${al.year ? ' · ' + esc(al.year) : ''}</span></button>`).join('')}</div></section>` : ''}
+    ${merged.length ? `<div class="sec-head" style="margin:22px 0 12px"><h2 class="sec">Треки</h2><span class="grow"></span><button class="btn sm" data-action="search-next" title="Сразу после текущего трека">${ICONS.plus}Играть следующими</button><button class="btn sm" data-action="search-last">${ICONS.plus}В конец очереди</button></div>` : ''}`;
   const f = (v, label, dot) => `<button class="chip solid ${s.filter === v ? 'on' : ''}" data-action="search-filter" data-v="${v}">${dot ? `<span class="d" style="background:${dot}"></span>` : ''}${label}</button>`;
   view.innerHTML = `<div class="scroll">
     <h1 class="page">Поиск</h1>
     <form class="search-field" data-form="search" style="max-width:640px">${ICONS.search}<input name="q" type="search" value="${esc(s.q)}" placeholder="Трек или исполнитель" aria-label="Поиск"></form>
     ${s.res ? `<div class="chips">${f('all', 'Все')}${f('ya', `Яндекс · ${s.res.ya.length}`, 'var(--ya)')}${f('yt', `YouTube Music · ${s.res.yt.length}`, 'var(--yt-bright)')}${f('sc', `SoundCloud · ${(s.res.sc || []).length}`, 'var(--sc)')}${(s.res.vk || []).length ? f('vk', `VK · ${s.res.vk.length}`, 'var(--vk)') : ''}</div>` : ''}
-    ${s.loading ? '<div class="skeleton" style="height:300px"></div>' : s.res ? (merged.length ? tracksHtml(merged, 'search') : '<div class="empty">Ничего не нашлось</div>') : ''}
+    ${extra}
+    ${s.loading ? '<div class="skeleton" style="height:300px"></div>' : s.res ? (merged.length ? tracksHtml(merged, 'search') : !best && !artists.length && !albums.length ? '<div class="empty">Ничего не нашлось</div>' : '') : ''}
   </div>`;
   const input = $('input[name=q]', view);
   if (input && !s.res) input.focus();
@@ -1011,14 +1020,31 @@ function continueHtml() {
   </section>`;
 }
 let nowTimer;
+let lastQueueKey = '';
 function pushNow(force = false) {
   roomPush();
   if (!api.cloud || !state.cloud.loggedIn) return;
   clearTimeout(nowTimer);
   nowTimer = setTimeout(() => {
     const t = player.current;
-    api.cloud.now({ track: t, position: player.audio.currentTime || 0, playing: player.playing, context: player.mode || '', volume: player.audio.volume, force: force === true }).catch(() => {});
+    // очередь («откуда играет и что дальше») — только когда она поменялась, чтобы перенос на другое устройство брал весь список
+    const key = t ? `${t.id}|${player.index}|${player.queue.length}|${player.mode}|${player.label}` : '';
+    const queue = t && key !== lastQueueKey ? queueSnapshot(player.queue, player.index, player.label, player.mode) : null;
+    lastQueueKey = key;
+    api.cloud.now({ track: t, position: player.audio.currentTime || 0, playing: player.playing, context: player.mode || '', volume: player.audio.volume, force: force === true, ...(queue ? { queue } : {}) }).catch(() => {});
   }, force === true ? 100 : 800);
+}
+/** Забрать музыку с другого устройства: весь его список или волну, с того же места */
+function playHandoff(d, fallbackLabel) {
+  const plan = handoffPlan(d);
+  if (!plan) return;
+  if (state.room && !state.room.isHost) leaveRoom(true);
+  playListAt(plan.tracks, plan.index, plan.label || fallbackLabel, plan.position);
+  if (plan.mode === 'wave') {
+    player.mode = 'wave';
+    player.maybeMore();
+  }
+  renderBar();
 }
 
 function renderSettings() {
@@ -1905,10 +1931,11 @@ async function handleAction(el, e) {
       break;
     }
     case 'cx-take': {
-      const d = (state.connect.devices || []).find((x) => x.deviceId === el.dataset.id);
+      // свежая запись с очередью (в живых событиях её нет)
+      const fresh = (await api.connect.devices().catch(() => null)) || [];
+      const d = fresh.find((x) => x.deviceId === el.dataset.id) || (state.connect.devices || []).find((x) => x.deviceId === el.dataset.id);
       if (!d || !d.track) break;
-      if (state.room && !state.room.isHost) await leaveRoom(true);
-      player.resume(d.track, livePosition(d), `С «${d.device}»`);
+      playHandoff(d, `С «${d.device}»`);
       api.connect.cmd(d.deviceId, 'pause').catch(() => {});
       $('#connect').hidden = true;
       break;
@@ -2017,6 +2044,20 @@ async function handleAction(el, e) {
     case 'open-pl':
       openPlaylist(el.dataset.id);
       break;
+    case 'search-next':
+    case 'search-last': {
+      const list = (lists.search || []).filter((t) => t.available !== false);
+      if (!list.length) break;
+      if (!player.current) {
+        player.playList(list, 0, `Поиск: ${state.search.q}`);
+      } else if (a === 'search-next') {
+        for (let i = list.length - 1; i >= 0; i--) if (list[i].id !== player.current.id) player.enqueueNext(list[i]);
+      } else {
+        for (const t of list) if (t.id !== player.current.id) player.enqueueLast(t);
+      }
+      toast(a === 'search-next' ? `${list.length} ${pl(list.length, 'трек', 'трека', 'треков')} — играют следующими` : `${list.length} ${pl(list.length, 'трек', 'трека', 'треков')} — в конце очереди`);
+      break;
+    }
     case 'open-artist':
       e.stopPropagation();
       go('artist', { ref: el.dataset.ref });
@@ -2117,8 +2158,7 @@ async function handleAction(el, e) {
     case 'resume-device': {
       const d = state.cloud.others.find((x) => x.deviceId === el.dataset.id);
       if (d && d.track) {
-        const pos = d.playing ? d.position + (Date.now() - d.updatedAt) / 1000 : d.position;
-        player.resume(d.track, d.track.duration && pos > d.track.duration - 5 ? 0 : pos, `С устройства «${d.device}»`);
+        playHandoff(d, `С устройства «${d.device}»`);
         state.cloud.others = state.cloud.others.filter((x) => x !== d);
         if (state.route === 'home') renderHome();
       }

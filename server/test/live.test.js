@@ -155,3 +155,27 @@ test('Итоги через API', async () => {
     server.close();
   }
 });
+
+test('Очередь в «сейчас играет»: хранится, переживает обновления без очереди, сбрасывается при смене трека', async () => {
+  const { server, call } = await setup();
+  try {
+    const pc = { token: (await login(call, 'ПК')).token };
+    const phone = { token: (await login(call, 'Телефон')).token };
+    await call('PUT', '/now', { ...phone, body: { track: tr(1), position: 5, playing: true, queue: { tracks: [tr(1), tr(2), tr(3)], index: 0, label: 'FORTUNA 812', mode: 'list' } } });
+    await call('PUT', '/now', { ...phone, body: { track: tr(1), position: 35, playing: true } });
+    let d = (await call('GET', '/connect/devices', pc)).json.devices.find((x) => x.device === 'Телефон');
+    assert.equal(d.queue.tracks.length, 3, 'очередь сохранилась после обновления без неё');
+    assert.equal(d.queue.label, 'FORTUNA 812');
+    assert.equal((await call('GET', '/now', pc)).json.devices[0].queue.tracks[2].id, 'ya:3', 'и для «Продолжить»');
+    await call('PUT', '/now', { ...phone, body: { track: tr(9), position: 0, playing: true } });
+    d = (await call('GET', '/connect/devices', pc)).json.devices.find((x) => x.device === 'Телефон');
+    assert.equal(d.queue, undefined, 'другой трек без очереди — старая не подставляется');
+    await call('PUT', '/now', { ...phone, body: { track: tr(9), queue: { tracks: Array.from({ length: 150 }, (_, i) => tr(i)), index: 400, mode: 'evil' } } });
+    d = (await call('GET', '/connect/devices', pc)).json.devices.find((x) => x.device === 'Телефон');
+    assert.equal(d.queue.tracks.length, 100);
+    assert.equal(d.queue.index, 99);
+    assert.equal(d.queue.mode, 'list');
+  } finally {
+    server.close();
+  }
+});

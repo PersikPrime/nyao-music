@@ -194,9 +194,13 @@ fun ConnectSheet(model: AppModel, onClose: () -> Unit) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (d.track != null) OutlinedButton(onClick = {
                                 if (Together.room.value?.isHost == false) Together.leave(silent = true)
-                                PlayerConnection.resume(d.track, (d.livePosition() * 1000).toLong(), "С «${d.device}»")
-                                cmd(d, "pause")
-                                onClose()
+                                scope.launch {
+                                    // свежая запись с очередью (в живых событиях её нет)
+                                    val fresh = runCatching { withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.cloud.connectDevices() } }.getOrNull()?.firstOrNull { it.deviceId == d.deviceId } ?: d
+                                    PlayerConnection.handoff(fresh.track ?: d.track!!, fresh.livePosition(), fresh.queue, "С «${d.device}»")
+                                    cmd(d, "pause")
+                                    onClose()
+                                }
                             }) { Text("Забрать сюда") }
                             if (current != null) Button(onClick = {
                                 val q = PlayerConnection.queue.value
