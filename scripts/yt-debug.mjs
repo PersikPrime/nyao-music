@@ -20,4 +20,4 @@ await step('artist', async () => (await yt.artist('UCEPMVbUzImPl4p8k4LkGevA')).n
 await step('album', async () => (await yt.album('MPREb_eEpQf8QskKl')).tracks.length);
 await step('playlistTracks', async () => (await yt.playlistTracks('yt:RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs')).length);
 console.log('=====');
-for (const l of out) console.log('::notice::' + l.replace(/\n/g, ' '));
+for (const l of out.filter((x) => !x.startsWith('  -'))) console.log('::notice::' + l.replace(/\n/g, ' '));
