@@ -3,6 +3,7 @@ import { Ribbon } from './ribbon.js';
 import { Onboarding } from './onboarding.js';
 import { layoutChoiceHtml } from './layouts.js';
 import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel } from './eq.js';
+import { FullScreen } from './fullscreen.js';
 
 const api = window.nyao;
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -142,6 +143,7 @@ function setRangeFill(input) {
   input.style.setProperty('--p', `${p}%`);
 }
 const SETTINGS_ICON_SM = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>';
+const FS_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
 const ICONS = {
   play: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>',
   pause: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1.2"/><rect x="14" y="4" width="4" height="16" rx="1.2"/></svg>',
@@ -505,7 +507,7 @@ function renderPlayer() {
   let body = '';
   if (state.tab === 'cover') {
     body = t ? `<div class="np-cover">
-      ${coverHtml(t, 'np-art')}
+      <div class="np-art-wrap" data-dbl="fullscreen" title="Двойной клик — полный экран">${coverHtml(t, 'np-art')}</div>
       <div class="np-info">
         <div class="src-chips"><span class="src-chip">${badge(t.source)}Играет из ${srcName(t.source, true)}</span>${player.label ? `<span class="src-chip" style="padding-left:10px">${esc(player.label)}</span>` : ''}</div>
         <h1>${esc(t.title)}</h1>
@@ -514,6 +516,7 @@ function renderPlayer() {
           <button class="btn ${player.liked.has(t.id) ? 'primary' : ''}" data-action="like-cur">${player.liked.has(t.id) ? ICONS.heartOn : ICONS.heart}${player.liked.has(t.id) ? 'В «Мне нравится»' : 'Нравится'}</button>
           <button class="btn" data-action="cur-more">${ICONS.plus}В микс</button>
           ${player.mode === 'wave' ? `<button class="btn" data-action="go" data-route="wave">${ICONS.tune}Волна</button>` : ''}
+          <button class="btn" data-action="fullscreen">${FS_ICON}Полный экран</button>
         </div>
         <div class="lyric-peek" data-action="tab" data-v="lyrics"><span class="eyebrow">Текст</span><span class="cur" id="peek-cur">…</span><span class="nx" id="peek-nx"></span></div>
       </div>
@@ -1295,6 +1298,9 @@ async function handleAction(el, e) {
     case 'cur-more':
       if (player.current) openMenu(e.clientX, e.clientY, player.current);
       break;
+    case 'fullscreen':
+      fullscreen.show();
+      break;
     case 'like-cur':
       await player.toggleLike();
       if (state.route === 'player') renderPlayer();
@@ -1696,7 +1702,27 @@ player.addEventListener('time', () => {
   updateTime();
   if (state.route === 'player' && state.tab !== 'queue') syncLyrics(false);
 });
+const fullscreen = new FullScreen({
+  player,
+  api,
+  isMac: IS_MAC,
+  ensureLyrics: () => ensureLyrics(),
+  like: () => player.toggleLike(),
+  icons: {
+    play: ICONS.playBig, pause: ICONS.pauseBig, heart: ICONS.heart, heartOn: ICONS.heartOn,
+    prev: '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>',
+    next: '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>'
+  }
+});
 player.addEventListener('like', renderBar);
+player.addEventListener('track', () => fullscreen.update());
+player.addEventListener('state', () => fullscreen.update());
+player.addEventListener('like', () => fullscreen.update());
+player.addEventListener('time', () => fullscreen.tick());
+api.win.onFullscreen((on) => {
+  if (!on) fullscreen.close();
+});
+$('#pb-full').onclick = () => fullscreen.toggle();
 player.addEventListener('track', pushRpc);
 player.addEventListener('state', pushRpc);
 player.addEventListener('track', pushNow);
@@ -1737,7 +1763,17 @@ $('#accounts').addEventListener('click', (e) => {
   }
 });
 document.addEventListener('keydown', (e) => {
-  if (e.target.closest('input, textarea')) return;
+  if (e.target.closest && e.target.closest('input, textarea')) return;
+  // полноэкранный режим: F11 — вкл/выкл, Esc — выход
+  if (e.code === 'F11' || (e.code === 'KeyF' && (e.metaKey || e.ctrlKey) && e.shiftKey)) {
+    e.preventDefault();
+    fullscreen.toggle();
+    return;
+  }
+  if (e.code === 'Escape' && fullscreen.open) {
+    fullscreen.close();
+    return;
+  }
   if (e.code === 'Space') {
     e.preventDefault();
     player.toggle();
@@ -2033,3 +2069,7 @@ function openMixBuilder() {
     else openOnboarding();
   }
 })();
+
+view.addEventListener('dblclick', (e) => {
+  if (e.target.closest('[data-dbl="fullscreen"]')) fullscreen.show();
+});
