@@ -2,6 +2,8 @@ package org.nyao.music.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import coil3.request.allowHardware
+import coil3.toBitmap
 import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
@@ -225,8 +227,8 @@ class PlaybackService : MediaSessionService() {
             scope.launch {
                 val bmp = withContext(Dispatchers.IO) {
                     runCatching {
-                        val req = coil3.request.ImageRequest.Builder(this@PlaybackService).data(cover).size(256).let { coil3.request.allowHardware(it, false) }.build()
-                        (coil3.SingletonImageLoader.get(this@PlaybackService).execute(req) as? coil3.request.SuccessResult)?.image?.let { coil3.toBitmap(it) }
+                        val req = coil3.request.ImageRequest.Builder(this@PlaybackService).data(cover).size(256).allowHardware(false).build()
+                        (coil3.SingletonImageLoader.get(this@PlaybackService).execute(req) as? coil3.request.SuccessResult)?.image?.toBitmap()
                     }.getOrNull()
                 }
                 if (widgetCoverUrl == cover) {
