@@ -1,5 +1,15 @@
 package org.nyao.music.ui
 
+import androidx.compose.ui.layout.positionInParent
+
+import androidx.compose.ui.layout.onGloballyPositioned
+
+import androidx.compose.ui.graphics.layer.drawLayer
+
+import androidx.compose.ui.draw.blur
+
+import androidx.compose.ui.draw.drawWithContent
+
 import androidx.compose.runtime.mutableStateOf
 
 import androidx.activity.compose.BackHandler
@@ -227,10 +237,20 @@ private fun Content(model: AppModel, wide: Boolean) {
 @Composable
 private fun PhoneLayout(model: AppModel) {
     val current by PlayerConnection.current.collectAsState()
+    // Снимок экрана под плеером: из него рисуем размытую полосу за мини-плеером и панелью
+    val shot = androidx.compose.ui.graphics.rememberGraphicsLayer()
+    var barsTop by remember { androidx.compose.runtime.mutableFloatStateOf(Float.NaN) }
     Box(Modifier.fillMaxSize()) {
-        Content(model, wide = false)
+        Box(
+            Modifier.fillMaxSize().drawWithContent {
+                shot.record { this@drawWithContent.drawContent() }
+                drawLayer(shot)
+            },
+        ) { Content(model, wide = false) }
+        BottomBlur(shot, barsTop)
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp),
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)
+                .onGloballyPositioned { barsTop = it.positionInParent().y },
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -245,6 +265,34 @@ private fun PhoneLayout(model: AppModel) {
             NowPlayingScreen(model, asPane = false, onClose = { model.nowPlayingOpen = false })
         }
     }
+}
+
+/**
+ * Мягкое размытие под мини-плеером и панелью: снизу контент размыт, кверху размытие плавно сходит на нет.
+ * Настоящее размытие — с Android 12; на старых версиях остаётся только плавное затемнение.
+ */
+@Composable
+private fun BottomBlur(shot: androidx.compose.ui.graphics.layer.GraphicsLayer, barsTop: Float) {
+    if (barsTop.isNaN()) return
+    val bg = MaterialTheme.colorScheme.background
+    val fade = with(androidx.compose.ui.platform.LocalDensity.current) { 56.dp.toPx() }
+    val blur = if (android.os.Build.VERSION.SDK_INT >= 31) Modifier.blur(18.dp, androidx.compose.ui.draw.BlurredEdgeTreatment.Rectangle) else Modifier
+    Box(
+        Modifier.fillMaxSize()
+            .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+            .then(blur)
+            .drawWithContent {
+                val top = (barsTop - fade).coerceAtLeast(0f)
+                androidx.compose.ui.graphics.drawscope.clipRect(top = top) { drawLayer(shot) }
+                // сверху размытие плавно исчезает
+                drawRect(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = top, endY = top + fade * 1.6f),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                )
+                // и чуть притемняем, чтобы панель читалась на любом фоне
+                drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Transparent, 1f to bg.copy(alpha = 0.55f), startY = top, endY = size.height))
+            },
+    )
 }
 
 /** Плавающая панель из макета: выбранная вкладка раскрывается в «таблетку» с подписью */
