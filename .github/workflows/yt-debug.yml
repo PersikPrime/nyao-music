@@ -8,7 +8,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+        with:
+          node-version: 22
       - run: npm ci --ignore-scripts
-      - run: node scripts/yt-debug.mjs 2>&1 | tee yt.log; for l in $(grep -n "" yt.log | cut -d: -f1); do :; done; while IFS= read -r line; do echo "::notice::$line"; done < <(grep -E "^(OK|ERR)|at |   -" yt.log | head -60)
-        shell: bash
+      - shell: bash
+        run: |
+          node scripts/yt-debug.mjs > yt.log 2>&1 || true
+          cat yt.log
+          grep -E "^(OK|ERR)|    at |   -" yt.log | head -60 | while IFS= read -r line; do echo "::notice::${line}"; done
