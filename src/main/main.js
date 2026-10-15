@@ -475,12 +475,13 @@ function registerIpc() {
   });
 
   handle('library:playlists', async () => {
-    const [yaLists, ytLists, scLists] = await Promise.all([
+    const [yaLists, ytLists, scLists, vkLists] = await Promise.all([
       ya.loggedIn ? safe(ya.playlists(), []) : [],
       yt.loggedIn ? safe(yt.playlists(), []) : [],
-      sc.loggedIn ? safe(sc.playlists(), []) : []
+      sc.loggedIn ? safe(sc.playlists(), []) : [],
+      vk.loggedIn ? safe(vk.playlists(), []) : []
     ]);
-    return [...readMixes().map(mixSummary), ...yaLists, ...ytLists, ...scLists];
+    return [...readMixes().map(mixSummary), ...yaLists, ...ytLists, ...scLists, ...vkLists];
   });
 
   handle('library:liked', async () => {
@@ -503,6 +504,7 @@ function registerIpc() {
     if (playlistId.startsWith('ya:')) return ya.playlistTracks(playlistId);
     if (playlistId.startsWith('yt:')) return yt.playlistTracks(playlistId);
     if (playlistId.startsWith('sc:')) return sc.playlistTracks(playlistId);
+    if (playlistId.startsWith('vk:')) return vk.playlistTracks(playlistId);
     throw new Error('Неизвестный плейлист');
   });
 

@@ -214,7 +214,8 @@ object Repo {
         val a = async { if (ya.loggedIn) runCatching { ya.playlists() }.getOrDefault(emptyList()) else emptyList() }
         val b = async { if (yt.loggedIn) runCatching { yt.playlists() }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (sc.loggedIn) runCatching { sc.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        listOfNotNull(org.nyao.music.playback.Offline.asPlaylist()) + a.await() + b.await() + c.await()
+        val d = async { if (vk.loggedIn) runCatching { vk.playlists() }.getOrDefault(emptyList()) else emptyList() }
+        listOfNotNull(org.nyao.music.playback.Offline.asPlaylist()) + a.await() + b.await() + c.await() + d.await()
     }
 
     suspend fun playlistTracks(id: String): List<Track> = remember(
@@ -226,6 +227,7 @@ object Repo {
             id.startsWith("mix:") -> mixStore.get(id)?.tracks ?: emptyList()
             id.startsWith("ya:") -> ya.playlistTracks(id)
             id.startsWith("sc:") -> sc.playlistTracks(id)
+            id.startsWith("vk:") -> vk.playlistTracks(id)
             else -> yt.playlistTracks(id)
         },
     )

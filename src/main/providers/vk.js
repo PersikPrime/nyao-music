@@ -155,6 +155,21 @@ export function apiAudioToItem(o) {
   return a;
 }
 
+/** Плейлисты из мобильной версии: ссылки вида act=audio_playlist{владелец}_{id}&access_hash=… */
+export function parsePlaylistsHtml(html) {
+  const out = new Map();
+  const re = /act=audio_playlist(-?\d+)_(\d+)(?:&(?:amp;)?access_hash=([0-9a-f]+))?[^>]*>([\s\S]{0,1500}?)<\/a>/g;
+  for (const m of String(html).matchAll(re)) {
+    const key = `${m[1]}_${m[2]}`;
+    if (out.has(key)) continue;
+    const inner = m[4];
+    const title = (/class="[^"]*(?:Title|title)[^"]*"[^>]*>([^<]+)</.exec(inner) || [])[1] || '';
+    const cover = (/url\((?:&quot;|'|")?(https:[^)'"&]+)/.exec(inner) || [])[1] || null;
+    out.set(key, { owner: m[1], id: m[2], hash: m[3] || '', title: title.trim(), cover });
+  }
+  return [...out.values()];
+}
+
 /** Объект плейлиста в ответе load_section: { list: [...], hasMore, nextOffset } */
 function findPlaylist(node, depth = 0) {
   if (!node || typeof node !== 'object' || depth > 8) return null;
@@ -259,10 +274,15 @@ export class VKProvider {
   /** «Моя музыка» */
   async likedTracks(limit = 5000) {
     if (!this.uid) await this.refresh();
+    return this.loadPlaylist(this.uid, -1, '', limit);
+  }
+
+  /** Треки плейлиста (playlist_id -1 — «Моя музыка») */
+  async loadPlaylist(ownerId, playlistId, accessHash = '', limit = 5000) {
     const out = [];
     let offset = 0;
     for (let page = 0; page < 60 && out.length < limit; page++) {
-      const data = await this.post('load_section', { owner_id: this.uid, playlist_id: -1, offset, type: 'playlist', access_hash: '', is_loading_all: 1 });
+      const data = await this.post('load_section', { owner_id: ownerId, playlist_id: playlistId, offset, type: 'playlist', access_hash: accessHash || '', is_loading_all: 1 });
       const pl = findPlaylist(data);
       const items = collectAudios(pl ? pl.list : data);
       if (!items.length) {
@@ -274,6 +294,45 @@ export class VKProvider {
       offset = Number(pl.nextOffset) || offset + items.length;
     }
     return this.remember(out.slice(0, limit));
+  }
+
+  /** Свои плейлисты VK: id вида vk:владелец_плейлист_ключ */
+  async playlists() {
+    if (!this.uid) await this.refresh();
+    const uid = this.uid;
+    const tries = [
+      ['api audio.getPlaylists', async () => {
+        const r = await this.api('audio.getPlaylists', { owner_id: String(uid), count: '100' });
+        return ((r && r.items) || []).map((p) => {
+          const th = (p.thumbs && p.thumbs[0]) || p.photo || {};
+          return { owner: p.owner_id, id: p.id, hash: p.access_key || '', title: p.title, count: p.count, cover: th.photo_600 || th.photo_300 || th.photo_270 || null };
+        });
+      }],
+      ['m.vk', async () => {
+        const base = (this.getBase() || BASE).replace('://', '://m.');
+        const res = await this.fetch(`${base}/audio?act=audio_playlists${uid}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const html = decodeVk(Buffer.from(await res.arrayBuffer()), res.headers.get('content-type'));
+        return parsePlaylistsHtml(html);
+      }]
+    ];
+    for (const [name, fn] of this.preferWorking('playlists', tries)) {
+      try {
+        const list = (await fn()).filter((p) => p && p.id != null && p.owner != null);
+        if (list.length) {
+          this.works.playlists = name;
+          return list.map((p) => ({ id: `vk:${p.owner}_${p.id}_${p.hash || ''}`, source: 'vk', title: unescapeHtml(p.title) || 'Плейлист', count: Number(p.count) || 0, cover: p.cover || null, subtitle: 'VK Музыка' }));
+        }
+      } catch (e) {
+        this.debug(`playlists / ${name}: ${e.message}`);
+      }
+    }
+    return [];
+  }
+
+  async playlistTracks(id) {
+    const m = /^vk:(-?\d+)_(-?\d+)_?(\w*)$/.exec(String(id));
+    if (!m) throw new Error('Странный плейлист VK');
+    return this.loadPlaylist(m[1], m[2], m[3]);
   }
 
   async section(name, extra = {}) {
