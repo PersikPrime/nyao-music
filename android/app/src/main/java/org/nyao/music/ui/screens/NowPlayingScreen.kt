@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import androidx.compose.foundation.basicMarquee
+
 import org.nyao.music.ui.components.NyaoIcons
 
 import androidx.compose.animation.AnimatedContent
@@ -78,6 +80,7 @@ import org.nyao.music.ui.theme.tabular
  * «Сейчас играет» по макету: обложка-«гребешок», заголовок Unbounded, лайк-печенька,
  * волнистый прогресс, группа кнопок, панель инструментов и «Далее» снизу. Цвета — из обложки.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
     val current by PlayerConnection.current.collectAsState()
@@ -93,6 +96,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
     val pal = rememberCoverPalette(t.cover)
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
+    var showInfo by remember { mutableStateOf(false) }
     val repeat by PlayerConnection.repeat.collectAsState()
     val shuffle by PlayerConnection.shuffle.collectAsState()
     val nextList by PlayerConnection.upNext.collectAsState()
@@ -144,9 +148,16 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
         }
         item {
             Row(Modifier.fillMaxWidth().widthIn(max = 520.dp).padding(start = 24.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
+                // длинное название бежит строкой; нажатие — «О треке» со всеми данными
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { showInfo = true }) {
                     AnimatedContent(t.title, transitionSpec = { (slideInVertically { it / 2 } + fadeIn()) togetherWith (slideOutVertically { -it / 2 } + fadeOut()) }, label = "title") { title ->
-                        Text(title, style = MaterialTheme.typography.headlineMedium, color = pal.onContainer, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = pal.onContainer,
+                            maxLines = 1,
+                            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1500, velocity = 40.dp),
+                        )
                     }
                     Text(
                         t.artist + if (t.album.isNotEmpty()) " · ${t.album}" else "",
@@ -154,7 +165,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                         color = pal.accent,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2500, velocity = 30.dp),
                     )
                 }
                 LikeCookie(isLiked, pal) { model.like(t, !isLiked) }
@@ -273,6 +284,70 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
             }
         }
         item { Spacer(Modifier.navigationBarsPadding().height(28.dp)) }
+    }
+    if (showInfo) TrackInfoSheet(model, t) { showInfo = false }
+}
+
+/** Ссылка на трек в его сервисе */
+private fun trackLink(t: org.nyao.music.data.Track): String = when (t.source) {
+    org.nyao.music.data.SOURCE_YA -> if (t.albumId != null) "https://music.yandex.ru/album/${t.albumId}/track/${t.srcId}" else "https://music.yandex.ru/track/${t.srcId}"
+    org.nyao.music.data.SOURCE_SC -> "https://soundcloud.com/search/sounds?q=" + android.net.Uri.encode("${t.artist} ${t.title}")
+    org.nyao.music.data.SOURCE_VK -> "https://vk.com/audio${t.srcId}"
+    else -> "https://music.youtube.com/watch?v=${t.srcId}"
+}
+
+/** «О треке»: всё, что известно о треке, плюс копирование, поиск исполнителя и переход в сервис */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClose: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onClose) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Cover(t.cover, Modifier.size(88.dp), RoundedCornerShape(20.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(t.title, style = MaterialTheme.typography.titleLarge)
+                    Text(t.artist, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            @Composable
+            fun Info(label: String, value: String) {
+                if (value.isBlank()) return
+                Row {
+                    Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(110.dp))
+                    Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Info("Название", t.title)
+                Info("Исполнители", t.artist)
+                Info("Альбом", t.album)
+                Info("Длительность", if (t.duration > 0) org.nyao.music.data.formatTime(t.duration) else "")
+                Info("Сервис", org.nyao.music.data.sourceName(t.source))
+                Info("ID в сервисе", t.srcId)
+            }
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.FilledTonalButton(onClick = {
+                    clip.setText(androidx.compose.ui.text.AnnotatedString("${t.artist} — ${t.title}"))
+                    model.message("Название скопировано")
+                }) { Text("Скопировать") }
+                androidx.compose.material3.OutlinedButton(onClick = {
+                    onClose()
+                    model.nowPlayingOpen = false
+                    val q = t.artist.substringBefore(",").trim()
+                    model.searchQuery = q
+                    model.runSearch(q)
+                    model.go(org.nyao.music.ui.Route.Search)
+                }) { Text("Ещё от исполнителя") }
+                androidx.compose.material3.OutlinedButton(onClick = {
+                    runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(trackLink(t))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }) { Text("Открыть в ${if (t.source == org.nyao.music.data.SOURCE_YA) "Яндексе" else org.nyao.music.data.sourceName(t.source)}") }
+            }
+        }
     }
 }
 

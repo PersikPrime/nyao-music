@@ -1,5 +1,11 @@
 package org.nyao.music.ui
 
+import androidx.compose.foundation.layout.widthIn
+
+import androidx.compose.ui.input.pointer.pointerInput
+
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+
 import org.nyao.music.ui.components.NyaoIcons
 
 import androidx.compose.ui.layout.positionInParent
@@ -56,8 +62,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -135,7 +139,7 @@ fun NyaoRoot() {
     val scope = rememberCoroutineScope()
     val model = remember { AppModel(scope) }
     val settings by Repo.prefs.settings.collectAsState()
-    val snackbar = remember { SnackbarHostState() }
+    var toast by remember { mutableStateOf<Toast?>(null) }
     var requiredUpdate by remember { mutableStateOf<org.nyao.music.data.UpdateInfo?>(null) }
     val outdated by Repo.cloud.outdated.collectAsState()
 
@@ -165,7 +169,9 @@ fun NyaoRoot() {
                 else if (u.available) PlaybackEvents.emit("Доступна Nyao Music ${u.label} — обновить можно в Настройках")
             }
         }
-        PlaybackEvents.messages.collect { snackbar.showSnackbar(it) }
+        // новое уведомление сразу заменяет старое (без очереди); одинаковое — просто продлевает показ
+        var seq = 0L
+        PlaybackEvents.messages.collect { text -> toast = Toast(text, ++seq) }
     }
 
     BackHandler(enabled = model.loginFor != null || model.nowPlayingOpen || model.stack.size > 1 || model.route != Route.Home) {
@@ -192,7 +198,7 @@ fun NyaoRoot() {
             })
         }
 
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 140.dp))
+        TopToast(toast, onDismiss = { toast = null }, modifier = Modifier.align(Alignment.TopCenter))
 
         // режим «Плеер»: окно нового микса; после обновления с 0.4 — выбор вида; устаревшая сборка — обновиться
         if (model.mixBuilderOpen) org.nyao.music.ui.screens.MixBuilderDialog(model)
@@ -223,6 +229,63 @@ private fun Content(model: AppModel, wide: Boolean) {
             Route.Library -> LibraryScreen(model, wide)
             Route.Settings -> SettingsScreen(model)
             is Route.PlaylistPage -> PlaylistScreen(model, r.playlist)
+        }
+    }
+}
+
+// ---------- Уведомления: капсула сверху ----------
+
+private data class Toast(val text: String, val id: Long) {
+    /** Ошибки и длинные сообщения висят дольше, подтверждения — коротко */
+    val durationMs: Long get() {
+        val problem = Regex("(?i)не |ошиб|не удалось|недоступ|закончил").containsMatchIn(text)
+        return (if (problem) 4500L else 2200L) + (if (text.length > 60) 1500L else 0L)
+    }
+}
+
+/** Капсула, выезжающая сверху: не закрывает кнопки плеера; смахивается вверх или по нажатию */
+@Composable
+private fun TopToast(toast: Toast?, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    var shown by remember { mutableStateOf(toast) }
+    if (toast != null) shown = toast
+    LaunchedEffect(toast?.id) {
+        if (toast != null) {
+            delay(toast.durationMs)
+            onDismiss()
+        }
+    }
+    var drag by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    AnimatedVisibility(
+        toast != null,
+        modifier = modifier.statusBarsPadding().padding(top = 8.dp, start = 16.dp, end = 16.dp),
+        enter = slideInVertically(spring(dampingRatio = 0.75f, stiffness = 500f)) { -it * 2 } + fadeIn(),
+        exit = slideOutVertically { -it * 2 } + fadeOut(),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = NyaoColors.S3,
+            contentColor = NyaoColors.Text,
+            shadowElevation = 10.dp,
+            modifier = Modifier
+                .widthIn(max = 520.dp)
+                .graphicsLayer { translationY = drag.coerceAtMost(0f) }
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragEnd = { if (drag < -30f) onDismiss(); drag = 0f },
+                        onDragCancel = { drag = 0f },
+                    ) { _, dy -> drag += dy }
+                }
+                .clickable(onClick = onDismiss),
+        ) {
+            AnimatedContent(shown?.text ?: "", transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "toast") { text ->
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
