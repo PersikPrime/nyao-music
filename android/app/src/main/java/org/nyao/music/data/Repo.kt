@@ -74,7 +74,7 @@ object Repo {
         // изменения настроек волны, вида и миксов уезжают на другие устройства
         prefs.onSyncChange = { key -> bg.launch { runCatching { cloud.pushState(key, stateData(key)) } } }
         mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
-        wave = WaveMixer(ya, yt, sc, vk, prefs, isDown = { !up(it) }) { cloud.recentIds() }
+        wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) })
     }
 
     fun track(id: String): Track? = tracks[id]
