@@ -410,7 +410,10 @@ export class YTMusicProvider {
           const expire = Number(new URL(url).searchParams.get('expire')) * 1000;
           const ttl = expire ? Math.max(60_000, expire - Date.now() - 5 * 60_000) : 30 * 60_000;
           log(`${videoId} ${client}: OK (${format.mime_type})`);
-          return { url, headers, ttl, mime: format.mime_type, client };
+          // насколько трек громче эталона YouTube (дБ) — для выравнивания громкости
+          const ac = (info.player_config && info.player_config.audio_config) || {};
+          const loudnessDb = Number.isFinite(ac.loudness_db) ? ac.loudness_db : null;
+          return { url, headers, ttl, mime: format.mime_type, client, loudnessDb };
         } catch (e) {
           log(`${videoId} ${client}: ${e.message}`);
           errors.push(`${client}: ${e.message}`);

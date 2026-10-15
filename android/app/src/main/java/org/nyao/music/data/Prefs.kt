@@ -20,6 +20,10 @@ data class Settings(
     val eqOn: Boolean = false,
     val eqPreset: String = "flat",
     val eqGains: List<Int> = List(10) { 0 },
+    /** Выравнивать громкость (по данным Яндекса и YouTube) */
+    val normalize: Boolean = false,
+    /** Плавные переходы между треками, секунд (0 — выкл) */
+    val fade: Int = 0,
 ) {
     val isWaveLayout: Boolean get() = layout == "wave"
 }
@@ -45,6 +49,8 @@ class Prefs(context: Context) {
         eqPreset = sp.getString("eqPreset", "flat") ?: "flat",
         eqGains = (sp.getString("eqGains", null) ?: "").split(",").mapNotNull { it.trim().toIntOrNull() }
             .takeIf { it.size == 10 }?.map { it.coerceIn(-12, 12) } ?: List(10) { 0 },
+        normalize = sp.getBoolean("normalize", false),
+        fade = sp.getInt("fade", 0).coerceIn(0, 10),
     )
 
     /** Вызывается, когда меняется то, что синхронизируется через аккаунт Nyao: "wave" или "prefs" */
@@ -67,6 +73,8 @@ class Prefs(context: Context) {
         putString("eqPreset", preset)
         putString("eqGains", gains.joinToString(",") { it.coerceIn(-12, 12).toString() })
     }
+    fun setNormalize(v: Boolean) = update { putBoolean("normalize", v) }
+    fun setFade(v: Int) = update { putInt("fade", v.coerceIn(0, 10)) }
     fun setWaveTab(v: Boolean) = update { putBoolean("waveTab", v) }.also { onSyncChange?.invoke("prefs") }
 
     /** Когда ключ синхронизации («wave», «prefs», «mixes») последний раз менялся на этом устройстве */

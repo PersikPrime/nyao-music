@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('nyao', {
     feedback: (type, track, played) => call('wave:feedback', type, track, played)
   },
   prepare: (id) => call('stream:prepare', id),
+  loudness: (id) => call('stream:loudness', id),
   streamError: (id) => call('stream:error', id),
   lyrics: (track) => call('lyrics', track),
   like: (track, on) => call('like', track, on),

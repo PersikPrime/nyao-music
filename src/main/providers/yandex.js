@@ -30,7 +30,9 @@ export function mapTrack(t) {
     album: album.title || '',
     duration: Math.round((t.durationMs || 0) / 1000),
     cover: coverUrl(t.coverUri || album.coverUri || t.ogImage),
-    available: t.available !== false
+    available: t.available !== false,
+    // громкость трека (LUFS по EBU R128) — для выравнивания громкости между треками и сервисами
+    loud: t.r128 && Number.isFinite(t.r128.i) ? t.r128.i : null
   };
 }
 

@@ -78,10 +78,42 @@ export class Equalizer {
       f.gain.value = 0;
       return f;
     });
+    // после фильтров: выравнивание громкости трека и плавные переходы
+    this.norm = this.ctx.createGain();
+    this.fader = this.ctx.createGain();
     let node = source.connect(this.pre);
     for (const f of this.filters) node = node.connect(f);
-    node.connect(this.ctx.destination);
+    node.connect(this.norm).connect(this.fader).connect(this.ctx.destination);
+    if (this.pendingGain != null) this.norm.gain.value = this.pendingGain;
     return true;
+  }
+
+  /** Усиление трека в дБ (выравнивание громкости). 0 — без изменений */
+  setTrackGain(db) {
+    const v = Math.pow(10, (Number(db) || 0) / 20);
+    if (!this.ctx) {
+      if (!db) return;
+      if (!this.build()) return;
+    }
+    this.norm.gain.setTargetAtTime(v, this.ctx.currentTime, 0.15);
+  }
+
+  /** Плавно довести громкость до value (0…1) за seconds */
+  fade(value, seconds) {
+    if (!this.ctx && !this.build()) return;
+    const g = this.fader.gain;
+    const t = this.ctx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(value, t + Math.max(0.05, seconds));
+  }
+
+  /** Сразу на полную громкость (новый трек без перехода) */
+  unfade() {
+    if (!this.ctx) return;
+    const g = this.fader.gain;
+    g.cancelScheduledValues(this.ctx.currentTime);
+    g.setValueAtTime(1, this.ctx.currentTime);
   }
 
   apply(eq) {
@@ -96,4 +128,16 @@ export class Equalizer {
     this.pre.gain.setTargetAtTime(Math.pow(10, (-peak * 0.6) / 20), t, 0.02);
     if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
   }
+}
+
+/**
+ * Усиление для выравнивания: Яндекс даёт громкость трека в LUFS (r128), YouTube — насколько трек громче своего эталона.
+ * Цель — -14 LUFS (как у Spotify и YouTube). Тише делаем сколько нужно, громче — не больше +6 дБ, чтобы не хрипело.
+ */
+export function normalizeGain(track, ytLoudnessDb) {
+  let db = null;
+  if (track && Number.isFinite(track.loud)) db = -14 - track.loud;
+  else if (Number.isFinite(ytLoudnessDb)) db = -ytLoudnessDb;
+  if (db == null) return 0;
+  return Math.max(-12, Math.min(6, Math.round(db * 10) / 10));
 }

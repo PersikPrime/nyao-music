@@ -555,6 +555,7 @@ function registerIpc() {
   handle('catalog:artist', (ref) => catalog.artist(ref));
   handle('catalog:album', (ref) => catalog.album(ref));
   handle('stream:prepare', (trackId) => streams.prepare(trackId));
+  handle('stream:loudness', (trackId) => streams.loudness(trackId));
   handle('stream:error', (trackId) => streams.lastError(trackId));
   handle('lyrics', (track) => findLyrics(track, fetchFn));
   handle('like', async (track, on) => {

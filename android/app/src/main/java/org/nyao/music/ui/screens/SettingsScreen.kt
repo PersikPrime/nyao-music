@@ -257,6 +257,31 @@ private fun EqCard() {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
+                Text("Выравнивать громкость", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Треки из разных сервисов звучат одинаково громко — по данным Яндекса и YouTube. SoundCloud и VK такие данные не дают.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.Switch(checked = s.normalize, onCheckedChange = { Repo.prefs.setNormalize(it) })
+        }
+        Column {
+            Text("Плавные переходы", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (s.fade > 0) "Трек затихает за ${s.fade} с до конца, следующий плавно нарастает" else "Выключены — треки сменяются сразу",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            androidx.compose.material3.Slider(
+                value = s.fade.toFloat(),
+                onValueChange = { v -> Math.round(v).let { if (it != s.fade) Repo.prefs.setFade(it) } },
+                valueRange = 0f..10f,
+                steps = 9,
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
                 Text("Эквалайзер", style = MaterialTheme.typography.titleSmall)
                 Text(
                     "Настраивает звук всех сервисов. Выключен — звук без изменений.",

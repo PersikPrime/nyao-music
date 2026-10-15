@@ -2,7 +2,7 @@ import { Player } from './player.js';
 import { Ribbon } from './ribbon.js';
 import { Onboarding } from './onboarding.js';
 import { layoutChoiceHtml } from './layouts.js';
-import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel } from './eq.js';
+import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain } from './eq.js';
 import { FullScreen } from './fullscreen.js';
 
 const api = window.nyao;
@@ -995,6 +995,7 @@ function renderSettings() {
     </section>
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Аккаунты</h2>${SERVICES.map((x) => svcCard(x.id)).join('')}</section>
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Моя волна</h2>${waveControlsHtml()}</section>
+    ${soundCardHtml()}
     ${eqCardHtml()}
     ${discordCardHtml()}
     <section class="card" id="lastfm-card">${lastfmCardInner()}</section>
@@ -1048,6 +1049,45 @@ async function refreshLastfm() {
     // нет связи с главным процессом — оставим как есть
   }
   renderLastfm();
+}
+
+// ---------- Звук: выравнивание громкости и плавные переходы ----------
+function soundCardHtml() {
+  const s = state.settings;
+  const fade = Number(s.fade) || 0;
+  return `<section class="card eq-card">
+    <div class="pref-row"><span><b>Выравнивать громкость</b><span class="hint">Треки из разных сервисов звучат одинаково громко — по данным Яндекса и YouTube о громкости трека. SoundCloud и VK такие данные не дают.</span></span>
+      <button class="switch ${s.normalize ? 'on' : ''}" role="switch" aria-checked="${!!s.normalize}" aria-label="Выравнивать громкость" data-action="toggle-normalize"><span></span></button></div>
+    <div class="pref-row"><span><b>Плавные переходы</b><span class="hint" id="fade-label">${fade ? `Трек затихает за ${fade} с до конца, следующий плавно нарастает` : 'Выключены — треки сменяются сразу'}</span></span>
+      <input type="range" min="0" max="10" step="1" value="${fade}" data-input="fade" aria-label="Плавные переходы, секунд" style="width:180px"></div>
+  </section>`;
+}
+
+let normSeq = 0;
+async function applyTrackSound() {
+  const t = player.current;
+  const s = state.settings || {};
+  fadingOut = false;
+  if (Number(s.fade) > 0) {
+    eq.fade(0, 0.01);
+    eq.fade(1, Math.min(2, Number(s.fade)));
+  } else eq.unfade();
+  const seq = ++normSeq;
+  if (!t || !s.normalize) return eq.setTrackGain(0);
+  const yt = t.source === 'yt' ? await api.loudness(t.id).catch(() => null) : null;
+  if (seq === normSeq) eq.setTrackGain(normalizeGain(t, yt));
+}
+
+let fadingOut = false;
+function checkFadeOut() {
+  const fade = Number((state.settings || {}).fade) || 0;
+  const a = player.audio;
+  if (!fade || fadingOut || !Number.isFinite(a.duration) || player.repeat === 'one') return;
+  const left = a.duration - a.currentTime;
+  if (left > 0 && left <= fade) {
+    fadingOut = true;
+    eq.fade(0, Math.max(0.2, left - 0.1));
+  }
 }
 
 let eqSaveTimer;
@@ -1464,6 +1504,11 @@ async function handleAction(el, e) {
       toast('Last.fm отключён');
       refreshLastfm();
       break;
+    case 'toggle-normalize':
+      state.settings = await api.settings.set({ normalize: !state.settings.normalize });
+      applyTrackSound();
+      renderSettings();
+      break;
     case 'eq-toggle': {
       const e = normalizeEq(state.settings.eq);
       saveEq({ ...e, on: !e.on });
@@ -1663,6 +1708,16 @@ view.addEventListener('submit', async (e) => {
 });
 
 view.addEventListener('input', (e) => {
+  if (e.target.dataset.input === 'fade') {
+    const v = Number(e.target.value);
+    state.settings = { ...state.settings, fade: v };
+    const l = $('#fade-label', view);
+    if (l) l.textContent = v ? `Трек затихает за ${v} с до конца, следующий плавно нарастает` : 'Выключены — треки сменяются сразу';
+    clearTimeout(eqSaveTimer);
+    eqSaveTimer = setTimeout(() => api.settings.set({ fade: v }).catch(() => {}), 300);
+    if (!v) eq.unfade();
+    return;
+  }
   if (e.target.dataset.input === 'eq') {
     const i = Number(e.target.dataset.i);
     const cur = normalizeEq(state.settings.eq);
@@ -1842,6 +1897,8 @@ const fullscreen = new FullScreen({
 });
 player.addEventListener('like', renderBar);
 player.addEventListener('track', () => fullscreen.update());
+player.addEventListener('track', applyTrackSound);
+player.addEventListener('time', checkFadeOut);
 player.addEventListener('state', () => fullscreen.update());
 player.addEventListener('like', () => fullscreen.update());
 player.addEventListener('time', () => fullscreen.tick());

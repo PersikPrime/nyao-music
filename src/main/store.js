@@ -17,7 +17,9 @@ const DEFAULT_SETTINGS = {
   layout: null,          // 'player' | 'wave'; null — ещё не выбран (предложим выбрать при запуске)
   splitLiked: false,     // «Мне нравится» отдельно по сервисам
   waveTab: false,        // вкладка «Моя волна» в меню в режиме «Плеер»
-  eq: null               // эквалайзер { on, preset, gains[10] }; null — выключен
+  eq: null,              // эквалайзер { on, preset, gains[10] }; null — выключен
+  normalize: false,      // выравнивать громкость треков (по данным Яндекса и YouTube)
+  fade: 0                // плавные переходы между треками, секунд (0 — выкл)
 };
 
 function dataPath(name) {

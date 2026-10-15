@@ -59,6 +59,11 @@ class PlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val equalizer = NyaoEqualizer()
+    // выравнивание громкости и плавные переходы: итоговая громкость плеера = norm × fade
+    private var normVol = 1f
+    private var fadeVol = 1f
+    private var enhancer: android.media.audiofx.LoudnessEnhancer? = null
+    private var enhancerSession = 0
     private var loadingMore = false
     private var lastId: String? = null
     private var lastPos = 0L
@@ -100,6 +105,27 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         player.addListener(listener)
+        // плавные переходы: каждые 200 мс считаем, насколько приглушить начало и конец трека
+        scope.launch {
+            while (isActive) {
+                val fade = Repo.prefs.settings.value.fade
+                val f = if (fade <= 0 || !player.isPlaying) 1f else {
+                    val pos = player.currentPosition
+                    val dur = player.duration
+                    val inMs = minOf(2000L, fade * 1000L)
+                    val fin = (pos.toFloat() / inMs).coerceIn(0f, 1f)
+                    val fout = if (dur > 0 && player.repeatMode != Player.REPEAT_MODE_ONE) ((dur - pos).toFloat() / (fade * 1000L)).coerceIn(0f, 1f) else 1f
+                    minOf(fin, fout)
+                }
+                if (f != fadeVol) {
+                    fadeVol = f
+                    applyVolume()
+                }
+                delay(200)
+            }
+        }
+        // выравнивание громкости — при смене настройки
+        scope.launch { Repo.prefs.settings.collect { applyNorm() } }
         // эквалайзер из настроек: следим за изменениями и за сменой звуковой сессии
         scope.launch {
             Repo.prefs.settings.collect { s -> equalizer.attach(player.audioSessionId, s.eqOn, s.eqGains) }
@@ -148,6 +174,7 @@ class PlaybackService : MediaSessionService() {
 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            applyNorm()
             val prev = lastId?.let { Repo.track(it) }
             val wave = Repo.mode.value == Repo.Mode.WAVE
             if (wave && prev != null && prev.id != mediaItem?.mediaId) {
@@ -164,7 +191,10 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_READY) errorsInRow = 0
+            if (playbackState == Player.STATE_READY) {
+                errorsInRow = 0
+                applyNorm() // громкость YouTube известна только после получения ссылки
+            }
             if (playbackState == Player.STATE_ENDED) maybeMore()
         }
 
@@ -174,6 +204,34 @@ class PlaybackService : MediaSessionService() {
             val s = Repo.prefs.settings.value
             equalizer.attach(audioSessionId, s.eqOn, s.eqGains)
         }
+    }
+
+    private fun applyVolume() {
+        player.volume = (normVol * fadeVol).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Выравнивание громкости: Яндекс даёт громкость трека в LUFS, YouTube — насколько трек громче своего эталона.
+     * Цель -14 LUFS. Тише — громкостью плеера, громче (до +6 дБ) — системным LoudnessEnhancer.
+     */
+    private fun applyNorm() {
+        val t = player.currentMediaItem?.mediaId?.let { Repo.track(it) }
+        val db = if (!Repo.prefs.settings.value.normalize || t == null) 0.0 else {
+            val raw = t.loud?.let { -14 - it } ?: if (t.source == org.nyao.music.data.SOURCE_YT) Repo.ytStreams.loudness(t.srcId)?.let { -it } else null
+            (raw ?: 0.0).coerceIn(-12.0, 6.0)
+        }
+        normVol = if (db < 0) Math.pow(10.0, db / 20).toFloat() else 1f
+        runCatching {
+            val session = player.audioSessionId
+            if (session != 0 && session != enhancerSession) {
+                enhancer?.release()
+                enhancer = android.media.audiofx.LoudnessEnhancer(session)
+                enhancerSession = session
+            }
+            enhancer?.setTargetGain(if (db > 0) (db * 100).toInt() else 0)
+            enhancer?.enabled = db > 0
+        }
+        applyVolume()
     }
 
     private fun maybeMore() {
@@ -250,6 +308,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         scope.cancel()
         equalizer.release()
+        runCatching { enhancer?.release() }
         session?.run {
             player.release()
             release()

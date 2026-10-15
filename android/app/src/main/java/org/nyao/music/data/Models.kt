@@ -12,6 +12,8 @@ data class Track(
     val duration: Int = 0,
     val cover: String? = null,
     val available: Boolean = true,
+    /** Громкость трека в LUFS (Яндекс, r128) — для выравнивания громкости */
+    val loud: Double? = null,
 ) {
     val isYa: Boolean get() = source == SOURCE_YA
 }

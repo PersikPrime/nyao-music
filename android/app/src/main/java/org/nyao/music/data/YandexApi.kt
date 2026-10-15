@@ -47,6 +47,7 @@ class YandexApi(private val prefs: Prefs) {
                 duration = (t.optLong("durationMs", 0) / 1000).toInt(),
                 cover = cover(t.str("coverUri") ?: album?.str("coverUri") ?: t.str("ogImage")),
                 available = t.optBoolean("available", true),
+                loud = t.optJSONObject("r128")?.let { r -> if (r.has("i")) r.optDouble("i").takeIf { !it.isNaN() } else null },
             )
         }
     }
