@@ -1,6 +1,7 @@
 package org.nyao.music.ui
 
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.graphics.drawscope.clipRect
 
 import androidx.compose.ui.layout.onGloballyPositioned
 
@@ -283,7 +284,7 @@ private fun BottomBlur(shot: androidx.compose.ui.graphics.layer.GraphicsLayer, b
             .then(blur)
             .drawWithContent {
                 val top = (barsTop - fade).coerceAtLeast(0f)
-                androidx.compose.ui.graphics.drawscope.clipRect(top = top) { drawLayer(shot) }
+                clipRect(top = top) { drawLayer(shot) }
                 // сверху размытие плавно исчезает
                 drawRect(
                     androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = top, endY = top + fade * 1.6f),
