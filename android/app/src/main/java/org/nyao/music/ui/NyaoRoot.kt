@@ -212,6 +212,18 @@ fun NyaoRoot() {
             })
         }
 
+        // проверка SoundCloud (капча): после неё досылаем отложенные лайки
+        val captcha by Repo.sc.captcha.collectAsState()
+        captcha?.let { url ->
+            org.nyao.music.ui.screens.ScCaptchaScreen(url) { ok ->
+                Repo.sc.captcha.value = null
+                if (ok) scope.launch {
+                    runCatching { Repo.flushScLikes() }
+                    PlaybackEvents.emit("Проверка пройдена — лайки SoundCloud отправлены")
+                }
+            }
+        }
+
         // техработы — заглушка поверх всего (скачанное слушать можно)
         val svc by Repo.status.collectAsState()
         AnimatedVisibility(svc.maintenance.active, enter = fadeIn(), exit = fadeOut()) {

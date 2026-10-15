@@ -191,3 +191,55 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
         )
     }
 }
+
+/**
+ * Проверка SoundCloud (DataDome): SoundCloud иногда просит доказать, что ты человек, прежде чем ставить лайки.
+ * Открываем его страницу проверки с тем же User-Agent, что и у входа; когда появится cookie datadome — закрываем и досылаем лайки.
+ */
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun ScCaptchaScreen(url: String, onDone: (Boolean) -> Unit) {
+    val done by rememberUpdatedState(onDone)
+    val start = remember { CookieManager.getInstance().getCookie("https://soundcloud.com")?.let { Regex("datadome=([^;]+)").find(it)?.groupValues?.get(1) } }
+    var finished by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        while (!finished) {
+            kotlinx.coroutines.delay(800)
+            val now = CookieManager.getInstance().getCookie("https://soundcloud.com")?.let { Regex("datadome=([^;]+)").find(it)?.groupValues?.get(1) }
+            if (now != null && now != start) {
+                finished = true
+                CookieManager.getInstance().flush()
+                kotlinx.coroutines.delay(600)
+                done(true)
+            }
+        }
+    }
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { finished = true; done(false) }) { Icon(NyaoIcons.Close, "Закрыть") }
+            Column(Modifier.weight(1f)) {
+                Text("Проверка SoundCloud", style = MaterialTheme.typography.titleMedium)
+                Text("Пройди её один раз — и лайки SoundCloud снова будут доходить", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        AndroidView(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.userAgentString = org.nyao.music.data.ScApi.LOGIN_UA
+                    if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+                        WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, emptySet())
+                    }
+                    layoutParams = android.view.ViewGroup.LayoutParams(-1, -1)
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                    webViewClient = WebViewClient()
+                    loadUrl(url)
+                }
+            },
+            onRelease = { it.destroy() },
+        )
+    }
+}
