@@ -78,7 +78,7 @@ function configureRpc() {
 // Что из настроек едет на другие устройства (остальное — своё у каждого компьютера)
 const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood'];
 // вид приложения и «Мне нравится» по сервисам — тоже общие для всех устройств
-const PREF_KEYS = ['layout', 'splitLiked', 'waveTab'];
+const PREF_KEYS = ['layout', 'splitLiked', 'waveTab', 'accent'];
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);

@@ -4,6 +4,7 @@ import { Onboarding } from './onboarding.js';
 import { layoutChoiceHtml } from './layouts.js';
 import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain } from './eq.js';
 import { FullScreen } from './fullscreen.js';
+import { ACCENTS, paletteFor, applyAccent } from './accent.js';
 import { releaseAgo } from './releases.js';
 import { arrangeSearch } from './search.js';
 import { handoffPlan, queueSnapshot, REACTIONS, JOIN_BASE, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
@@ -218,6 +219,32 @@ function waveControlsHtml(compact = false) {
   </div>`;
 }
 
+// ---------- Акцентный цвет ----------
+let accentPalette = paletteFor('lavender', { mac: IS_MAC });
+let bgRibbon = null;
+let accentCover = { id: null, rgb: null };
+function accentColor() {
+  return accentPalette.a;
+}
+/** Применяет палитру из настроек; для «Из обложки» берёт цвет текущей обложки */
+function refreshAccent() {
+  const id = (state.settings && state.settings.accent) || 'lavender';
+  const t = player.current;
+  if (id === 'cover' && t && t.cover && accentCover.id !== t.id) {
+    const tid = t.id;
+    accentCover = { id: tid, rgb: accentCover.rgb };
+    api.coverColor(t.cover).then((rgb) => {
+      if (accentCover.id !== tid) return;
+      accentCover.rgb = rgb;
+      refreshAccent();
+    }).catch(() => {});
+  }
+  accentPalette = paletteFor(id, { mac: IS_MAC, coverRgb: accentCover.rgb });
+  applyAccent(document.body, accentPalette, IS_MAC);
+  if (bgRibbon) bgRibbon.accent = accentPalette.a;
+  $$('.wave-shapes').forEach((el) => el.style.setProperty('--sh-a', accentPalette.a));
+}
+
 // ---------- Вид приложения ----------
 /** 'player' — своя музыка на первом плане (по умолчанию), 'wave' — акцент на «Мою волну» */
 function layout() {
@@ -337,6 +364,10 @@ function go(route, params = {}, push = true) {
     state.stack.push({ route: state.route, params: state.params });
     if (state.stack.length > 30) state.stack.shift();
   }
+  if (state.route !== route) {
+    state.waveShown = false;
+    state.waveTune = false;
+  }
   state.route = route;
   state.params = params;
   renderRail();
@@ -404,7 +435,7 @@ function renderHome() {
     ${ytSection ? `<section><h2 class="sec" style="margin-bottom:12px">${esc(ytSection.title)}</h2>${tracksHtml(ytSection.tracks.slice(0, 8), 'home-yt')}</section>` : ''}
   </div>`;
   if (ytSection) lists['home-section'] = ytSection.tracks;
-  new Ribbon($('#home-ribbon'), { lines: 14, cy: 0.42, amp: 0.9, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+  new Ribbon($('#home-ribbon'), { lines: 14, cy: 0.42, amp: 0.9, accent: accentColor() });
   injectOutage();
 }
 
@@ -471,7 +502,7 @@ function renderHomePlayer() {
     </div>
     ${ytSection ? `<section><h2 class="sec" style="margin-bottom:12px">${esc(ytSection.title)}</h2>${tracksHtml(ytSection.tracks.slice(0, 8), 'home-yt')}</section>` : ''}
   </div>`;
-  new Ribbon($('#home-ribbon'), { lines: 12, cy: 0.5, amp: 0.8, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+  new Ribbon($('#home-ribbon'), { lines: 12, cy: 0.5, amp: 0.8, accent: accentColor() });
   injectOutage();
 }
 /** История и «чаще всего» для главной */
@@ -495,29 +526,94 @@ async function loadRecent() {
   if (state.route === 'home') renderHome();
 }
 
+// Фигуры M3 Expressive по краям «Моей волны»: плотные, в цветах акцента, выезжают с краёв по очереди.
+// Размеры в em: контейнер масштабируется от ширины окна, фигуры остаются у краёв.
+function polarPath(r, lobes, depth, rot = 0, steps = 180) {
+  const pts = [];
+  const R = r * (1 + depth);
+  for (let i = 0; i < steps; i++) {
+    const a = (2 * Math.PI * i) / steps;
+    const rr = r * (1 + depth * Math.cos(lobes * (a + rot)));
+    pts.push(`${(R + rr * Math.cos(a)).toFixed(1)} ${(R + rr * Math.sin(a)).toFixed(1)}`);
+  }
+  return { d: `M${pts.join(' L')} Z`, size: 2 * R };
+}
+// [сторона, лепестки, глубина, поворот, радиус, позиция (em), цвет]
+const WAVE_SHAPES = [
+  ['l', 9, 0.07, 0, 15, { left: -18, top: -4 }, 'deep'],
+  ['l', 4, 0.2, 0.4, 9.2, { left: 1, top: 25 }, 'strong'],
+  ['l', 8, 0.09, 0, 5.8, { left: 18.7, top: 0.7 }, 'a'],
+  ['l', 12, 0.05, 0, 10, { left: -6.5, bottom: -11.5 }, 'dark'],
+  ['l', 0, 0, 0, 0, { left: 7, bottom: 9.5, pill: [13, 5.2, 14] }, 'light'],
+  ['r', 6, 0.11, 0, 18, { right: -16, top: -6 }, 'deep'],
+  ['r', 3, 0.17, 0.3, 8.2, { right: 13.4, top: 28.4 }, 'a'],
+  ['r', 5, 0.14, 0.2, 6, { right: 8.2, top: -2.8 }, 'light'],
+  ['r', 7, 0.1, 0, 12, { right: 22.8, bottom: -17 }, 'dark'],
+  ['r', 0, 0, 0, 0, { right: 27, top: 4.6, pill: [16, 6, -18] }, 'strong']
+];
+function waveShapesHtml(animate) {
+  return `<div class="wave-shapes ${animate ? 'anim' : ''}" aria-hidden="true">${WAVE_SHAPES.map(([side, lobes, depth, rot, r, pos, col], i) => {
+    const place = Object.entries(pos).filter(([k]) => k !== 'pill').map(([k, v]) => `${k}:${v}em`).join(';');
+    const style = `${place};--i:${i};--dx:${side === 'l' ? -1 : 1};--c:var(${col === 'a' ? '--accent' : `--accent-${col}`})`;
+    if (pos.pill) {
+      const [w, h, deg] = pos.pill;
+      return `<span class="wsh pill" style="${style};width:${w}em;height:${h}em;--rot:${deg}deg"></span>`;
+    }
+    const { d, size } = polarPath(r * 10, lobes, depth, rot);
+    return `<svg class="wsh" style="${style};width:${(size / 10).toFixed(2)}em;height:${(size / 10).toFixed(2)}em" viewBox="0 0 ${size.toFixed(1)} ${size.toFixed(1)}"><path d="${d}"/></svg>`;
+  }).join('')}</div><div class="wave-fade" aria-hidden="true"></div>`;
+}
+function waveSummary() {
+  const s = state.settings || {};
+  const div = (DIVERSITY.find((d) => d[0] === s.waveDiversity) || DIVERSITY[0])[1];
+  const mood = (MOODS.find((m) => m[0] === s.waveMood) || [])[1];
+  return [div, mood, shareLabel(s.ytmShare ?? 30)].filter(Boolean).join(' · ');
+}
+function waveTuneHtml() {
+  return `<div class="wave-scrim" data-action="wave-tune-close"></div>
+  <aside class="wave-tune" role="dialog" aria-label="Настроить волну">
+    <div class="wt-head"><h2>Настроить волну</h2><button class="ic dr-close" data-action="wave-tune-close" aria-label="Закрыть" title="Закрыть (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="wt-body">${waveControlsHtml()}</div>
+  </aside>`;
+}
+function closeWaveTune() {
+  if (!state.waveTune) return false;
+  state.waveTune = false;
+  $('.wave-tune-layer', view)?.classList.remove('open');
+  $('.wave-tune-btn', view)?.setAttribute('aria-expanded', 'false');
+  return true;
+}
 function renderWave() {
   const t = player.current;
   const waveOn = player.mode === 'wave';
   const playing = waveOn && player.playing;
   const next = waveOn ? player.queue.slice(player.index + 1, player.index + 6) : [];
+  const animate = !state.waveShown;
+  state.waveShown = true;
+  const extra = [state.status.yt && ['yt', 'YouTube Music'], state.status.sc && ['sc', 'SoundCloud'], state.status.vk && ['vk', 'VK']].filter(Boolean);
   view.innerHTML = `<div class="wave-view">
     <section class="wave-hero">
-      <canvas id="wave-ribbon"></canvas>
-      <div class="top"><span class="srcs"><span class="dotsrc ya"></span>Яндекс<span style="opacity:.4">+</span><span class="dotsrc yt"></span>YouTube Music<span style="opacity:.4">→</span><span style="color:var(--accent)">одна волна</span></span><span></span></div>
+      ${waveShapesHtml(animate)}
+      <div class="top">
+        <span class="glass-cap srcs"><span class="dotsrc ya"></span>Яндекс${extra.map(([k, n]) => `<span class="plus">+</span><span class="dotsrc ${k}"></span>${n}`).join('')}<span class="plus">→</span><span class="one">одна волна</span></span>
+        <span class="glass-cap" id="wave-summary">${esc(waveSummary())}</span>
+      </div>
       <div class="center">
         <h1 class="wave-title">Моя волна</h1>
         <button class="wave-play" data-action="wave-toggle" aria-label="${playing ? 'Пауза' : 'Слушать волну'}">${playing ? ICONS.pauseBig : ICONS.playBig}</button>
-        ${waveOn && t ? `<button class="now-pill" data-action="fullscreen" title="Полный экран">${coverHtml(t, '')}<span class="ttl">${esc(t.title)}</span><span class="muted">${esc(t.artist)}</span>${badge(t.source)}</button>` : ''}
+        <div class="wave-row">
+          ${waveOn && t ? `<button class="now-pill" data-action="fullscreen" title="Полный экран">${coverHtml(t, '')}<span class="ttl">${esc(t.title)}</span><span class="muted">${esc(t.artist)}</span>${badge(t.source)}</button>` : ''}
+          <button class="wave-tune-btn" data-action="wave-tune" aria-haspopup="dialog" aria-expanded="${!!state.waveTune}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4"/></svg>Настроить волну</button>
+        </div>
       </div>
     </section>
-    <section class="wave-panels">${waveControlsHtml()}</section>
     <section class="next-up">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><h2 class="sec" style="font-size:17px">Дальше в волне</h2><span class="hint">дослушанные и пропущенные треки учат ленту Яндекса</span></div>
       ${next.length ? `<div class="next-grid">${next.map((n, i) => `<button class="next-card" data-action="q-play" data-i="${player.index + 1 + i}">${coverHtml(n, 'xs')}<span class="meta"><span class="t" style="display:block">${esc(n.title)}</span><span class="s" style="display:block">${esc(n.artist)}</span></span><span class="dotsrc ${n.source}"></span></button>`).join('')}</div>` : '<div class="hint">Запусти волну — здесь появятся следующие треки.</div>'}
     </section>
-  </div>`;
+  </div>
+  <div class="wave-tune-layer ${state.waveTune ? 'open' : ''}">${waveTuneHtml()}</div>`;
   $$('input[data-input="share"]', view).forEach(setRangeFill);
-  new Ribbon($('#wave-ribbon'), { lines: 18, cy: 0.5, amp: 1, accent: '#C6B8FF' });
 }
 
 // ---------- Выезжающая панель справа: «Об исполнителе / Далее / Об этом треке» и очередь ----------
@@ -757,7 +853,7 @@ function renderArtist() {
       <div class="artist-grid">${a.similar.map((s) => `<button class="artist-tile" data-action="open-artist" data-ref="${esc(s.ref)}"><div class="cover round" style="background:#14101e">${esc((s.name || '?').charAt(0).toUpperCase())}${s.cover ? `<img src="${esc(s.cover)}" alt="">` : ''}</div><span class="t">${esc(s.name)}</span></button>`).join('')}</div>
     </section>` : ''}
   </div>`;
-  if (!a.cover) new Ribbon($('#artist-ribbon'), { lines: 12, cy: 0.45, amp: 0.8, accent: '#C6B8FF' });
+  if (!a.cover) new Ribbon($('#artist-ribbon'), { lines: 12, cy: 0.45, amp: 0.8, accent: accentColor() });
 }
 
 /** Простой список треков: «Все треки» исполнителя */
@@ -1029,6 +1125,18 @@ function playHandoff(d, fallbackLabel) {
   renderBar();
 }
 
+function accentPickerHtml() {
+  const cur = (state.settings && state.settings.accent) || 'lavender';
+  return `<div class="accent-pick">
+    <div><b>Акцентный цвет</b><span class="hint">Как в Android 16: один цвет красит фигуры «Моей волны», кнопки, выделение и прогресс. «Из обложки» подстраивается под текущий трек.</span></div>
+    <div class="accent-row" role="radiogroup" aria-label="Акцентный цвет">${ACCENTS.map(([id, label]) => {
+      const p = id === 'cover' ? null : paletteFor(id, { mac: IS_MAC });
+      const sw = p ? `<span class="sw"><i style="background:${p.a}"></i><i style="background:${p.strong}"></i><i style="background:${p.deep}"></i></span>` : '<span class="sw cover"></span>';
+      return `<button class="accent-sw ${cur === id ? 'on' : ''}" role="radio" aria-checked="${cur === id}" data-action="set-accent" data-v="${id}">${sw}<span class="nm">${label}</span></button>`;
+    }).join('')}</div>
+  </div>`;
+}
+
 function renderSettings() {
   view.innerHTML = `<div class="scroll settings">
     <h1 class="page">Настройки</h1>
@@ -1036,6 +1144,7 @@ function renderSettings() {
     <section class="card">
       <div><h2 class="sec">Вид приложения</h2><div class="hint">Что главное при запуске. Через аккаунт Nyao едет на все устройства.</div></div>
       ${layoutChoiceHtml(layout(), 'data-action="set-layout"')}
+      ${accentPickerHtml()}
       <div class="pref-row"><span><b>«Мне нравится» по сервисам</b><span class="hint">Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud — плюс общий.</span></span>
         <button class="switch ${state.settings.splitLiked ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.splitLiked}" aria-label="«Мне нравится» по сервисам" data-action="split-liked" data-v="${state.settings.splitLiked ? 0 : 1}"><span></span></button></div>
       ${layout() === 'player' ? `<div class="pref-row"><span><b>Вкладка «Моя волна» в меню</b><span class="hint">В режиме «Плеер» волна живёт плиткой на главной. Можно вернуть её отдельной вкладкой.</span></span>
@@ -1718,7 +1827,7 @@ function renderTogether() {
         <section class="tg-card"><span class="eyebrow">Тебя позвали</span><h2>Войти по коду</h2><p>Код из 6 знаков или ссылка-приглашение.</p>
           <form data-form="room-join" class="tg-join"><input name="code" maxlength="64" placeholder="Например, K7QM2X" aria-label="Код комнаты" autocomplete="off"><button class="btn primary">Войти</button></form></section>
       </div></div>`;
-    new Ribbon($('#tg-ribbon'), { lines: 10, cy: 0.6, amp: 0.7, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+    new Ribbon($('#tg-ribbon'), { lines: 10, cy: 0.6, amp: 0.7, accent: accentColor() });
     return;
   }
   const st = r.state;
@@ -1834,7 +1943,7 @@ function renderStats() {
       </div>`;
   }
   view.innerHTML = `<div class="scroll stats"><div class="st-head"><h1 class="page">Итоги</h1>${seg}</div>${body}</div>`;
-  if ($('#st-ribbon')) new Ribbon($('#st-ribbon'), { lines: 14, cy: 0.55, amp: 1, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+  if ($('#st-ribbon')) new Ribbon($('#st-ribbon'), { lines: 14, cy: 0.55, amp: 1, accent: accentColor() });
 }
 
 // ---------- Перенос плейлиста в другой сервис ----------
@@ -1998,6 +2107,14 @@ async function handleAction(el, e) {
       if (player.mode === 'wave' && player.current) player.toggle();
       else await player.startWave();
       if (state.route === 'home' || state.route === 'wave') RENDER[state.route]();
+      break;
+    case 'wave-tune':
+      state.waveTune = true;
+      $('.wave-tune-layer', view)?.classList.add('open');
+      $('.wave-tune-btn', view)?.setAttribute('aria-expanded', 'true');
+      break;
+    case 'wave-tune-close':
+      closeWaveTune();
       break;
     case 'wave-div':
       await setWave({ waveDiversity: el.dataset.v });
@@ -2262,6 +2379,15 @@ async function handleAction(el, e) {
     }
     case 'set-layout':
       await setLayout(el.dataset.v);
+      break;
+    case 'set-accent':
+      state.settings = await api.settings.set({ accent: el.dataset.v });
+      refreshAccent();
+      $$('.accent-sw').forEach((b) => {
+        const on = b.dataset.v === el.dataset.v;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-checked', String(on));
+      });
       break;
     case 'toggle-wavetab':
       state.settings = await api.settings.set({ waveTab: !state.settings.waveTab });
@@ -2570,6 +2696,7 @@ volEl.addEventListener('input', () => {
 
 player.addEventListener('track', () => {
   renderBar();
+  if (state.settings && state.settings.accent === 'cover') refreshAccent();
   if (state.drawer) {
     renderDrawer(state.drawer === 'queue');
     if (state.drawer === 'info') loadNpArtist();
@@ -2725,6 +2852,7 @@ document.addEventListener('keydown', (e) => {
       $('#connect').hidden = true;
       return;
     }
+    if (closeWaveTune()) return;
     if (closeDrawer()) return;
   }
   if (e.code === 'Space') {
@@ -2967,8 +3095,9 @@ function openMixBuilder() {
 
 // ---------- Старт ----------
 (async function init() {
-  if (IS_MAC) new Ribbon($('#bg-ribbon'), { lines: 20, cy: 0.58, amp: 1, width: 1.7, accent: '#D8CEFF', alpha: 0.9 });
   state.settings = await api.settings.get();
+  refreshAccent();
+  if (IS_MAC) bgRibbon = new Ribbon($('#bg-ribbon'), { lines: 20, cy: 0.58, amp: 1, width: 1.7, accent: accentColor(), alpha: 0.9 });
   eq.apply(state.settings.eq);
   api.status.get().then(applyStatus).catch(() => {});
   api.status.onChange(applyStatus);
@@ -2992,7 +3121,10 @@ function openMixBuilder() {
     api.cloud.onChanged(async (keys) => {
       // другое устройство поменяло миксы или настройки волны
       if (keys.includes('wave') || keys.includes('prefs')) state.settings = await api.settings.get();
-      if (keys.includes('prefs')) renderRail();
+      if (keys.includes('prefs')) {
+        renderRail();
+        refreshAccent();
+      }
       if (keys.includes('mixes')) {
         loadHome();
         loadLibrary();

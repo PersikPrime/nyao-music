@@ -78,7 +78,7 @@ export class FullScreen {
         </div>
       </div>
       <aside class="fs-queue" aria-label="Очередь">
-        <div class="fs-q-head"><span>Очередь</span><button class="fs-round" data-fs="queue" aria-label="Закрыть очередь"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+        <div class="fs-q-head"><span>Очередь</span><span class="fs-q-sub"></span><button class="fs-round" data-fs="queue" aria-label="Закрыть очередь"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
         <div class="fs-q-list"></div>
       </aside>`;
     document.body.appendChild(el);
@@ -198,6 +198,7 @@ export class FullScreen {
     const key = `${player.index}|${q.length}|${q[player.index] && q[player.index].id}`;
     if (this.queueKey === key && !scroll) return;
     this.queueKey = key;
+    this.$('.fs-q-sub').textContent = player.mode === 'wave' ? 'Моя волна' : [player.label, q.length ? `${q.length} тр.` : ''].filter(Boolean).join(' · ');
     list.innerHTML = items.length ? items.map((t, k) => {
       const i = from + k;
       return `<button class="fs-q-row${i === player.index ? ' cur' : ''}${i < player.index ? ' past' : ''}" data-qi="${i}"><span class="fs-q-art">${t.cover ? `<img src="${esc(t.cover)}" alt="" loading="lazy">` : ''}</span><span class="fs-q-meta"><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></span>${t.duration ? `<span class="fs-q-dur">${fmt(t.duration)}</span>` : ''}</button>`;

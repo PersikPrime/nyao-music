@@ -20,7 +20,8 @@ const DEFAULT_SETTINGS = {
   eq: null,              // эквалайзер { on, preset, gains[10] }; null — выключен
   normalize: false,      // выравнивать громкость треков (по данным Яндекса и YouTube)
   fade: 0,               // плавные переходы между треками, секунд (0 — выкл)
-  fsAutoHide: false,     // полноэкранный режим: прятать кнопки, если мышь не двигается
+  fsAutoHide: false,
+  accent: 'lavender',     // акцентный цвет: lavender | coral | mint | sun | cover     // полноэкранный режим: прятать кнопки, если мышь не двигается
   continueSimilar: true, // список доиграл — продолжать похожим (радио по последнему треку)
   searchPlay: 'similar', // трек из поиска: 'similar' — дальше похожее, 'list' — остальные результаты
   globalKeys: true,      // сочетания Ctrl+Alt+… работают, даже когда окно свёрнуто
