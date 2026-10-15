@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage, Tray, Menu, globalShortcut } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -352,6 +352,7 @@ function registerIpc() {
   handle('settings:set', (patch) => {
     const next = settings.set(patch);
     if ('discordRpc' in patch) configureRpc();
+    if ('globalKeys' in patch) applyShortcuts();
     if (WAVE_KEYS.some((k) => k in patch) && cloud) cloud.pushState('wave', pick(next, WAVE_KEYS)).catch(() => {});
     if (PREF_KEYS.some((k) => k in patch) && cloud) cloud.pushState('prefs', pick(next, PREF_KEYS)).catch(() => {});
     return next;
@@ -377,6 +378,10 @@ function registerIpc() {
     return cloud.recordPlay(play);
   });
   handle('cloud:now', (info) => {
+    if (info) {
+      nowInfo = { title: (info.track && info.track.title) || '', artist: (info.track && info.track.artist) || '', playing: !!info.playing };
+      updateTray();
+    }
     if (info && info.playing && info.track) lastfm.nowPlaying(info.track).catch(() => {});
     return cloud.setNow(info).catch(() => {});
   });
@@ -599,6 +604,15 @@ function createWindow() {
   win.on('maximize', () => win.webContents.send('win:state', { maximized: true }));
   win.on('unmaximize', () => win.webContents.send('win:state', { maximized: false }));
   win.on('leave-full-screen', () => win.webContents.send('win:fullscreen', false));
+  // «сворачивать в трей»: крестик прячет окно, музыка играет дальше
+  win.on('close', (e) => {
+    if (!quitting && settings.get().closeToTray && tray) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+  setupTray();
+  applyShortcuts();
   win.webContents.once('did-finish-load', () => pollStatus());
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
@@ -646,6 +660,60 @@ app.whenReady().then(() => {
     cb({ requestHeaders: details.requestHeaders });
   });
 });
+
+// ---------- Трей и глобальные сочетания клавиш ----------
+let tray = null;
+let nowInfo = { title: '', artist: '', playing: false };
+let quitting = false;
+const control = (cmd) => {
+  if (win && !win.isDestroyed()) win.webContents.send('control', cmd);
+};
+function showWindow() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+function trayMenu() {
+  const label = nowInfo.title ? `${nowInfo.title} — ${nowInfo.artist}`.slice(0, 60) : 'Ничего не играет';
+  return Menu.buildFromTemplate([
+    { label, enabled: false },
+    { type: 'separator' },
+    { label: nowInfo.playing ? 'Пауза' : 'Играть', click: () => control('toggle') },
+    { label: 'Следующий', click: () => control('next') },
+    { label: 'Предыдущий', click: () => control('prev') },
+    { label: 'Мне нравится', click: () => control('like') },
+    { type: 'separator' },
+    { label: 'Открыть Nyao Music', click: showWindow },
+    { label: 'Выйти', click: () => { quitting = true; app.quit(); } }
+  ]);
+}
+function updateTray() {
+  if (!tray) return;
+  tray.setToolTip(nowInfo.title ? `Nyao Music — ${nowInfo.title}` : 'Nyao Music');
+  tray.setContextMenu(trayMenu());
+}
+function setupTray() {
+  if (tray) return;
+  const img = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'tray.png'));
+  tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img);
+  tray.on('click', () => (process.platform === 'darwin' ? tray.popUpContextMenu() : showWindow()));
+  updateTray();
+}
+const SHORTCUTS = { 'CommandOrControl+Alt+Space': 'toggle', 'CommandOrControl+Alt+Right': 'next', 'CommandOrControl+Alt+Left': 'prev', 'CommandOrControl+Alt+L': 'like' };
+function applyShortcuts() {
+  globalShortcut.unregisterAll();
+  if (!settings.get().globalKeys) return;
+  for (const [acc, cmd] of Object.entries(SHORTCUTS)) {
+    try {
+      globalShortcut.register(acc, () => control(cmd));
+    } catch {
+      // сочетание занято другой программой — пропускаем
+    }
+  }
+}
+app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('before-quit', () => { quitting = true; });
 
 app.on('window-all-closed', () => {
   rpc.disconnect();

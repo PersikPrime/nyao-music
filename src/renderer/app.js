@@ -1022,6 +1022,7 @@ function renderSettings() {
     ${eqCardHtml()}
     ${discordCardHtml()}
     <section class="card" id="lastfm-card">${lastfmCardInner()}</section>
+    ${controlCardHtml()}
     ${updateCardHtml()}
     <section class="card">
       <h2 class="sec">О приложении</h2>
@@ -1041,6 +1042,18 @@ function eqCardHtml() {
       <button class="switch ${e.on ? 'on' : ''}" role="switch" aria-checked="${e.on}" aria-label="Эквалайзер" data-action="eq-toggle"><span></span></button></div>
     <div class="eq-presets ${e.on ? '' : 'off'}">${EQ_PRESETS.map(([id, name]) => `<button class="chip ${e.preset === id ? 'on' : ''}" data-action="eq-preset" data-v="${id}">${name}</button>`).join('')}${e.preset === 'custom' ? '<button class="chip on" disabled>Свой</button>' : ''}</div>
     <div class="eq-bands ${e.on ? '' : 'off'}">${EQ_BANDS.map((hz, i) => `<label class="eq-band"><span class="eq-db" id="eq-db-${i}">${e.gains[i] > 0 ? '+' : ''}${e.gains[i]}</span><input type="range" min="-12" max="12" step="1" value="${e.gains[i]}" data-input="eq" data-i="${i}" aria-label="${bandLabel(hz)} Гц" ${e.on ? '' : 'disabled'}><span class="eq-hz">${bandLabel(hz)}</span></label>`).join('')}</div>
+  </section>`;
+}
+
+// ---------- Управление: глобальные сочетания и трей ----------
+function controlCardHtml() {
+  const s = state.settings;
+  const mod = IS_MAC ? '⌘⌥' : 'Ctrl+Alt+';
+  return `<section class="card eq-card">
+    <div class="pref-row"><span><b>Сочетания клавиш везде</b><span class="hint">Работают, даже когда окно свёрнуто: ${mod}Пробел — пауза, ${mod}→ / ${mod}← — следующий и предыдущий, ${mod}L — «Мне нравится». Медиаклавиши клавиатуры работают всегда.</span></span>
+      <button class="switch ${s.globalKeys !== false ? 'on' : ''}" role="switch" aria-checked="${s.globalKeys !== false}" aria-label="Сочетания клавиш везде" data-action="toggle-globalkeys"><span></span></button></div>
+    <div class="pref-row"><span><b>Сворачивать в трей при закрытии</b><span class="hint">Крестик прячет окно, музыка играет дальше. Иконка Nyao в трее — управление и выход.</span></span>
+      <button class="switch ${s.closeToTray ? 'on' : ''}" role="switch" aria-checked="${!!s.closeToTray}" aria-label="Сворачивать в трей при закрытии" data-action="toggle-tray"><span></span></button></div>
   </section>`;
 }
 
@@ -1527,6 +1540,14 @@ async function handleAction(el, e) {
       toast('Last.fm отключён');
       refreshLastfm();
       break;
+    case 'toggle-globalkeys':
+      state.settings = await api.settings.set({ globalKeys: state.settings.globalKeys === false });
+      renderSettings();
+      break;
+    case 'toggle-tray':
+      state.settings = await api.settings.set({ closeToTray: !state.settings.closeToTray });
+      renderSettings();
+      break;
     case 'toggle-normalize':
       state.settings = await api.settings.set({ normalize: !state.settings.normalize });
       applyTrackSound();
@@ -1925,6 +1946,13 @@ player.addEventListener('time', checkFadeOut);
 player.addEventListener('state', () => fullscreen.update());
 player.addEventListener('like', () => fullscreen.update());
 player.addEventListener('time', () => fullscreen.tick());
+// команды из трея и глобальных сочетаний
+api.onControl((cmd) => {
+  if (cmd === 'toggle') player.toggle();
+  else if (cmd === 'next') player.next(true);
+  else if (cmd === 'prev') player.prev();
+  else if (cmd === 'like' && player.current) player.toggleLike().then(() => toast(player.liked.has(player.current.id) ? 'Добавлено в «Мне нравится»' : 'Убрано из «Мне нравится»')).catch(() => {});
+});
 api.win.onFullscreen((on) => {
   if (!on) fullscreen.close();
 });

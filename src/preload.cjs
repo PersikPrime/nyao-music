@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   coverColor: (url) => call('cover:color', url),
   trackDetails: (track) => call('track:details', track),
+  onControl: (cb) => ipcRenderer.on('control', (_e, cmd) => cb(cmd)),
   radio: {
     start: (track) => call('radio:start', track),
     more: (ids) => call('radio:more', ids)
