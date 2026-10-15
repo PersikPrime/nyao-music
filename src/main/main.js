@@ -14,7 +14,7 @@ import { StreamService } from './stream.js';
 import { findLyrics } from './lyrics.js';
 import { Catalog } from './catalog.js';
 import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
-import { NyaoCloud } from './cloud.js';
+import { NyaoCloud, API_BASE } from './cloud.js';
 import os from 'node:os';
 import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch } from './auth.js';
 
@@ -36,6 +36,23 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const fetchFn = (url, opts) => net.fetch(url, opts);
+
+// Статус с сервера Nyao: техработы (заглушка на весь экран) и сбои отдельных сервисов (плашка, их треки пропускаем)
+let svcStatus = { maintenance: { active: false }, outages: [] };
+async function pollStatus() {
+  try {
+    const res = await net.fetch(`${API_BASE}/status`, { headers: { 'X-Nyao-Build': String(readVersion().build || 0) } });
+    if (!res.ok) return svcStatus;
+    const s = await res.json();
+    svcStatus = { maintenance: s.maintenance || { active: false }, outages: Array.isArray(s.outages) ? s.outages : [] };
+    if (win && !win.isDestroyed()) win.webContents.send('status', svcStatus);
+  } catch {
+    // сервер недоступен — работаем как обычно
+  }
+  return svcStatus;
+}
+const up = (id) => !svcStatus.outages.includes(id);
+setInterval(pollStatus, 2 * 60_000).unref?.();
 let ya, yt, sc, vk, wave, streams, catalog, win, cloud;
 const rpc = new DiscordRPC({ log: (m) => console.log(m) });
 function configureRpc() {
@@ -122,6 +139,7 @@ function initProviders() {
   const waveMemFile = path.join(app.getPath('userData'), 'wave-memory.json');
   wave = new WaveMixer({
     ya, yt, sc, vk,
+    isDown: (id) => svcStatus.outages.includes(id),
     getSettings: () => settings.get(),
     getRecent: () => cloud.recentIds(),
     memory: {
@@ -255,6 +273,7 @@ function registerIpc() {
   handle('win:minimize', () => win.minimize());
   handle('win:maximize', () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   handle('win:close', () => win.close());
+  handle('status:get', (force) => (force ? pollStatus() : svcStatus));
   handle('win:fullscreen', (on) => {
     win.setFullScreen(!!on);
     return win.isFullScreen();
@@ -484,7 +503,7 @@ function registerIpc() {
   handle('search', async (q) => {
     // Поиск YouTube Music работает и без входа — аккаунт нужен только для лайков и библиотеки
     // SoundCloud тоже ищет без входа
-    const [a, b, c, d] = await Promise.all([ya.loggedIn ? safe(ya.search(q), []) : [], safe(yt.search(q), []), safe(sc.search(q), []), vk.loggedIn ? safe(vk.search(q), []) : []]);
+    const [a, b, c, d] = await Promise.all([ya.loggedIn && up('ya') ? safe(ya.search(q), []) : [], up('yt') ? safe(yt.search(q), []) : [], up('sc') ? safe(sc.search(q), []) : [], vk.loggedIn && up('vk') ? safe(vk.search(q), []) : []]);
     return { ya: a, yt: b, sc: c, vk: d };
   });
 
@@ -530,6 +549,7 @@ function createWindow() {
   win.on('maximize', () => win.webContents.send('win:state', { maximized: true }));
   win.on('unmaximize', () => win.webContents.send('win:state', { maximized: false }));
   win.on('leave-full-screen', () => win.webContents.send('win:fullscreen', false));
+  win.webContents.once('did-finish-load', () => pollStatus());
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };

@@ -233,6 +233,9 @@ object PlayerConnection {
         }
     }
 
+    /** Пауза, если играет (техработы) */
+    fun pauseIfPlaying() = withController { c -> if (c.isPlaying) c.pause() }
+
     fun toggle() = withController { c ->
         if (c.isPlaying) c.pause() else {
             if (c.playbackState == Player.STATE_IDLE) c.prepare()

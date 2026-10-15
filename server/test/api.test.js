@@ -137,3 +137,16 @@ test('minBuild: старые сборки просят обновиться', as
     server.close();
   }
 });
+
+// статус: техработы и сбои сервисов
+import { normalizeStatus as ns } from '../src/status.js';
+test('status: по умолчанию всё работает, сбои фильтруются', () => {
+  const off = ns(null);
+  assert.equal(off.maintenance.active, false);
+  assert.deepEqual(off.outages, []);
+  const on = ns({ maintenance: { active: true, until: 'Примерно до 18:30' }, outages: 'sc, vk, xxx' });
+  assert.equal(on.maintenance.active, true);
+  assert.equal(on.maintenance.title, 'Скоро вернёмся');
+  assert.match(on.maintenance.text, /техобслуживании/);
+  assert.deepEqual(on.outages, ['sc', 'vk']);
+});

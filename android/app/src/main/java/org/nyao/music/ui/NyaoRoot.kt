@@ -162,6 +162,19 @@ fun NyaoRoot() {
                 delay(5 * 60_000L)
             }
         }
+        // техработы и сбои сервисов: сразу и потом раз в 2 минуты
+        launch {
+            var wasDown = false
+            while (true) {
+                val s = Repo.refreshStatus()
+                if (s != null) {
+                    if (s.maintenance.active && !wasDown) org.nyao.music.playback.PlayerConnection.pauseIfPlaying()
+                    if (!s.maintenance.active && wasDown) PlaybackEvents.emit("Nyao снова работает")
+                    wasDown = s.maintenance.active
+                }
+                delay(2 * 60_000L)
+            }
+        }
         launch {
             delay(3000)
             runCatching { org.nyao.music.data.Updates.check(org.nyao.music.BuildConfig.VERSION_CODE) }.getOrNull()?.let { u ->
@@ -196,6 +209,12 @@ fun NyaoRoot() {
                 model.loginFor = null
                 if (ok) model.accountsChanged()
             })
+        }
+
+        // техработы — заглушка поверх всего (скачанное слушать можно)
+        val svc by Repo.status.collectAsState()
+        AnimatedVisibility(svc.maintenance.active, enter = fadeIn(), exit = fadeOut()) {
+            org.nyao.music.ui.screens.MaintenanceScreen(model)
         }
 
         TopToast(toast, onDismiss = { toast = null }, modifier = Modifier.align(Alignment.TopCenter))

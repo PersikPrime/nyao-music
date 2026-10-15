@@ -47,6 +47,16 @@ object Repo {
     private val _accounts = MutableStateFlow<Map<String, Account?>>(mapOf(SOURCE_YA to null, SOURCE_YT to null, SOURCE_SC to null, SOURCE_VK to null))
     val accounts: StateFlow<Map<String, Account?>> = _accounts
 
+    /** Техработы и сбои сервисов — опрашивается раз в 2 минуты из NyaoRoot */
+    val status = MutableStateFlow(SvcStatus())
+    fun up(source: String) = source !in status.value.outages
+
+    suspend fun refreshStatus(): SvcStatus? {
+        val s = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cloud.status() } }.getOrNull() ?: return null
+        status.value = s
+        return s
+    }
+
     private val _liked = MutableStateFlow<Set<String>>(emptySet())
     val liked: StateFlow<Set<String>> = _liked
 
@@ -64,7 +74,7 @@ object Repo {
         // изменения настроек волны, вида и миксов уезжают на другие устройства
         prefs.onSyncChange = { key -> bg.launch { runCatching { cloud.pushState(key, stateData(key)) } } }
         mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
-        wave = WaveMixer(ya, yt, sc, vk, prefs) { cloud.recentIds() }
+        wave = WaveMixer(ya, yt, sc, vk, prefs, isDown = { !up(it) }) { cloud.recentIds() }
     }
 
     fun track(id: String): Track? = tracks[id]
@@ -216,10 +226,10 @@ object Repo {
 
     suspend fun search(q: String): SearchResult = coroutineScope {
         // Поиск YouTube Music работает и без входа
-        val a = async { if (ya.loggedIn) runCatching { ya.search(q) }.getOrDefault(emptyList()) else emptyList() }
-        val b = async { runCatching { yt.search(q) }.getOrDefault(emptyList()) }
-        val c = async { runCatching { sc.search(q) }.getOrDefault(emptyList()) }
-        val d = async { if (vk.loggedIn) runCatching { vk.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        val a = async { if (ya.loggedIn && up(SOURCE_YA)) runCatching { ya.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        val b = async { if (up(SOURCE_YT)) runCatching { yt.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        val c = async { if (up(SOURCE_SC)) runCatching { sc.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        val d = async { if (vk.loggedIn && up(SOURCE_VK)) runCatching { vk.search(q) }.getOrDefault(emptyList()) else emptyList() }
         SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()))
     }
 

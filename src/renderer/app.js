@@ -389,6 +389,7 @@ function renderHome() {
   </div>`;
   if (ytSection) lists['home-section'] = ytSection.tracks;
   new Ribbon($('#home-ribbon'), { lines: 14, cy: 0.42, amp: 0.9, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+  injectOutage();
 }
 
 // ---------- Главная в режиме «Плеер» ----------
@@ -454,6 +455,7 @@ function renderHomePlayer() {
     ${ytSection ? `<section><h2 class="sec" style="margin-bottom:12px">${esc(ytSection.title)}</h2>${tracksHtml(ytSection.tracks.slice(0, 8), 'home-yt')}</section>` : ''}
   </div>`;
   new Ribbon($('#home-ribbon'), { lines: 12, cy: 0.5, amp: 0.8, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+  injectOutage();
 }
 /** История и «чаще всего» для главной */
 async function loadRecent() {
@@ -1024,6 +1026,59 @@ function saveEq(next, rerender = true) {
   if (rerender && state.route === 'settings') renderSettings();
 }
 
+// ---------- Техработы и сбои сервисов (статус с сервера Nyao) ----------
+const SVC_NAMES = { ya: 'Яндекс Музыка', yt: 'YouTube Music', sc: 'SoundCloud', vk: 'VK Музыка' };
+let svcStatus = { maintenance: { active: false }, outages: [] };
+const hiddenOutages = new Set();
+
+function injectOutage() {
+  const box = $('.scroll', view);
+  if (!box) return;
+  const list = svcStatus.outages.filter((id) => !hiddenOutages.has(id));
+  if (!list.length) return;
+  const names = list.map((id) => SVC_NAMES[id] || id);
+  const one = names.length === 1;
+  box.insertAdjacentHTML('afterbegin', `<div class="outage" role="status">
+    <span class="outage-ic">${list.map((id) => badge(id)).join('')}</span>
+    <span class="outage-txt"><b>${esc(names.join(', '))} ${one ? 'сейчас не отвечает' : 'сейчас не отвечают'}</b><span>${one ? 'Его треки' : 'Их треки'} в волне и поиске пока пропускаем, остальное работает. Вернётся — подключим сами.</span></span>
+    <button class="ic" data-action="outage-hide" aria-label="Скрыть"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>`);
+}
+
+function applyStatus(s) {
+  const was = svcStatus.maintenance && svcStatus.maintenance.active;
+  svcStatus = { maintenance: (s && s.maintenance) || { active: false }, outages: (s && s.outages) || [] };
+  const m = svcStatus.maintenance;
+  let el = $('#mt');
+  if (m.active) {
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'mt';
+      el.className = 'mt';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = `<div class="mt-brand"><svg width="22" height="22" viewBox="0 0 64 64" fill="none" stroke-width="7" stroke-linecap="round" aria-hidden="true"><path d="M10 26c8-12 16-12 22 0s14 12 22 0" stroke="#FFD60A"/><path d="M10 32c8-12 16-12 22 0s14 12 22 0" stroke="#D8CEFF"/><path d="M10 38c8-12 16-12 22 0s14 12 22 0" stroke="#F0574A"/></svg>Nyao Music</div>
+      <div class="mt-body">
+        <svg class="mt-waves" width="260" height="120" viewBox="0 0 260 120" fill="none" stroke-width="14" stroke-linecap="round" aria-hidden="true"><path d="M20 52c26-34 52-34 74 0s48 34 74 0 50-34 72 0" stroke="#FFD60A"/><path d="M20 66c26-34 52-34 74 0s48 34 74 0 50-34 72 0" stroke="#D8CEFF"/><path d="M20 80c26-34 52-34 74 0s48 34 74 0 50-34 72 0" stroke="#F0574A"/></svg>
+        <h1>${esc(m.title || 'Скоро вернёмся')}</h1>
+        <p>${esc(m.text || '')}</p>
+        ${m.until ? `<div class="mt-eta"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>${esc(m.until)}</div>` : ''}
+        <button class="btn primary mt-retry" data-mt="retry">Проверить снова</button>
+      </div>
+      <div class="mt-foot">Лайки, плейлисты и входы в сервисы в порядке · проверяем каждые 2 минуты сами</div>`;
+    el.querySelector('[data-mt="retry"]').onclick = async (e) => {
+      e.currentTarget.disabled = true;
+      applyStatus(await api.status.get(true).catch(() => svcStatus));
+      if (svcStatus.maintenance.active) toast('Пока ещё чиним — загляни чуть позже');
+    };
+    if (!was && player.playing) player.toggle();
+  } else if (el) {
+    el.remove();
+    if (was) toast('Nyao снова работает');
+  }
+  if (state.route === 'home') RENDER.home();
+}
+
 const RPC_STATUS = { off: 'выключено', 'no-id': 'выключено', connecting: 'жду Discord… (он должен быть запущен)', connected: 'подключено' };
 function discordCardHtml() {
   const s = state.settings || {};
@@ -1300,6 +1355,10 @@ async function handleAction(el, e) {
       break;
     case 'fullscreen':
       fullscreen.show();
+      break;
+    case 'outage-hide':
+      svcStatus.outages.forEach((id) => hiddenOutages.add(id));
+      el.closest('.outage')?.remove();
       break;
     case 'like-cur':
       await player.toggleLike();
@@ -2017,6 +2076,8 @@ function openMixBuilder() {
   if (IS_MAC) new Ribbon($('#bg-ribbon'), { lines: 20, cy: 0.58, amp: 1, width: 1.7, accent: '#D8CEFF', alpha: 0.9 });
   state.settings = await api.settings.get();
   eq.apply(state.settings.eq);
+  api.status.get().then(applyStatus).catch(() => {});
+  api.status.onChange(applyStatus);
   player.setVolume(state.settings.volume);
   volEl.value = Math.round(state.settings.volume * 100);
   setRangeFill(volEl);

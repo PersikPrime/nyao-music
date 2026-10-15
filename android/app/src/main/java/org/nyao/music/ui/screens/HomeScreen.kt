@@ -127,6 +127,7 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                 }
             }
         }
+        item(key = "outage") { OutageBanner(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp)) }
         item {
             Text(
                 greeting(),

@@ -4,6 +4,7 @@ import { createPool, migrate } from './db.js';
 import { TelegramOIDC } from './telegram.js';
 import { ReleaseMirror } from './mirror.js';
 import { createApp } from './app.js';
+import { StatusFile } from './status.js';
 
 const env = process.env;
 const PUBLIC_URL = env.PUBLIC_URL || 'https://api.nmusic.bixtl.cc';
@@ -27,12 +28,13 @@ if (!tg.configured) console.warn('[auth] TG_CLIENT_ID / TG_CLIENT_SECRET не з
 
 const mirror = new ReleaseMirror({ repo: env.GITHUB_REPO || 'PersikPrime/nyao-music', dir: env.MIRROR_DIR || '/data/releases', publicUrl: PUBLIC_URL });
 mirror.sync();
-setInterval(() => mirror.sync(), 15 * 60_000);
+setInterval(() => mirror.sync(), 3 * 60_000);
 
 // MIN_BUILD — минимальная разрешённая сборка (задаётся переменной репозитория NYAO_MIN_BUILD)
 const minBuild = Number(env.MIN_BUILD) || 0;
 if (minBuild) console.log(`[nyao] минимальная сборка: ${minBuild}`);
-const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild }));
+const status = new StatusFile(env.STATUS_FILE || '/data/status/status.json');
+const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status }));
 server.listen(Number(env.PORT) || 8080, () => console.log(`[nyao] сервер слушает :${server.address().port}`));
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

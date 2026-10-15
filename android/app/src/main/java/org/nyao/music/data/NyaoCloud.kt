@@ -63,6 +63,21 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         return json
     }
 
+    /** Статус сервиса: техработы и сбои музыкальных сервисов (без входа) */
+    suspend fun status(): SvcStatus {
+        val o = request("GET", "/status")
+        val m = o.optJSONObject("maintenance")
+        return SvcStatus(
+            maintenance = Maintenance(
+                active = m?.optBoolean("active") == true,
+                title = m?.optString("title").orEmpty(),
+                text = m?.optString("text").orEmpty(),
+                until = m?.optString("until").orEmpty(),
+            ),
+            outages = o.optJSONArray("outages").let { a -> (0 until (a?.length() ?: 0)).mapNotNull { a?.optString(it)?.takeIf { s -> s.isNotBlank() } } },
+        )
+    }
+
     private fun forget() {
         prefs.nyaoToken = null
         prefs.nyaoUser = null
@@ -303,3 +318,8 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         }
     }
 }
+
+data class Maintenance(val active: Boolean = false, val title: String = "", val text: String = "", val until: String = "")
+
+/** Статус с сервера Nyao: техработы (заглушка) и какие сервисы сейчас лежат (их пропускаем) */
+data class SvcStatus(val maintenance: Maintenance = Maintenance(), val outages: List<String> = emptyList())

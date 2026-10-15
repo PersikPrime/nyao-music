@@ -35,7 +35,8 @@ export class WaveMixer {
    * getRecent — async () => Set id треков, звучавших недавно (на всех устройствах), чтобы волна не повторялась.
    * memory — { get(), set(v) }: что волна помнит между запусками (какими треками она начиналась).
    */
-  constructor({ ya, yt, sc, vk = null, getSettings, getRecent = async () => new Set(), memory = null }) {
+  constructor({ ya, yt, sc, vk = null, getSettings, getRecent = async () => new Set(), memory = null, isDown = () => false }) {
+    this.isDown = isDown; // сервис временно лежит (статус с сервера Nyao) — его пропускаем
     this.ya = ya;
     this.yt = yt;
     this.sc = sc;
@@ -50,6 +51,11 @@ export class WaveMixer {
     this.refilling = null;
   }
 
+  /** Яндекс подключён и не лежит */
+  get yaUp() {
+    return this.ya.loggedIn && !this.isDown('ya');
+  }
+
   opts() {
     const s = this.getSettings();
     return { diversity: s.waveDiversity, mood: s.waveMood, share: s.ytmShare };
@@ -57,7 +63,7 @@ export class WaveMixer {
 
   /** «Дополнительные» сервисы волны: YouTube Music и SoundCloud — что подключено */
   get extras() {
-    return [this.yt, this.sc, this.vk].filter((p) => p && p.loggedIn);
+    return [[this.yt, 'yt'], [this.sc, 'sc'], [this.vk, 'vk']].filter(([p, id]) => p && p.loggedIn && !this.isDown(id)).map(([p]) => p);
   }
 
   async refillPool() {
@@ -110,7 +116,7 @@ export class WaveMixer {
     let base = [];
     let gotAny = false;
     let lastList = [];
-    if (this.ya.loggedIn && share < 100) {
+    if (this.yaUp && share < 100) {
       // Яндекс прислал только уже звучавшее — просим следующую пачку, а не сдаёмся
       for (let attempt = 0; attempt < 4; attempt++) {
         let list;
@@ -145,7 +151,7 @@ export class WaveMixer {
     });
     if (useYt && this.pool.length < 6) this.refillPool();
     if (!out.length) {
-      if (this.ya.loggedIn || this.extras.length) throw new Error(gotAny ? 'Сервисы прислали только уже сыгранное — нажми ещё раз, попробую снова' : 'Сервисы не прислали треков — проверь интернет и попробуй ещё раз');
+      if (this.yaUp || this.extras.length) throw new Error(gotAny ? 'Сервисы прислали только уже сыгранное — нажми ещё раз, попробую снова' : 'Сервисы не прислали треков — проверь интернет и попробуй ещё раз');
       throw new Error('Волна пустая: войди хотя бы в один сервис в настройках');
     }
     return out;

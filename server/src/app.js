@@ -1,5 +1,6 @@
 // HTTP API сервера Nyao Music. Без фреймворков: маршрутов мало, зависимостей меньше — меньше дыр.
 import crypto from 'node:crypto';
+import { normalizeStatus } from './status.js';
 import fs from 'node:fs';
 import { pkce } from './telegram.js';
 
@@ -83,7 +84,7 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0 }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null }) {
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
   setInterval(() => {
     const now = Date.now();
@@ -129,6 +130,8 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
 
   const routes = [
     ['GET', /^\/health$/, async () => ({ ok: true, minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
+    // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)
+    ['GET', /^\/status$/, async () => (status ? status.get() : normalizeStatus(null))],
 
     // ---------- Вход ----------
     ['POST', /^\/auth\/start$/, async ({ req, ip }) => {

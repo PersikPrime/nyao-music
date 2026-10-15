@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('nyao', {
     onFullscreen: (cb) => ipcRenderer.on('win:fullscreen', (_e, on) => cb(on))
   },
   coverColor: (url) => call('cover:color', url),
+  status: {
+    get: (force) => call('status:get', force),
+    onChange: (cb) => ipcRenderer.on('status', (_e, s) => cb(s))
+  },
   openExternal: (url) => call('open:external', url),
   vkLog: () => call('vk:openLog'),
   version: () => call('app:version'),

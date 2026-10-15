@@ -1,0 +1,65 @@
+# Техработы и сбои сервисов: Actions → «Техработы» → Run workflow.
+# Пишет status.json на сервер — приложения увидят заглушку или плашку в течение 2 минут. Перезапуск сервера не нужен.
+name: Техработы
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Техработы (заглушка на весь экран)'
+        type: choice
+        options: ['выключить', 'включить']
+        default: 'выключить'
+      until:
+        description: 'Примерный срок, например «до 18:30» или «до вечера» (можно пусто)'
+        required: false
+        default: ''
+      text:
+        description: 'Свой текст заглушки (пусто — стандартный)'
+        required: false
+        default: ''
+      outages:
+        description: 'Какие сервисы сейчас лежат: ya, yt, sc, vk через запятую (пусто — все работают)'
+        required: false
+        default: ''
+
+concurrency:
+  group: server-status
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH-ключ
+        env:
+          KEY: ${{ secrets.NYAO_SSH_KEY }}
+          HOST: ${{ secrets.NYAO_SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" | tr -d '\r' > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -T 15 -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+      - name: Записать статус
+        env:
+          HOST: ${{ secrets.NYAO_SSH_HOST }}
+          USER_: ${{ secrets.NYAO_SSH_USER }}
+          MODE: ${{ inputs.mode }}
+          UNTIL: ${{ inputs.until }}
+          TEXT: ${{ inputs.text }}
+          OUTAGES: ${{ inputs.outages }}
+        run: |
+          node -e '
+            const e = process.env;
+            const until = (e.UNTIL || "").trim();
+            const s = {
+              maintenance: { active: e.MODE === "включить", text: (e.TEXT || "").trim() || undefined, until: until ? (/^(до|примерно)/i.test(until) ? until[0].toUpperCase() + until.slice(1) : "Примерно до " + until) : "" },
+              outages: (e.OUTAGES || "").split(/[\s,]+/).filter(Boolean),
+              at: new Date().toISOString()
+            };
+            require("fs").writeFileSync("status.json", JSON.stringify(s));
+            console.log(JSON.stringify(s, null, 2));
+          '
+          SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
+          $SSH "cd /opt/nyao/server && docker compose exec -T api sh -c 'mkdir -p /data/status && cat > /data/status/status.json'" < status.json
+          echo "::notice::Статус записан: техработы — $MODE, сбои — ${OUTAGES:-нет}"
