@@ -258,6 +258,7 @@ object PlayerConnection {
     fun playList(list: List<Track>, start: Int, label: String) {
         val playable = list.filter { it.available }
         if (playable.isEmpty()) return
+        Repo.forceContinue = false
         val startIndex = playable.indexOf(list.getOrNull(start)).coerceAtLeast(0)
         Repo.mode.value = Repo.Mode.LIST
         Repo.queueLabel.value = label

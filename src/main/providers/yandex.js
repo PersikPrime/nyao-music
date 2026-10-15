@@ -379,6 +379,35 @@ export class YandexProvider {
     return [...found.values()].sort((a, b) => b.releaseDate.localeCompare(a.releaseDate)).slice(0, limit);
   }
 
+  /**
+   * Текст трека от Яндекса (лицензированный: Musixmatch, LyricFind и др.). format: 'LRC' — по строкам со временем, 'TEXT' — просто текст.
+   * Запрос подписывается так же, как в приложении Яндекс Музыки. → { text, provider } или null
+   */
+  async lyrics(trackId, format = 'LRC') {
+    const id = String(trackId).split(':')[0];
+    const ts = Math.floor(Date.now() / 1000);
+    const sign = crypto.createHmac('sha256', 'p93jhgh689SBReK6ghtw62').update(`${id}${ts}`).digest('base64');
+    let r;
+    try {
+      r = await this.request('GET', `/tracks/${id}/lyrics`, { query: { format, timeStamp: String(ts), sign } });
+    } catch (e) {
+      if (e.status === 404 || e.status === 400 || e.status === 403) return null;
+      throw e;
+    }
+    if (!r || !r.downloadUrl) return null;
+    const res = await this.fetch(r.downloadUrl);
+    if (!res.ok) return null;
+    const text = await res.text();
+    const major = r.major && (r.major.prettyName || r.major.name);
+    return text.trim() ? { text, provider: major ? String(major).replace(/^MUSIXMATCH$/i, 'Musixmatch').replace(/^LYRICFIND$/i, 'LyricFind') : null } : null;
+  }
+
+  /** Все треки исполнителя (по популярности) */
+  async artistTracks(id, limit = 500) {
+    const r = await this.request('GET', `/artists/${id}/tracks`, { query: { page: '0', 'page-size': String(limit) } });
+    return (r.tracks || []).map(mapTrack).filter(Boolean);
+  }
+
   async searchArtist(name) {
     const r = await this.request('GET', '/search', { query: { text: name, type: 'artist', page: '0' } });
     return ((r.artists && r.artists.results) || []).map((x) => this.mapArtistCard(x));

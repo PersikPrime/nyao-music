@@ -1,4 +1,4 @@
-// Тексты песен из открытой базы LRCLIB (lrclib.net) — одинаково для треков обоих сервисов.
+// Тексты песен. Цепочка источников: Яндекс Музыка (лицензированные, по строкам) → LRCLIB (открытая база) → YouTube Music.
 
 export function parseLrc(lrc) {
   const lines = [];
@@ -18,6 +18,7 @@ function cleanTitle(title) {
     .trim();
 }
 
+/** Только LRCLIB */
 export async function findLyrics(track, fetch = globalThis.fetch) {
   const headers = { 'User-Agent': 'NyaoMusic/0.1 (https://github.com/)' };
   const artist = String(track.artist).split(',')[0].trim();
@@ -40,7 +41,43 @@ export async function findLyrics(track, fetch = globalThis.fetch) {
     return null;
   }
   if (!data) return null;
-  if (data.syncedLyrics) return { synced: true, lines: parseLrc(data.syncedLyrics) };
-  if (data.plainLyrics) return { synced: false, lines: data.plainLyrics.split(/\r?\n/).map((text) => ({ time: null, text })) };
+  if (data.syncedLyrics) return { synced: true, lines: parseLrc(data.syncedLyrics), source: 'LRCLIB' };
+  if (data.plainLyrics) return { synced: false, lines: plainLines(data.plainLyrics), source: 'LRCLIB' };
   return null;
+}
+
+function plainLines(text) {
+  return String(text).split(/\r?\n/).map((t) => ({ time: null, text: t.trim() }));
+}
+
+/**
+ * Лучший текст из всех источников: с таймингами лучше, чем без.
+ * ya, yt — провайдеры (или null, если сервис недоступен); matchYa(track) → трек Яндекса для трека другого сервиса.
+ */
+export async function findLyricsChain(track, { fetch = globalThis.fetch, ya = null, yt = null, matchYa = null } = {}) {
+  let plain = null;
+  const yaName = (p) => (p ? `Яндекс Музыка · ${p}` : 'Яндекс Музыка');
+  // 1) Яндекс: сам трек или найденный в Яндексе такой же
+  let yaId = track.source === 'ya' ? track.srcId : null;
+  if (ya && !yaId && matchYa) {
+    const m = await matchYa(track).catch(() => null);
+    if (m) yaId = m.srcId;
+  }
+  if (ya && yaId) {
+    const lrc = await ya.lyrics(yaId, 'LRC').catch(() => null);
+    const lines = lrc ? parseLrc(lrc.text) : [];
+    if (lines.length) return { synced: true, lines, source: yaName(lrc.provider) };
+    const txt = await ya.lyrics(yaId, 'TEXT').catch(() => null);
+    if (txt) plain = { synced: false, lines: plainLines(txt.text), source: yaName(txt.provider) };
+  }
+  // 2) LRCLIB
+  const lr = await findLyrics(track, fetch).catch(() => null);
+  if (lr && lr.synced) return lr;
+  if (!plain && lr) plain = lr;
+  // 3) YouTube Music (без таймингов)
+  if (!plain && yt && track.source === 'yt') {
+    const t = await yt.lyrics(track.srcId).catch(() => null);
+    if (t) plain = { synced: false, lines: plainLines(t), source: 'YouTube Music' };
+  }
+  return plain;
 }

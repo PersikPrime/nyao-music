@@ -282,6 +282,24 @@ private fun EqCard() {
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
+                Text("Продолжать похожим", style = MaterialTheme.typography.titleSmall)
+                Text("Плейлист или альбом доиграл — дальше без паузы идёт радио по последнему треку", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            androidx.compose.material3.Switch(checked = s.continueSimilar, onCheckedChange = { Repo.prefs.setContinueSimilar(it) })
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Трек из поиска", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (s.searchPlay == "similar") "Играет он, а дальше — похожее на него, как в Яндексе" else "После него играют остальные найденные треки",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                org.nyao.music.ui.components.PillChip("Дальше похожее", s.searchPlay == "similar", { Repo.prefs.setSearchPlay("similar") })
+                org.nyao.music.ui.components.PillChip("Весь поиск", s.searchPlay == "list", { Repo.prefs.setSearchPlay("list") })
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
                 Text("Эквалайзер", style = MaterialTheme.typography.titleSmall)
                 Text(
                     "Настраивает звук всех сервисов. Выключен — звук без изменений.",

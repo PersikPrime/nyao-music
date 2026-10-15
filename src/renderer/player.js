@@ -15,6 +15,8 @@ export class Player extends EventTarget {
     this.loadingMore = false;
     this.errors = 0;
     this.startedAt = 0;
+    this.continueSimilar = true; // список доиграл — продолжать похожим
+    this.forceContinue = false; // трек из поиска в режиме «дальше похожее»
 
     audio.addEventListener('ended', () => {
       // повтор трека: тот же трек с начала (в историю — как полное прослушивание)
@@ -89,6 +91,7 @@ export class Player extends EventTarget {
     const playable = tracks.filter((t) => t.available !== false);
     if (!playable.length) return;
     this.reportLeave(true);
+    this.forceContinue = false;
     const start = Math.max(0, playable.indexOf(tracks[startIndex]));
     this.mode = 'list';
     this.label = label;
@@ -164,6 +167,27 @@ export class Player extends EventTarget {
     this.maybeMore();
   }
 
+  /** Список доиграл: дальше «похожее» на последний трек (радио), прошлые треки остаются в очереди */
+  async continueWithSimilar() {
+    const last = this.current;
+    if (!last) return false;
+    try {
+      const tracks = await api.radio.start(last);
+      const have = new Set(this.queue.map((t) => t.id));
+      const more = tracks.filter((t) => !have.has(t.id));
+      if (!more.length || this.current !== last) return false;
+      this.mode = 'radio';
+      this.forceContinue = false;
+      this.label = `Похожее на «${last.title}»`;
+      this.queue.push(...more);
+      this.index++;
+      this.load();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Радио по треку: сам трек и бесконечное «похожее» */
   async startRadio(track) {
     this.reportLeave(true);
@@ -233,6 +257,8 @@ export class Player extends EventTarget {
         if (this.index + 1 >= this.queue.length) return;
       } else if (this.repeat !== 'off') {
         this.index = -1;
+      } else if ((this.continueSimilar || this.forceContinue) && (await this.continueWithSimilar())) {
+        return;
       } else {
         this.audio.pause();
         this.emit('state');

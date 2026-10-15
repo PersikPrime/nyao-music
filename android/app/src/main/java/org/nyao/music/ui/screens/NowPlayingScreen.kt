@@ -409,7 +409,7 @@ private fun Tool(icon: ImageVector, label: String, on: Boolean, pal: CoverPalett
 }
 
 
-/** Синхронный текст из LRCLIB: текущая строка крупнее и ярче, панель сама прокручивается, тап по строке — перемотка */
+/** Синхронный текст (Яндекс Музыка, LRCLIB или YouTube Music): текущая строка крупнее и ярче, панель сама прокручивается, тап по строке — перемотка */
 @Composable
 private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: CoverPalette) {
     var lyrics by remember(track.id) { mutableStateOf<org.nyao.music.data.Lyrics?>(null) }
@@ -450,6 +450,7 @@ private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: Cove
                             .padding(horizontal = 22.dp, vertical = 7.dp),
                     )
                 }
+                item { Text("Текст: ${l.source}", style = MaterialTheme.typography.labelSmall, color = pal.sub, modifier = Modifier.padding(horizontal = 22.dp, vertical = 16.dp)) }
             }
         }
     }

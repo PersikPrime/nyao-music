@@ -442,22 +442,36 @@ private fun minutesText(m: Int): String = if (m < 60) "$m ${plural(m, "мину�
 
 private fun num(n: Int): String = "%,d".format(n).replace(',', ' ')
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun StatsScreen(model: AppModel) {
     var period by remember { mutableStateOf("month") }
     var data by remember { mutableStateOf<JSONObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(period) {
+    var refreshing by remember { mutableStateOf(false) }
+    var reload by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(period, reload) {
         if (!Repo.cloud.loggedIn) return@LaunchedEffect
-        data = null
+        if (reload == 0) data = null
         error = null
         try {
             data = withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.cloud.stats(period) }
         } catch (e: Exception) {
             error = e.message
         }
+        refreshing = false
     }
+    /** Сначала досылаем накопленные прослушивания, потом пересчитываем */
+    fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        scope.launch {
+            withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { Repo.cloud.flush() } }
+            reload++
+        }
+    }
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refresh() }, modifier = Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
         item {
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -497,7 +511,12 @@ fun StatsScreen(model: AppModel) {
                         Modifier.appear(0).padding(16.dp).fillMaxWidth().clip(RoundedCornerShape(36.dp))
                             .background(Brush.linearGradient(listOf(NyaoColors.Hero, Color(0xFF120E22)))).padding(24.dp),
                     ) {
-                        Text(periodTitle(period, s.str("from")), style = MaterialTheme.typography.labelLarge, color = NyaoColors.Lavender)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(periodTitle(period, s.str("from")), style = MaterialTheme.typography.labelLarge, color = NyaoColors.Lavender, modifier = Modifier.weight(1f))
+                            FilledIconButton(onClick = { refresh() }, enabled = !refreshing, colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(containerColor = Color.Black.copy(alpha = 0.3f), contentColor = Color.White)) {
+                                Icon(NyaoIcons.Refresh, "Обновить итоги")
+                            }
+                        }
                         Text(num(minutes), fontSize = 72.sp, fontWeight = FontWeight.Bold, lineHeight = 76.sp)
                         Text("${plural(minutes, "минута", "минуты", "минут")} музыки · ${num(plays)} ${plural(plays, "прослушивание", "прослушивания", "прослушиваний")}", color = NyaoColors.Muted)
                         topArtists.firstOrNull()?.let { a ->
@@ -516,11 +535,17 @@ fun StatsScreen(model: AppModel) {
                         if (!s.isNull("topHour") && s.has("topHour")) s.optInt("topHour").let { h -> add("%02d:00".format(h) to "чаще всего слушаешь ${if (h < 5) "ночью" else if (h < 12) "утром" else if (h < 18) "днём" else "вечером"}") }
                         s.obj("busiestDay")?.let { add(minutesText(it.optInt("minutes")) to "в самый музыкальный день") }
                     }
-                    FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        facts.forEachIndexed { i, (big, label) ->
-                            Column(Modifier.appear(i).width(160.dp).clip(RoundedCornerShape(24.dp)).background(NyaoColors.S2).padding(16.dp)) {
-                                Text(big, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                                Text(label, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+                    // два столбца на всю ширину
+                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        facts.chunked(2).forEachIndexed { r, pair ->
+                            Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                pair.forEachIndexed { c, (big, label) ->
+                                    Column(Modifier.appear(r * 2 + c).weight(1f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(NyaoColors.S2).padding(16.dp)) {
+                                        Text(big, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                                        Text(label, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+                                    }
+                                }
+                                if (pair.size == 1) Spacer(Modifier.weight(1f))
                             }
                         }
                     }
@@ -592,6 +617,7 @@ fun StatsScreen(model: AppModel) {
             }
         }
     }
+}
 }
 
 private fun srcColor(k: String) = when (k) {

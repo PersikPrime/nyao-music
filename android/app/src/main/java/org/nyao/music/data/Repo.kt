@@ -44,6 +44,8 @@ object Repo {
     /** Что сейчас играет: «Моя волна» (сама подгружает треки) или обычный список */
     val mode = MutableStateFlow(Mode.LIST)
     val queueLabel = MutableStateFlow("")
+    /** Трек из поиска в режиме «дальше похожее»: продолжить радио, даже если общая настройка выключена */
+    @Volatile var forceContinue = false
 
     private val tracks = ConcurrentHashMap<String, Track>()
     private val yaStreamCache = ConcurrentHashMap<String, Pair<String, Long>>()
@@ -237,6 +239,7 @@ object Repo {
             id.startsWith("liked:") -> likedTracks().filter { it.source == id.removePrefix("liked:") }
             id.startsWith("mix:") -> mixStore.get(id)?.tracks ?: emptyList()
             id.startsWith("yaalbum:") -> ya.albumTracks(id)
+            id.startsWith("artist:") -> artistTracks(id)
             id.startsWith("ya:") -> ya.playlistTracks(id)
             id.startsWith("sc:") -> sc.playlistTracks(id)
             id.startsWith("vk:") -> vk.playlistTracks(id)
@@ -259,6 +262,24 @@ object Repo {
         val artists = alternateAll(arYa.await(), arYt.await()).distinctBy { Search.norm(it.name) }.sortedByDescending { Search.norm(it.name) == nq }.take(10)
         val albums = alternateAll(alYa.await(), alYt.await()).take(12)
         SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()), artists, albums)
+    }
+
+    /** «Все треки» исполнителя: id вида artist:<сервис>:<id>:<имя>. SoundCloud и VK — поиском по имени */
+    private suspend fun artistTracks(key: String): List<Track> {
+        val parts = key.split(":", limit = 4)
+        val source = parts.getOrNull(1) ?: return emptyList()
+        val id = parts.getOrNull(2)?.ifBlank { null }
+        val name = parts.getOrNull(3) ?: ""
+        val full = runCatching {
+            when {
+                source == SOURCE_YA && id != null && ya.loggedIn -> ya.artistTracks(id)
+                source == SOURCE_YT && id != null -> yt.artistTracks(id)
+                else -> null
+            }
+        }.getOrNull()
+        if (!full.isNullOrEmpty()) return full
+        val found = runCatching { searchIn(source, name) }.getOrDefault(emptyList())
+        return found.filter { it.artist.contains(name, ignoreCase = true) }.ifEmpty { found }
     }
 
     /** Страница исполнителя: у Яндекса и YouTube — настоящая, у SoundCloud и VK — его треки из поиска */

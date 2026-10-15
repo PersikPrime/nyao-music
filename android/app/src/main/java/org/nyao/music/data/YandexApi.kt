@@ -399,6 +399,34 @@ class YandexApi(private val prefs: Prefs) {
         })
     }
 
+    /**
+     * Текст трека от Яндекса (лицензированный). format: "LRC" — по строкам со временем, "TEXT" — просто текст.
+     * Подпись запроса — как в приложении Яндекс Музыки. → (текст, поставщик) или null
+     */
+    suspend fun lyrics(trackId: String, format: String = "LRC"): Pair<String, String?>? {
+        val id = trackId.substringBefore(':')
+        val ts = (System.currentTimeMillis() / 1000).toString()
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        mac.init(javax.crypto.spec.SecretKeySpec("p93jhgh689SBReK6ghtw62".toByteArray(), "HmacSHA256"))
+        val sign = android.util.Base64.encodeToString(mac.doFinal("$id$ts".toByteArray()), android.util.Base64.NO_WRAP)
+        val r = try {
+            obj("GET", "/tracks/$id/lyrics", query = mapOf("format" to format, "timeStamp" to ts, "sign" to sign))
+        } catch (e: ApiException) {
+            if (e.code in listOf(400, 403, 404)) return null else throw e
+        }
+        val url = r.str("downloadUrl") ?: return null
+        val (code, text) = Net.call(Request.Builder().url(url).build())
+        if (code !in 200..299 || text.isBlank()) return null
+        val major = r.obj("major")?.let { it.str("prettyName") ?: it.str("name") }?.let {
+            when (it.uppercase()) { "MUSIXMATCH" -> "Musixmatch"; "LYRICFIND" -> "LyricFind"; else -> it }
+        }
+        return text to major
+    }
+
+    /** Все треки исполнителя (по популярности) */
+    suspend fun artistTracks(id: String): List<Track> =
+        obj("GET", "/artists/$id/tracks", query = mapOf("page" to "0", "page-size" to "500")).arr("tracks").objects().mapNotNull { mapTrack(it) }
+
     suspend fun searchArtists(text: String): List<SearchArtist> {
         val res = obj("GET", "/search", query = mapOf("text" to text, "type" to "artist", "page" to "0"))
         return res.path("artists")?.arr("results").objects().mapNotNull { a ->

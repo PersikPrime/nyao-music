@@ -92,13 +92,13 @@ private val TILE_SHAPES: List<Shape> = listOf(
 )
 
 /** Сгруппированный список треков внутри LazyColumn */
-private fun LazyListScope.trackGroup(model: AppModel, tracks: List<Track>, label: String, currentId: String?, liked: Set<String>) {
+private fun LazyListScope.trackGroup(model: AppModel, tracks: List<Track>, label: String, currentId: String?, liked: Set<String>, onPlay: ((Int) -> Unit)? = null) {
     itemsIndexed(tracks) { i, t ->
         TrackRow(
             track = t,
             current = currentId == t.id,
             liked = t.id in liked,
-            onClick = { PlayerConnection.playList(tracks, i, label) },
+            onClick = { onPlay?.invoke(i) ?: PlayerConnection.playList(tracks, i, label) },
             onPlayNext = { PlayerConnection.playNext(t) },
             onLike = { on -> model.like(t, on) },
             onArtist = { model.openArtist(t) },
@@ -464,7 +464,13 @@ fun SearchScreen(model: AppModel) {
                     }
                 }
                 if (shown.isEmpty() && arr.best == null && arr.artists.isEmpty() && arr.albums.isEmpty()) item { Hint("Ничего не нашлось.") }
-                else if (shown.isNotEmpty()) trackGroup(model, shown, "Поиск: ${model.searchQuery}", current?.id, likedIds)
+                else if (shown.isNotEmpty()) trackGroup(model, shown, "Поиск: ${model.searchQuery}", current?.id, likedIds) { i ->
+                    if (Repo.prefs.settings.value.searchPlay == "similar") {
+                        // трек из поиска: только он, а дальше — похожее на него
+                        PlayerConnection.playList(listOf(shown[i]), 0, "Поиск: ${model.searchQuery}")
+                        Repo.forceContinue = true
+                    } else PlayerConnection.playList(shown, i, "Поиск: ${model.searchQuery}")
+                }
             }
         }
     }
@@ -510,6 +516,12 @@ fun ArtistScreen(model: AppModel, r: Route.ArtistPage) {
                 if (p.popular.isNotEmpty()) {
                     item { Text("Популярное", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp)) }
                     trackGroup(model, p.popular.take(20), p.name, current?.id, likedIds)
+                    item {
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = { model.go(Route.PlaylistPage(Playlist("artist:${p.source}:${p.id ?: ""}:${p.name}", p.source, p.name, subtitle = "Все треки", cover = p.cover))) },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        ) { Text("Все треки") }
+                    }
                 }
                 if (p.albums.isNotEmpty()) {
                     item { Text("Альбомы и синглы", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 20.dp, top = 22.dp, bottom = 10.dp)) }

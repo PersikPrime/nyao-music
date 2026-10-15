@@ -202,7 +202,10 @@ class PlaybackService : MediaSessionService() {
                 errorsInRow = 0
                 applyNorm() // громкость YouTube известна только после получения ссылки
             }
-            if (playbackState == Player.STATE_ENDED) maybeMore()
+            if (playbackState == Player.STATE_ENDED) {
+                maybeMore()
+                maybeContinueSimilar()
+            }
         }
 
         override fun onPlayerError(error: PlaybackException) = handleError(error)
@@ -303,6 +306,33 @@ class PlaybackService : MediaSessionService() {
             } catch (e: Exception) {
                 Log.w("Nyao", "волна: ${e.message}")
                 PlaybackEvents.emit(e.message ?: "Не удалось догрузить волну")
+            } finally {
+                loadingMore = false
+            }
+        }
+    }
+
+    /** Список доиграл (повтор выключен) — дальше «похожее» на последний трек, прошлые треки остаются в очереди */
+    private fun maybeContinueSimilar() {
+        if (Repo.mode.value != Repo.Mode.LIST || player.repeatMode != Player.REPEAT_MODE_OFF || loadingMore) return
+        if (!Repo.prefs.settings.value.continueSimilar && !Repo.forceContinue) return
+        val last = player.currentMediaItem?.mediaId?.let { Repo.track(it) } ?: return
+        loadingMore = true
+        scope.launch {
+            try {
+                val have = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toSet()
+                val more = withContext(Dispatchers.IO) { Repo.radioStart(last) }.filter { it.id !in have }
+                if (more.isNotEmpty() && player.playbackState == Player.STATE_ENDED && player.currentMediaItem?.mediaId == last.id) {
+                    Repo.forceContinue = false
+                    Repo.mode.value = Repo.Mode.RADIO
+                    Repo.queueLabel.value = "Похожее на «${last.title}»"
+                    player.addMediaItems(more.map { Repo.mediaItem(it) })
+                    player.seekToNextMediaItem()
+                    player.prepare()
+                    player.play()
+                }
+            } catch (e: Exception) {
+                Log.w("Nyao", "продолжение похожим: ${e.message}")
             } finally {
                 loadingMore = false
             }

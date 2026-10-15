@@ -11,7 +11,7 @@ import { VKProvider } from './providers/vk.js';
 import { checkUpdate, downloadAsset } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
-import { findLyrics } from './lyrics.js';
+import { findLyricsChain } from './lyrics.js';
 import { Catalog } from './catalog.js';
 import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
 import { NyaoCloud, API_BASE } from './cloud.js';
@@ -658,10 +658,19 @@ function registerIpc() {
 
   handle('catalog:artist', (ref) => catalog.artist(ref));
   handle('catalog:album', (ref) => catalog.album(ref));
+  handle('catalog:artistTracks', (refs) => catalog.artistTracks(refs));
   handle('stream:prepare', (trackId) => streams.prepare(trackId));
   handle('stream:loudness', (trackId) => streams.loudness(trackId));
   handle('stream:error', (trackId) => streams.lastError(trackId));
-  handle('lyrics', (track) => findLyrics(track, fetchFn));
+  handle('lyrics', (track) => findLyricsChain(track, {
+    fetch: fetchFn,
+    ya: ya.loggedIn && up('ya') ? ya : null,
+    yt: up('yt') ? yt : null,
+    matchYa: async (t) => {
+      const m = await findMatch(t, (q) => ya.search(q), { minScore: 0.75 });
+      return m && m.track;
+    }
+  }));
   handle('like', async (track, on) => {
     if (track.source === 'ya') await ya.like(track, on);
     else if (track.source === 'yt') await yt.like(track, on);

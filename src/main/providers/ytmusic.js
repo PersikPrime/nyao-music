@@ -341,6 +341,24 @@ export class YTMusicProvider {
     };
   }
 
+  /** Текст из YouTube Music (обычно без таймингов, от LyricFind) → строка или null */
+  async lyrics(videoId) {
+    const yt = await this.client();
+    const shelf = await yt.music.getLyrics(videoId).catch(() => null);
+    const text = shelf && shelf.description && shelf.description.toString();
+    return text && text.trim() ? text : null;
+  }
+
+  /** Все треки исполнителя: раздел «Песни» → его полный плейлист */
+  async artistTracks(channelId) {
+    const yt = await this.client();
+    const a = await yt.music.getArtist(channelId);
+    const shelf = (a.sections || []).find((s) => s.type === 'MusicShelf' && s.endpoint);
+    const bid = shelf && shelf.endpoint && shelf.endpoint.payload && shelf.endpoint.payload.browseId;
+    if (!bid) return (shelf && shelf.contents ? shelf.contents.filter(isSong).map(mapItem).filter(Boolean) : []);
+    return this.playlistTracks(`yt:${String(bid).replace(/^VL/, '')}`);
+  }
+
   async searchArtist(name) {
     const yt = await this.client();
     const r = await yt.music.search(name, { type: 'artist' });

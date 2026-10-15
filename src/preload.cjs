@@ -92,7 +92,8 @@ contextBridge.exposeInMainWorld('nyao', {
   search: (q) => call('search', q),
   catalog: {
     artist: (ref) => call('catalog:artist', ref),
-    album: (ref) => call('catalog:album', ref)
+    album: (ref) => call('catalog:album', ref),
+    artistTracks: (refs) => call('catalog:artistTracks', refs)
   },
   wave: {
     start: () => call('wave:start'),

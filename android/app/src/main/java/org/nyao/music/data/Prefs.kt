@@ -24,6 +24,10 @@ data class Settings(
     val normalize: Boolean = false,
     /** Плавные переходы между треками, секунд (0 — выкл) */
     val fade: Int = 0,
+    /** Список доиграл — продолжать похожим (радио по последнему треку) */
+    val continueSimilar: Boolean = true,
+    /** Трек из поиска: "similar" — дальше похожее, "list" — остальные результаты */
+    val searchPlay: String = "similar",
 ) {
     val isWaveLayout: Boolean get() = layout == "wave"
 }
@@ -51,6 +55,8 @@ class Prefs(context: Context) {
             .takeIf { it.size == 10 }?.map { it.coerceIn(-12, 12) } ?: List(10) { 0 },
         normalize = sp.getBoolean("normalize", false),
         fade = sp.getInt("fade", 0).coerceIn(0, 10),
+        continueSimilar = sp.getBoolean("continueSimilar", true),
+        searchPlay = sp.getString("searchPlay", "similar") ?: "similar",
     )
 
     /** Вызывается, когда меняется то, что синхронизируется через аккаунт Nyao: "wave" или "prefs" */
@@ -75,6 +81,8 @@ class Prefs(context: Context) {
     }
     fun setNormalize(v: Boolean) = update { putBoolean("normalize", v) }
     fun setFade(v: Int) = update { putInt("fade", v.coerceIn(0, 10)) }
+    fun setContinueSimilar(v: Boolean) = update { putBoolean("continueSimilar", v) }
+    fun setSearchPlay(v: String) = update { putString("searchPlay", v) }
     fun setWaveTab(v: Boolean) = update { putBoolean("waveTab", v) }.also { onSyncChange?.invoke("prefs") }
 
     /** Когда ключ синхронизации («wave», «prefs», «mixes») последний раз менялся на этом устройстве */

@@ -38,6 +38,7 @@ const state = {
   lyrics: { id: null, data: undefined },
   artist: { ref: null, data: null, error: null, kind: 'album' },
   album: { ref: null, data: null, error: null },
+  trackList: { title: '', sub: '', tracks: null, error: null },
   npArtist: { ref: null, data: null },
   connect: { devices: null, error: null },
   room: null, // «Слушать вместе»: снимок комнаты + isHost
@@ -629,11 +630,11 @@ async function renderLyrics() {
   const el = $('#lyrics');
   if (!el || state.lyrics.id !== (player.current && player.current.id)) return;
   if (!d || !d.lines.length) {
-    el.innerHTML = '<div class="empty">Текст не найден в LRCLIB</div>';
+    el.innerHTML = '<div class="empty">Текст не найден — искали в Яндекс Музыке, LRCLIB и YouTube Music</div>';
     return;
   }
   el.classList.toggle('plain', !d.synced);
-  el.innerHTML = d.lines.map((l, i) => `<p data-i="${i}" ${d.synced ? `data-action="lyric-seek" data-t="${l.time}"` : ''}>${esc(l.text) || '♪'}</p>`).join('');
+  el.innerHTML = d.lines.map((l, i) => `<p data-i="${i}" ${d.synced ? `data-action="lyric-seek" data-t="${l.time}"` : ''}>${esc(l.text) || '♪'}</p>`).join('') + `<div class="lyr-credit">Текст: ${esc(d.source || 'LRCLIB')}</div>`;
   syncLyrics(true);
 }
 
@@ -774,6 +775,7 @@ function renderArtist() {
       <div class="main">
         <h2 class="sec" style="margin-bottom:10px">Популярное</h2>
         ${a.popular.length ? `<div class="tracks">${a.popular.map((r, i) => mergedRowHtml(r, i, 'artist-popular')).join('')}</div>` : '<div class="hint">Популярных треков нет</div>'}
+        <button class="btn all-tracks" data-action="artist-all">${ICONS.list || ''}Все треки</button>
       </div>
       ${latest ? `<div class="side"><button class="release" data-action="open-album" data-ref="${esc(latest.ref)}">
         <span class="eyebrow">Последний релиз</span>
@@ -790,6 +792,19 @@ function renderArtist() {
     </section>` : ''}
   </div>`;
   if (!a.cover) new Ribbon($('#artist-ribbon'), { lines: 12, cy: 0.45, amp: 0.8, accent: '#C6B8FF' });
+}
+
+/** Простой список треков: «Все треки» исполнителя */
+function renderTrackList() {
+  const tl = state.trackList;
+  view.innerHTML = `<div class="scroll">
+    <button class="back" data-action="back">${ICONS.back}Назад</button>
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:12px 0 18px">
+      <div><span class="eyebrow">${esc(tl.sub)}</span><h1 class="page">${esc(tl.title)}</h1>${tl.tracks ? `<span class="muted" style="font-size:13px">${tl.tracks.length} ${pl(tl.tracks.length, 'трек', 'трека', 'треков')}</span>` : ''}</div>
+      <div class="row-actions" style="padding:0"><button class="btn primary" data-action="tl-play" ${tl.tracks && tl.tracks.length ? '' : 'disabled'}>${ICONS.play}Слушать</button><button class="icbtn" data-action="tl-shuffle" aria-label="Вперемешку">${ICONS.shuffle}</button></div>
+    </div>
+    ${tl.error ? `<div class="hint err">${esc(tl.error)}</div>` : !tl.tracks ? '<div class="skeleton" style="height:320px"></div>' : tl.tracks.length ? tracksHtml(tl.tracks, 'tracklist') : '<div class="empty">Треков не нашлось</div>'}
+  </div>`;
 }
 
 function renderAlbum() {
@@ -1069,7 +1084,7 @@ function renderSettings() {
     ${updateCardHtml()}
     <section class="card">
       <h2 class="sec">О приложении</h2>
-      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · тема ${IS_MAC ? 'macOS (Liquid Glass)' : 'Windows'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из LRCLIB.</div>
+      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · тема ${IS_MAC ? 'macOS (Liquid Glass)' : 'Windows'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
       <button class="btn" data-action="onboarding" style="margin-top:12px">Показать приветствие снова</button>
     </section>
   </div>`;
@@ -1097,6 +1112,8 @@ function controlCardHtml() {
       <button class="switch ${s.globalKeys !== false ? 'on' : ''}" role="switch" aria-checked="${s.globalKeys !== false}" aria-label="Сочетания клавиш везде" data-action="toggle-globalkeys"><span></span></button></div>
     <div class="pref-row"><span><b>Сворачивать в трей при закрытии</b><span class="hint">Крестик прячет окно, музыка играет дальше. Иконка Nyao в трее — управление и выход.</span></span>
       <button class="switch ${s.closeToTray ? 'on' : ''}" role="switch" aria-checked="${!!s.closeToTray}" aria-label="Сворачивать в трей при закрытии" data-action="toggle-tray"><span></span></button></div>
+    <div class="pref-row"><span><b>Прятать кнопки в полноэкранном режиме</b><span class="hint">Если мышь не двигается 3 секунды, кнопки исчезают и остаются обложка и текст</span></span>
+      <button class="switch ${s.fsAutoHide ? 'on' : ''}" role="switch" aria-checked="${!!s.fsAutoHide}" aria-label="Прятать кнопки в полноэкранном режиме" data-action="toggle-fshide"><span></span></button></div>
   </section>`;
 }
 
@@ -1139,6 +1156,10 @@ function soundCardHtml() {
       <button class="switch ${s.normalize ? 'on' : ''}" role="switch" aria-checked="${!!s.normalize}" aria-label="Выравнивать громкость" data-action="toggle-normalize"><span></span></button></div>
     <div class="pref-row"><span><b>Плавные переходы</b><span class="hint" id="fade-label">${fade ? `Трек затихает за ${fade} с до конца, следующий плавно нарастает` : 'Выключены — треки сменяются сразу'}</span></span>
       <input type="range" min="0" max="10" step="1" value="${fade}" data-input="fade" aria-label="Плавные переходы, секунд" style="width:180px"></div>
+    <div class="pref-row"><span><b>Продолжать похожим</b><span class="hint">Плейлист или альбом доиграл — дальше без паузы идёт радио по последнему треку</span></span>
+      <button class="switch ${s.continueSimilar !== false ? 'on' : ''}" role="switch" aria-checked="${s.continueSimilar !== false}" aria-label="Продолжать похожим" data-action="toggle-continue"><span></span></button></div>
+    <div class="pref-row"><span><b>Трек из поиска</b><span class="hint">${(s.searchPlay || 'similar') === 'similar' ? 'Играет он, а дальше — похожее на него, как в Яндексе' : 'После него играют остальные найденные треки'}</span></span>
+      <div class="pill-seg" role="radiogroup" aria-label="Что играть после трека из поиска">${[['similar', 'Дальше похожее'], ['list', 'Весь поиск']].map(([v, l]) => `<button role="radio" aria-checked="${(s.searchPlay || 'similar') === v}" class="${(s.searchPlay || 'similar') === v ? 'on' : ''}" data-action="search-play" data-v="${v}">${l}</button>`).join('')}</div></div>
   </section>`;
 }
 
@@ -1265,7 +1286,7 @@ function pushRpc() {
   }, 400);
 }
 
-const RENDER = { home: renderHome, wave: renderWave, player: renderPlayer, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats };
+const RENDER = { home: renderHome, wave: renderWave, player: renderPlayer, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList };
 
 // ---------- Загрузка данных ----------
 async function loadStatus() {
@@ -1817,6 +1838,7 @@ function renderStats() {
     const maxD = Math.max(...s.weekdays, 1);
     const topA = s.topArtists[0];
     body = `<section class="st-hero"><canvas id="st-ribbon"></canvas>
+        <button class="icbtn st-refresh" data-action="stats-refresh" aria-label="Обновить итоги" title="Обновить">${state.stats.loading ? '…' : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>'}</button>
         <span class="eyebrow">${esc(periodTitle(s.period, s.from))}</span>
         <div class="st-big">${num(s.minutes)}</div>
         <div class="st-sub">${pl(s.minutes, 'минута', 'минуты', 'минут')} музыки · ${num(s.plays)} ${pl(s.plays, 'прослушивание', 'прослушивания', 'прослушиваний')}</div>
@@ -1975,6 +1997,12 @@ async function handleAction(el, e) {
     case 'room-react':
       if (state.room) api.room.react(state.room.code, el.dataset.e).catch((err) => toast(err.message, true));
       break;
+    case 'stats-refresh':
+      // сначала дошлём накопленные прослушивания, потом пересчитаем
+      if (api.cloud && api.cloud.sync) await api.cloud.sync().catch(() => {});
+      await loadStats();
+      toast('Итоги обновлены');
+      break;
     case 'stats-period':
       state.stats.period = el.dataset.v;
       state.stats.data = null;
@@ -2011,7 +2039,11 @@ async function handleAction(el, e) {
     case 'play-row': {
       const list = lists[el.dataset.list];
       const label = el.dataset.list === 'lib' ? libLabel() : el.dataset.list === 'search' ? 'Поиск' : el.dataset.list === 'home-recent' ? 'Недавно слушал' : el.dataset.list === 'home-top' ? 'Чаще всего' : '';
-      player.playList(list, Number(el.dataset.i), label);
+      if (el.dataset.list === 'search' && (state.settings.searchPlay || 'similar') === 'similar') {
+        // трек из поиска: только он, а дальше — похожее на него
+        player.playList([list[Number(el.dataset.i)]], 0, `Поиск: ${state.search.q}`);
+        player.forceContinue = true;
+      } else player.playList(list, Number(el.dataset.i), label);
       break;
     }
     case 'play-merged': {
@@ -2056,6 +2088,29 @@ async function handleAction(el, e) {
         for (const t of list) if (t.id !== player.current.id) player.enqueueLast(t);
       }
       toast(a === 'search-next' ? `${list.length} ${pl(list.length, 'трек', 'трека', 'треков')} — играют следующими` : `${list.length} ${pl(list.length, 'трек', 'трека', 'треков')} — в конце очереди`);
+      break;
+    }
+    case 'artist-all': {
+      const ad = state.artist.data;
+      if (!ad) break;
+      state.trackList = { title: ad.name, sub: 'Все треки', tracks: null, error: null };
+      go('tracks', { artist: state.artist.ref });
+      try {
+        state.trackList.tracks = await api.catalog.artistTracks(ad.refs);
+      } catch (err) {
+        state.trackList.error = err.message;
+      }
+      if (state.route === 'tracks') renderTrackList();
+      break;
+    }
+    case 'tl-play':
+    case 'tl-shuffle': {
+      const tl = state.trackList.tracks || [];
+      if (!tl.length) break;
+      const was = player.shuffle;
+      player.shuffle = a === 'tl-shuffle';
+      player.playList(tl, a === 'tl-shuffle' ? Math.floor(Math.random() * tl.length) : 0, `${state.trackList.title}: все треки`);
+      player.shuffle = was;
       break;
     }
     case 'open-artist':
@@ -2112,8 +2167,21 @@ async function handleAction(el, e) {
       state.settings = await api.settings.set({ globalKeys: state.settings.globalKeys === false });
       renderSettings();
       break;
+    case 'toggle-fshide':
+      state.settings = await api.settings.set({ fsAutoHide: !state.settings.fsAutoHide });
+      renderSettings();
+      break;
     case 'toggle-tray':
       state.settings = await api.settings.set({ closeToTray: !state.settings.closeToTray });
+      renderSettings();
+      break;
+    case 'toggle-continue':
+      state.settings = await api.settings.set({ continueSimilar: state.settings.continueSimilar === false });
+      player.continueSimilar = state.settings.continueSimilar !== false;
+      renderSettings();
+      break;
+    case 'search-play':
+      state.settings = await api.settings.set({ searchPlay: el.dataset.v });
       renderSettings();
       break;
     case 'toggle-normalize':
@@ -2503,6 +2571,7 @@ const fullscreen = new FullScreen({
   api,
   isMac: IS_MAC,
   ensureLyrics: () => ensureLyrics(),
+  autoHide: () => !!(state.settings && state.settings.fsAutoHide),
   like: () => player.toggleLike(),
   icons: {
     play: ICONS.playBig, pause: ICONS.pauseBig, heart: ICONS.heart, heartOn: ICONS.heartOn,
@@ -2867,6 +2936,7 @@ function openMixBuilder() {
   api.status.get().then(applyStatus).catch(() => {});
   api.status.onChange(applyStatus);
   player.setVolume(state.settings.volume);
+  player.continueSimilar = state.settings.continueSimilar !== false;
   volEl.value = Math.round(state.settings.volume * 100);
   setRangeFill(volEl);
   renderBar();

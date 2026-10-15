@@ -315,6 +315,24 @@ class YtMusicApi(private val prefs: Prefs) {
         return ArtistPage(SOURCE_YT, channelId, name, cover, null, songs, albums)
     }
 
+    /** Текст из YouTube Music (обычно без таймингов, от LyricFind): вкладка «Текст» у трека */
+    suspend fun lyrics(videoId: String): String? {
+        val next = post("next", JSONObject().put("videoId", videoId).put("isAudioOnly", true))
+        val bid = findAll(next, "browseEndpoint").mapNotNull { it.str("browseId") }.firstOrNull { it.startsWith("MPLY") } ?: return null
+        val r = post("browse", JSONObject().put("browseId", bid))
+        val shelf = findAll(r, "musicDescriptionShelfRenderer").firstOrNull() ?: return null
+        return runsText(shelf.obj("description")).ifBlank { null }
+    }
+
+    /** Все треки исполнителя: раздел «Песни» → его полный плейлист (кнопка «Показать все») */
+    suspend fun artistTracks(channelId: String): List<Track> {
+        val r = post("browse", JSONObject().put("browseId", channelId))
+        val shelf = findAll(r, "musicShelfRenderer").firstOrNull() ?: return emptyList()
+        val bid = shelf.path("bottomEndpoint", "browseEndpoint")?.str("browseId")
+            ?: shelf.obj("title")?.arr("runs").objects().firstNotNullOfOrNull { browseId(it) }
+        return if (bid != null && (bid.startsWith("VL") || bid.startsWith("PL") || bid.startsWith("OLAK"))) browseTracks(if (bid.startsWith("VL")) bid else "VL$bid") else tracksIn(shelf)
+    }
+
     /** «Радио» по треку — основа подмешивания YT в волну */
     suspend fun radio(videoId: String): List<Track> {
         val r = post(
