@@ -228,3 +228,4 @@ body.mac {
 .mac .glass-cap { background: rgba(20, 18, 28, .5); border-color: rgba(255, 255, 255, .16); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2); }
 .mac .wave-tune { top: 10px; right: 10px; bottom: 104px; background: rgba(36, 32, 48, .6); border: 1px solid var(--glass-border); -webkit-backdrop-filter: blur(40px) saturate(180%); backdrop-filter: blur(40px) saturate(180%); box-shadow: var(--glass-hi), -30px 0 80px rgba(0, 0, 0, .45); }
 .mac .wave-scrim { background: rgba(0, 0, 0, .3); }
+.mac .wave-fade { display: none; } /* фон под стеклом живой — размытие дало бы шов, хватает маски */
