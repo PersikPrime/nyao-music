@@ -15,9 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Equalizer
-import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -141,7 +138,7 @@ fun TrackRow(
             Cover(track.cover, Modifier.size(coverSize), RoundedCornerShape(14.dp))
             if (current) {
                 Box(Modifier.size(coverSize).clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Equalizer, null, tint = NyaoColors.Lavender)
+                    Icon(NyaoIcons.Equalizer, null, tint = NyaoColors.Lavender)
                 }
             }
         }
@@ -165,7 +162,7 @@ fun TrackRow(
             }
         }
         Box {
-            IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, "Ещё", tint = NyaoColors.Muted) }
+            IconButton(onClick = { menu = true }) { Icon(NyaoIcons.MoreVert, "Ещё", tint = NyaoColors.Muted) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text("Играть следующим") }, onClick = { menu = false; onPlayNext() })
                 DropdownMenuItem(text = { Text(if (liked) "Убрать из «Мне нравится»" else "Мне нравится") }, onClick = { menu = false; onLike(!liked) })

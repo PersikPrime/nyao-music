@@ -58,6 +58,7 @@ class PlaybackService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    private val equalizer = NyaoEqualizer()
     private var loadingMore = false
     private var lastId: String? = null
     private var lastPos = 0L
@@ -80,7 +81,14 @@ class PlaybackService : MediaSessionService() {
             .setUpstreamDataSourceFactory(resolving)
             .setCacheKeyFactory { spec -> spec.uri.toString() }
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        val routed = DataSource.Factory { RoutingDataSource(cached.createDataSource(), resolving.createDataSource()) }
+        // Скачанное (без автоудаления) — самым верхним слоем, только чтение: такие треки играют без сети
+        val offline = CacheDataSource.Factory()
+            .setCache(Offline.cache(this))
+            .setUpstreamDataSourceFactory(cached)
+            .setCacheKeyFactory { spec -> spec.uri.toString() }
+            .setCacheWriteDataSinkFactory(null)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        val routed = DataSource.Factory { RoutingDataSource(offline.createDataSource(), resolving.createDataSource()) }
 
         player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(routed))
@@ -92,6 +100,10 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         player.addListener(listener)
+        // эквалайзер из настроек: следим за изменениями и за сменой звуковой сессии
+        scope.launch {
+            Repo.prefs.settings.collect { s -> equalizer.attach(player.audioSessionId, s.eqOn, s.eqGains) }
+        }
 
         val open = PendingIntent.getActivity(
             this, 0,
@@ -157,6 +169,11 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onPlayerError(error: PlaybackException) = handleError(error)
+
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            val s = Repo.prefs.settings.value
+            equalizer.attach(audioSessionId, s.eqOn, s.eqGains)
+        }
     }
 
     private fun maybeMore() {
@@ -231,6 +248,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         scope.cancel()
+        equalizer.release()
         session?.run {
             player.release()
             release()

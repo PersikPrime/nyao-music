@@ -63,6 +63,7 @@ fun SettingsScreen(model: AppModel) {
         Text("Моя волна", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         OutlinedButton(onClick = { model.go(Route.Wave) }, modifier = Modifier.fillMaxWidth()) { Text("Характер, настроение и баланс источников") }
 
+        EqCard()
         CacheCard()
         UpdateCard(model)
 
@@ -194,6 +195,67 @@ fun ServiceLogo(source: String, size: Int = 48) {
     val ya = source == SOURCE_YA
     Box(Modifier.size(size.dp).clip(RoundedCornerShape((size / 3.5f).dp)).background(sourceColor(source)), contentAlignment = Alignment.Center) {
         Text(org.nyao.music.ui.components.sourceShort(source), color = if (ya) Color.Black else Color.White, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Эквалайзер: пресеты и 10 полос, как на ПК. Работает через системный эквалайзер телефона */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun EqCard() {
+    val s by Repo.prefs.settings.collectAsState()
+    Text("Звук", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Эквалайзер", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Настраивает звук всех сервисов. Выключен — звук без изменений.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.Switch(checked = s.eqOn, onCheckedChange = { Repo.prefs.setEq(it, s.eqPreset, s.eqGains) })
+        }
+        if (s.eqOn) {
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                org.nyao.music.playback.EqPresets.ALL.forEach { (id, name, gains) ->
+                    org.nyao.music.ui.components.PillChip(name, s.eqPreset == id, { Repo.prefs.setEq(true, id, gains) })
+                }
+                if (s.eqPreset == "custom") org.nyao.music.ui.components.PillChip("Свой", true, {})
+            }
+            org.nyao.music.playback.EqPresets.BANDS.forEachIndexed { i, hz ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        org.nyao.music.playback.EqPresets.label(hz),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(width = 40.dp, height = 20.dp),
+                    )
+                    androidx.compose.material3.Slider(
+                        value = s.eqGains[i].toFloat(),
+                        onValueChange = { v ->
+                            val g = s.eqGains.toMutableList().also { it[i] = Math.round(v) }
+                            if (g != s.eqGains) Repo.prefs.setEq(true, "custom", g)
+                        },
+                        valueRange = -12f..12f,
+                        steps = 23,
+                        modifier = Modifier.weight(1f),
+                    )
+                    val g = s.eqGains[i]
+                    Text(
+                        (if (g > 0) "+" else "") + g,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(start = 8.dp).size(width = 32.dp, height = 20.dp),
+                    )
+                }
+            }
+        }
     }
 }
 

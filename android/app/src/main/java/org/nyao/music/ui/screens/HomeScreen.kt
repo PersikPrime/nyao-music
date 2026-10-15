@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import org.nyao.music.ui.components.NyaoIcons
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,10 +22,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -82,7 +80,7 @@ private val MIX_STYLES = listOf(
 )
 
 private val MOOD_NAMES = mapOf("active" to "Бодрое", "fun" to "Весёлое", "calm" to "Спокойное", "sad" to "Грустное")
-private val CHAR_NAMES = mapOf("favorite" to "Любимое", "discover" to "Незнакомое", "popular" to "Популярное")
+private val CHAR_NAMES = mapOf("any" to "Всё", "favorite" to "Любимое", "discover" to "Незнакомое", "popular" to "Популярное")
 
 @Composable
 fun HomeScreen(model: AppModel, wide: Boolean) {
@@ -120,7 +118,7 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                 Box(
                     Modifier.size(44.dp).bouncy().clip(CircleShape).background(NyaoColors.S2).clickable { model.go(Route.Search) },
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Rounded.Search, "Поиск", tint = NyaoColors.Text) }
+                ) { Icon(NyaoIcons.Search, "Поиск", tint = NyaoColors.Text) }
                 Box(
                     Modifier.size(44.dp).bouncy().clip(PolarShape(7, 0.08f)).background(NyaoColors.Primary).clickable { model.go(Route.Settings) },
                     contentAlignment = Alignment.Center,
@@ -226,7 +224,7 @@ fun WaveHero(model: AppModel, modifier: Modifier = Modifier) {
             contentAlignment = Alignment.Center,
         ) {
             if (model.waveStarting) CircularProgressIndicator(color = NyaoColors.OnLavender, modifier = Modifier.size(30.dp), strokeWidth = 3.dp)
-            else Icon(if (active) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (active) "Пауза" else "Запустить волну", tint = NyaoColors.OnLavender, modifier = Modifier.size(42.dp))
+            else Icon(if (active) NyaoIcons.Pause else NyaoIcons.PlayArrow, if (active) "Пауза" else "Запустить волну", tint = NyaoColors.OnLavender, modifier = Modifier.size(42.dp))
         }
     }
 }

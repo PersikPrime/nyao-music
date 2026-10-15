@@ -1,0 +1,241 @@
+// Полноэкранный режим (макет «Полный экран (ПК)»): фон — цвет обложки, без подложек.
+// Слева обложка, название и прогресс, справа текст песни. Кнопки прячутся, если мышь не двигается 3 секунды.
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const fmt = (sec) => {
+  if (!Number.isFinite(sec) || sec < 0) return '0:00';
+  const s = Math.floor(sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+/** Цвет обложки → тёмный фон, на котором белый текст читается (яркость не выше 0.075, контраст ≥ 8:1) */
+export function backgroundFrom(rgb) {
+  if (!rgb) return '#26232b';
+  const lin = (c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  const [r0, g0, b0] = rgb;
+  let k = 1;
+  for (let i = 0; i < 30; i++) {
+    const L = 0.2126 * lin(r0 * k) + 0.7152 * lin(g0 * k) + 0.0722 * lin(b0 * k);
+    if (L <= 0.075) break;
+    k *= 0.92;
+  }
+  return `rgb(${Math.round(r0 * k)}, ${Math.round(g0 * k)}, ${Math.round(b0 * k)})`;
+}
+
+export class FullScreen {
+  /**
+   * deps: player, api, icons, ensureLyrics() → Promise<{synced, lines}>, like(track, on), isMac
+   */
+  constructor(deps) {
+    this.d = deps;
+    this.el = null;
+    this.open = false;
+    this.trackId = null;
+    this.lastLine = -2;
+    this.idleTimer = null;
+    this.showLyrics = true;
+    try {
+      this.showLyrics = localStorage.getItem('nyao-fs-lyrics') !== '0';
+    } catch {
+      // без сохранения — текст показываем
+    }
+  }
+
+  build() {
+    if (this.el) return;
+    const el = document.createElement('div');
+    el.className = 'fs';
+    el.hidden = true;
+    el.innerHTML = `
+      <div class="fs-top">
+        <button class="fs-pill" data-fs="lyrics" aria-label="Текст" title="Текст"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 11h16M4 16h10"/></svg>Текст</button>
+        <button class="fs-round" data-fs="exit" aria-label="Выйти из полного экрана" title="Выйти из полного экрана (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
+      </div>
+      <div class="fs-stage">
+        <div class="fs-left">
+          <div class="fs-art"><img alt=""></div>
+          <div class="fs-head">
+            <div class="fs-meta"><h1 class="fs-title"></h1><div class="fs-artist"></div></div>
+            <button class="fs-round fs-like fs-ctl" data-fs="like" aria-label="Мне нравится"></button>
+          </div>
+          <div class="fs-progress" data-fs="seek"><div class="fs-fill"></div><span class="fs-knob fs-ctl"></span></div>
+          <div class="fs-times"><span class="fs-cur">0:00</span><span class="fs-left-time">0:00</span></div>
+          <div class="fs-controls fs-ctl">
+            <button class="fs-btn" data-fs="prev" aria-label="Предыдущий"></button>
+            <button class="fs-play" data-fs="play" aria-label="Играть"></button>
+            <button class="fs-btn" data-fs="next" aria-label="Следующий"></button>
+          </div>
+        </div>
+        <div class="fs-lyrics" aria-live="off"></div>
+      </div>
+      <div class="fs-credit fs-ctl"></div>`;
+    document.body.appendChild(el);
+    this.el = el;
+    const $ = (s) => el.querySelector(s);
+    this.$ = $;
+    const { player } = this.d;
+    $('[data-fs="prev"]').innerHTML = this.d.icons.prev;
+    $('[data-fs="next"]').innerHTML = this.d.icons.next;
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-fs]');
+      const line = e.target.closest('[data-t]');
+      if (line) {
+        player.seek(Number(line.dataset.t));
+        return;
+      }
+      if (!b) return;
+      const a = b.dataset.fs;
+      if (a === 'exit') this.close();
+      else if (a === 'play') player.toggle();
+      else if (a === 'prev') player.prev();
+      else if (a === 'next') player.next(true);
+      else if (a === 'like') {
+        const t = player.current;
+        if (t) this.d.like(t, !player.liked.has(t.id));
+      } else if (a === 'lyrics') {
+        this.showLyrics = !this.showLyrics;
+        try {
+          localStorage.setItem('nyao-fs-lyrics', this.showLyrics ? '1' : '0');
+        } catch {
+          // не сохранилось — не страшно
+        }
+        this.renderLyrics();
+      } else if (a === 'seek') {
+        const r = b.getBoundingClientRect();
+        const dur = player.audio.duration;
+        if (Number.isFinite(dur)) player.seek(((e.clientX - r.left) / r.width) * dur);
+      }
+    });
+    el.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.fs-art')) this.close();
+    });
+    el.addEventListener('mousemove', () => this.wake());
+  }
+
+  toggle() {
+    if (this.open) this.close();
+    else this.show();
+  }
+
+  show() {
+    if (!this.d.player.current) return;
+    this.build();
+    this.open = true;
+    this.el.hidden = false;
+    document.body.classList.add('fs-on');
+    this.d.api.win.fullscreen(true).catch(() => {});
+    this.trackId = null;
+    this.update();
+    this.wake();
+  }
+
+  close() {
+    if (!this.open) return;
+    this.open = false;
+    this.el.hidden = true;
+    document.body.classList.remove('fs-on');
+    clearTimeout(this.idleTimer);
+    this.d.api.win.fullscreen(false).catch(() => {});
+  }
+
+  /** Мышь двинулась — показываем кнопки и прячем через 3 секунды */
+  wake() {
+    if (!this.el) return;
+    this.el.classList.remove('idle');
+    clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      if (this.open && this.d.player.playing) this.el.classList.add('idle');
+    }, 3000);
+  }
+
+  /** Смена трека, паузы, лайка */
+  update() {
+    if (!this.open) return;
+    const { player } = this.d;
+    const t = player.current;
+    if (!t) return this.close();
+    const $ = this.$;
+    $('.fs-play').innerHTML = player.playing ? this.d.icons.pause : this.d.icons.play;
+    $('.fs-play').setAttribute('aria-label', player.playing ? 'Пауза' : 'Играть');
+    const liked = player.liked.has(t.id);
+    $('.fs-like').innerHTML = liked ? this.d.icons.heartOn : this.d.icons.heart;
+    $('.fs-like').classList.toggle('on', liked);
+    if (!player.playing) this.el.classList.remove('idle');
+    if (this.trackId === t.id) return this.tick();
+    this.trackId = t.id;
+    this.lastLine = -2;
+    const img = $('.fs-art img');
+    img.src = t.cover || '';
+    img.style.visibility = t.cover ? 'visible' : 'hidden';
+    $('.fs-title').textContent = t.title;
+    $('.fs-artist').textContent = t.artist + (t.album ? ` · ${t.album}` : '');
+    this.el.style.setProperty('--fs-bg', backgroundFrom(null));
+    if (t.cover) {
+      this.d.api.coverColor(t.cover).then((rgb) => {
+        if (this.trackId === t.id) this.el.style.setProperty('--fs-bg', backgroundFrom(rgb));
+      }).catch(() => {});
+    }
+    this.lyrics = undefined;
+    this.renderLyrics();
+    this.d.ensureLyrics().then((data) => {
+      if (this.trackId !== t.id) return;
+      this.lyrics = data || null;
+      this.renderLyrics();
+    });
+    this.tick();
+  }
+
+  renderLyrics() {
+    if (!this.el) return;
+    const box = this.$('.fs-lyrics');
+    const d = this.lyrics;
+    const has = this.showLyrics && d && d.lines && d.lines.length;
+    this.el.classList.toggle('nolyrics', !has);
+    this.$('[data-fs="lyrics"]').classList.toggle('on', this.showLyrics);
+    this.$('[data-fs="lyrics"]').hidden = !(d && d.lines && d.lines.length);
+    this.$('.fs-credit').textContent = has ? 'Текст: LRCLIB' : '';
+    if (!has) {
+      box.innerHTML = '';
+      return;
+    }
+    box.classList.toggle('plain', !d.synced);
+    box.innerHTML = (d.synced ? '' : '<div class="fs-plain-label">Текст без таймингов</div>') +
+      d.lines.map((l, i) => `<p data-i="${i}" ${d.synced ? `data-t="${l.time}"` : ''}>${esc(l.text) || '♪'}</p>`).join('');
+    this.lastLine = -2;
+    this.tick(true);
+  }
+
+  /** Время: прогресс и текущая строка */
+  tick(force) {
+    if (!this.open || !this.el) return;
+    const a = this.d.player.audio;
+    const dur = Number.isFinite(a.duration) ? a.duration : (this.d.player.current && this.d.player.current.duration) || 0;
+    const cur = a.currentTime || 0;
+    const p = dur ? Math.min(1, cur / dur) : 0;
+    this.$('.fs-fill').style.width = `${p * 100}%`;
+    this.$('.fs-knob').style.left = `${p * 100}%`;
+    this.$('.fs-cur').textContent = fmt(cur);
+    this.$('.fs-left-time').textContent = '−' + fmt(Math.max(0, dur - cur));
+    const d = this.lyrics;
+    if (!d || !d.synced || !this.showLyrics) return;
+    const time = cur + 0.25;
+    let idx = -1;
+    for (let i = 0; i < d.lines.length; i++) if (d.lines[i].time <= time) idx = i;
+    if (idx === this.lastLine && !force) return;
+    this.lastLine = idx;
+    const box = this.$('.fs-lyrics');
+    box.querySelectorAll('p').forEach((el, i) => {
+      el.classList.toggle('on', i === idx);
+      el.classList.toggle('past', i < idx);
+      el.classList.toggle('next', i === idx + 1);
+    });
+    const on = box.querySelector('p.on') || box.querySelector('p');
+    if (!on) return;
+    const top = on.offsetTop - box.clientHeight / 2 + on.offsetHeight / 2;
+    if (typeof box.scrollTo === 'function') box.scrollTo({ top, behavior: force ? 'auto' : 'smooth' });
+    else box.scrollTop = top;
+  }
+}

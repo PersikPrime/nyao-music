@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import org.nyao.music.ui.components.NyaoIcons
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,11 +29,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.QueueMusic
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Waves
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -123,10 +120,10 @@ fun PlayerHome(model: AppModel, name: String?) {
     }
     val liked = model.liked
     val quick = buildList {
-        likedPlaylists(liked, settings.splitLiked).take(3).forEach { p -> add(Quick(p.title, p.source, Icons.Rounded.Favorite, null) { model.go(Route.PlaylistPage(p)) }) }
-        add(Quick("Моя волна", "mix", Icons.Rounded.Waves, null) { model.waveButton() })
-        mixes.take(2).forEach { m -> add(Quick(m.title, "mix", Icons.Rounded.QueueMusic, m.asPlaylist().cover) { model.go(Route.PlaylistPage(m.asPlaylist())) }) }
-        (model.playlists ?: emptyList()).forEach { p -> add(Quick(p.title, p.source, Icons.Rounded.QueueMusic, p.cover) { model.go(Route.PlaylistPage(p)) }) }
+        likedPlaylists(liked, settings.splitLiked).take(3).forEach { p -> add(Quick(p.title, p.source, NyaoIcons.Favorite, null) { model.go(Route.PlaylistPage(p)) }) }
+        add(Quick("Моя волна", "mix", NyaoIcons.Waves, null) { model.waveButton() })
+        mixes.take(2).forEach { m -> add(Quick(m.title, "mix", NyaoIcons.QueueMusic, m.asPlaylist().cover) { model.go(Route.PlaylistPage(m.asPlaylist())) }) }
+        (model.playlists ?: emptyList()).forEach { p -> add(Quick(p.title, p.source, NyaoIcons.QueueMusic, p.cover) { model.go(Route.PlaylistPage(p)) }) }
     }.take(6)
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
@@ -142,7 +139,7 @@ fun PlayerHome(model: AppModel, name: String?) {
                 Box(
                     Modifier.size(44.dp).bouncy().clip(CircleShape).background(NyaoColors.S2).clickable { model.go(Route.Search) },
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Rounded.Search, "Поиск", tint = NyaoColors.Text) }
+                ) { Icon(NyaoIcons.Search, "Поиск", tint = NyaoColors.Text) }
             }
         }
         model.others.firstOrNull()?.let { r ->

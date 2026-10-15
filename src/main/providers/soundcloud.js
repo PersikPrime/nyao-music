@@ -127,11 +127,11 @@ export class SoundCloudProvider {
     return items.map((t) => t && full.get(String(t.id))).filter(Boolean);
   }
 
-  async likedTracks(limit = 300) {
+  async likedTracks(limit = 5000) {
     const { uid } = await this.getAccount();
     let res = await this.request('GET', `/users/${uid}/track_likes`, { query: { limit: 200 } });
     const out = [];
-    for (let page = 0; res && page < 5; page++) {
+    for (let page = 0; res && page < 30; page++) {
       out.push(...(res.collection || []).map((x) => x.track).filter(Boolean));
       if (out.length >= limit || !res.next_href) break;
       res = await this.request('GET', res.next_href);

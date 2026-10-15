@@ -13,8 +13,11 @@ contextBridge.exposeInMainWorld('nyao', {
     minimize: () => call('win:minimize'),
     maximize: () => call('win:maximize'),
     close: () => call('win:close'),
-    onState: (cb) => ipcRenderer.on('win:state', (_e, s) => cb(s))
+    onState: (cb) => ipcRenderer.on('win:state', (_e, s) => cb(s)),
+    fullscreen: (on) => call('win:fullscreen', on),
+    onFullscreen: (cb) => ipcRenderer.on('win:fullscreen', (_e, on) => cb(on))
   },
+  coverColor: (url) => call('cover:color', url),
   openExternal: (url) => call('open:external', url),
   vkLog: () => call('vk:openLog'),
   version: () => call('app:version'),

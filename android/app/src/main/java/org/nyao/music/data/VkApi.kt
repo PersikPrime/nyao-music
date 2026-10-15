@@ -253,11 +253,11 @@ class VkApi(private val prefs: Prefs) {
     suspend fun account(): Account = Account("VK id$uid", uid = uid?.toString())
 
     /** «Моя музыка» */
-    suspend fun likedTracks(limit: Int = 500): List<Track> {
+    suspend fun likedTracks(limit: Int = 5000): List<Track> {
         val me = uid ?: throw ApiException("Нужен вход во VK")
         val out = ArrayList<JSONArray>()
         var offset = 0
-        for (page in 0 until 10) {
+        for (page in 0 until 60) {
             if (out.size >= limit) break
             val data = post("load_section", mapOf("owner_id" to me, "playlist_id" to -1, "offset" to offset, "type" to "playlist", "access_hash" to "", "is_loading_all" to 1))
             val pl = findPlaylist(data)

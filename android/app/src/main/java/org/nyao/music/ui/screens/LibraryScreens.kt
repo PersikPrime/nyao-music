@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import org.nyao.music.ui.components.NyaoIcons
+
 import androidx.compose.foundation.rememberScrollState
 
 import androidx.compose.foundation.horizontalScroll
@@ -32,13 +34,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -114,7 +109,7 @@ private fun ScreenHeader(title: String, onBack: (() -> Unit)? = null, action: (@
         Modifier.fillMaxWidth().statusBarsPadding().padding(start = if (onBack != null) 8.dp else 20.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Назад", tint = NyaoColors.Text) }
+        if (onBack != null) IconButton(onClick = onBack) { Icon(NyaoIcons.ArrowBack, "Назад", tint = NyaoColors.Text) }
         Text(title, style = MaterialTheme.typography.displayMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         action?.invoke()
     }
@@ -135,7 +130,7 @@ private fun PlayButtons(tracks: List<Track>, label: String, modifier: Modifier =
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.PlayArrow, null, tint = NyaoColors.OnLavender)
+            Icon(NyaoIcons.PlayArrow, null, tint = NyaoColors.OnLavender)
             Spacer(Modifier.size(6.dp))
             Text("Слушать", style = MaterialTheme.typography.labelLarge, color = NyaoColors.OnLavender)
         }
@@ -145,7 +140,7 @@ private fun PlayButtons(tracks: List<Track>, label: String, modifier: Modifier =
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.Shuffle, null, tint = NyaoColors.Text)
+            Icon(NyaoIcons.Shuffle, null, tint = NyaoColors.Text)
             Spacer(Modifier.size(6.dp))
             Text("Вперемешку", style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
@@ -164,7 +159,7 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
 
     val header: @Composable () -> Unit = {
         Column {
-            ScreenHeader("Медиатека", action = { CircleButton({ model.go(Route.Search) }) { Icon(Icons.Rounded.Search, "Поиск", tint = NyaoColors.Text) } })
+            ScreenHeader("Медиатека", action = { CircleButton({ model.go(Route.Search) }) { Icon(NyaoIcons.Search, "Поиск", tint = NyaoColors.Text) } })
             ConnectedGroup(listOf("Мне нравится", "Плейлисты"), tab, { tab = it }, Modifier.padding(horizontal = 16.dp), height = 48.dp)
             Spacer(Modifier.height(14.dp))
         }
@@ -191,7 +186,7 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                 Box(Modifier.size(64.dp).clip(PolarShape(9, 0.08f)).background(NyaoColors.Lavender), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Rounded.Favorite, null, tint = NyaoColors.OnLavender, modifier = Modifier.size(28.dp))
+                                    Icon(NyaoIcons.Favorite, null, tint = NyaoColors.OnLavender, modifier = Modifier.size(28.dp))
                                 }
                                 Column {
                                     Text("Мне нравится", style = MaterialTheme.typography.headlineSmall, color = NyaoColors.OnPrimary)
@@ -278,7 +273,7 @@ fun PlaylistScreen(model: AppModel, playlist: Playlist) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
         item {
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { model.back() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Назад", tint = NyaoColors.Text) }
+                IconButton(onClick = { model.back() }) { Icon(NyaoIcons.ArrowBack, "Назад", tint = NyaoColors.Text) }
                 Spacer(Modifier.weight(1f))
                 // свой микс можно удалить
                 if (playlist.id.startsWith("mix:")) TextButton(onClick = {
@@ -301,10 +296,60 @@ fun PlaylistScreen(model: AppModel, playlist: Playlist) {
                     color = NyaoColors.Muted,
                     modifier = Modifier.padding(top = 4.dp),
                 )
-                PlayButtons(tracks ?: emptyList(), playlist.title, Modifier.padding(top = 18.dp, bottom = 18.dp))
+                PlayButtons(tracks ?: emptyList(), playlist.title, Modifier.padding(top = 18.dp, bottom = 8.dp))
+                OfflineButton(model, playlist, tracks)
             }
         }
         if (tracks == null) item { Loading() } else trackGroup(model, tracks, playlist.title, current?.id, likedIds)
+    }
+}
+
+/** Скачать плейлист для прослушивания без интернета (Яндекс и YouTube; SoundCloud и VK — пока нельзя) */
+@Composable
+private fun OfflineButton(model: AppModel, playlist: Playlist, tracks: List<Track>?) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val st by org.nyao.music.playback.Offline.state.collectAsState()
+    val mod = Modifier.padding(bottom = 14.dp)
+    if (tracks.isNullOrEmpty()) return
+    if (playlist.id == org.nyao.music.playback.Offline.PLAYLIST_ID) {
+        TextButton(onClick = {
+            org.nyao.music.playback.Offline.removeAll()
+            model.message("Скачанное удалено")
+            model.back()
+        }, modifier = mod) { Text("Удалить всё скачанное") }
+        return
+    }
+    val prog = st.progress[playlist.id]
+    val ids = st.ids
+    val can = tracks.count { org.nyao.music.playback.Offline.canDownload(it) }
+    val have = tracks.count { it.id in ids && org.nyao.music.playback.Offline.canDownload(it) }
+    when {
+        prog != null -> Row(mod, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            androidx.compose.material3.CircularProgressIndicator(
+                progress = { if (prog.second == 0) 0f else prog.first / prog.second.toFloat() },
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 3.dp,
+            )
+            Text("Скачиваю ${prog.first} из ${prog.second}", style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted)
+            TextButton(onClick = { org.nyao.music.playback.Offline.cancel(playlist.id) }) { Text("Отменить") }
+        }
+        can == 0 -> Text("SoundCloud и VK пока нельзя скачать для офлайна", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = mod)
+        have >= can -> androidx.compose.material3.OutlinedButton(onClick = {
+            org.nyao.music.playback.Offline.remove(playlist.id, tracks)
+            model.message("Загрузка «${playlist.title}» удалена")
+        }, modifier = mod) {
+            Icon(NyaoIcons.DownloadDone, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text("Скачано · удалить")
+        }
+        else -> androidx.compose.material3.FilledTonalButton(onClick = {
+            org.nyao.music.playback.Offline.download(ctx, playlist.id, playlist.title, tracks)
+            model.message("Скачиваю «${playlist.title}» — можно слушать дальше")
+        }, modifier = mod) {
+            Icon(NyaoIcons.Download, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text(if (have > 0) "Докачать (${can - have})" else "Скачать для офлайна")
+        }
     }
 }
 
@@ -325,8 +370,8 @@ fun SearchScreen(model: AppModel) {
                 onValueChange = { text = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 placeholder = { Text("Трек или исполнитель", color = NyaoColors.Muted) },
-                leadingIcon = { Icon(Icons.Rounded.Search, null, tint = NyaoColors.Muted) },
-                trailingIcon = { if (text.isNotEmpty()) IconButton(onClick = { text = "" }) { Icon(Icons.Rounded.Close, "Очистить", tint = NyaoColors.Muted) } },
+                leadingIcon = { Icon(NyaoIcons.Search, null, tint = NyaoColors.Muted) },
+                trailingIcon = { if (text.isNotEmpty()) IconButton(onClick = { text = "" }) { Icon(NyaoIcons.Close, "Очистить", tint = NyaoColors.Muted) } },
                 singleLine = true,
                 shape = RoundedCornerShape(28.dp),
                 colors = TextFieldDefaults.colors(

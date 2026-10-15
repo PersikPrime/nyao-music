@@ -2,12 +2,15 @@ import { Player } from './player.js';
 import { Ribbon } from './ribbon.js';
 import { Onboarding } from './onboarding.js';
 import { layoutChoiceHtml } from './layouts.js';
+import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel } from './eq.js';
+import { FullScreen } from './fullscreen.js';
 
 const api = window.nyao;
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const view = $('#view');
 const player = new Player($('#audio'));
+const eq = new Equalizer(player.audio);
 
 // ---------- Тема по системе: macOS — Liquid Glass, остальное — Windows ----------
 const THEME = new URLSearchParams(location.search).get('theme') || (api.platform === 'darwin' ? 'mac' : 'win');
@@ -140,6 +143,7 @@ function setRangeFill(input) {
   input.style.setProperty('--p', `${p}%`);
 }
 const SETTINGS_ICON_SM = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>';
+const FS_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
 const ICONS = {
   play: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>',
   pause: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1.2"/><rect x="14" y="4" width="4" height="16" rx="1.2"/></svg>',
@@ -165,7 +169,7 @@ const NAV = [
 ];
 const SETTINGS_ICON = 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1';
 
-const DIVERSITY = [['favorite', 'Любимое', 'Больше того, что ты уже лайкал, плюс сами лайки из YouTube Music.'], ['discover', 'Незнакомое', 'Только новое: в поток не попадёт ничего из твоих лайков.'], ['popular', 'Популярное', 'Хиты и то, что сейчас слушают чаще всего.']];
+const DIVERSITY = [['any', 'Всё', 'Без ограничений: и любимое, и новое, и популярное — как обычная «Моя волна».'], ['favorite', 'Любимое', 'В основном твои лайки и похожее на них. Если лайков немного, треки будут повторяться.'], ['discover', 'Незнакомое', 'Только новое: в поток не попадёт ничего из твоих лайков.'], ['popular', 'Популярное', 'Хиты и то, что сейчас слушают чаще всего.']];
 const MOODS = [['active', 'Бодрое', '#FFB86B', 'M13 22h18M22 13v18'], ['fun', 'Весёлое', '#E8F06B', 'M14 25c3 4 13 4 16 0'], ['calm', 'Спокойное', '#7CE0C3', 'M13 22c3-3 6 3 9 0s6 3 9 0'], ['sad', 'Грустное', '#8FB4FF', 'M14 28c3-4 13-4 16 0']];
 
 function balanceTrack(share) {
@@ -503,7 +507,7 @@ function renderPlayer() {
   let body = '';
   if (state.tab === 'cover') {
     body = t ? `<div class="np-cover">
-      ${coverHtml(t, 'np-art')}
+      <div class="np-art-wrap" data-dbl="fullscreen" title="Двойной клик — полный экран">${coverHtml(t, 'np-art')}</div>
       <div class="np-info">
         <div class="src-chips"><span class="src-chip">${badge(t.source)}Играет из ${srcName(t.source, true)}</span>${player.label ? `<span class="src-chip" style="padding-left:10px">${esc(player.label)}</span>` : ''}</div>
         <h1>${esc(t.title)}</h1>
@@ -512,6 +516,7 @@ function renderPlayer() {
           <button class="btn ${player.liked.has(t.id) ? 'primary' : ''}" data-action="like-cur">${player.liked.has(t.id) ? ICONS.heartOn : ICONS.heart}${player.liked.has(t.id) ? 'В «Мне нравится»' : 'Нравится'}</button>
           <button class="btn" data-action="cur-more">${ICONS.plus}В микс</button>
           ${player.mode === 'wave' ? `<button class="btn" data-action="go" data-route="wave">${ICONS.tune}Волна</button>` : ''}
+          <button class="btn" data-action="fullscreen">${FS_ICON}Полный экран</button>
         </div>
         <div class="lyric-peek" data-action="tab" data-v="lyrics"><span class="eyebrow">Текст</span><span class="cur" id="peek-cur">…</span><span class="nx" id="peek-nx"></span></div>
       </div>
@@ -987,6 +992,7 @@ function renderSettings() {
     </section>
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Аккаунты</h2>${SERVICES.map((x) => svcCard(x.id)).join('')}</section>
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Моя волна</h2>${waveControlsHtml()}</section>
+    ${eqCardHtml()}
     ${discordCardHtml()}
     ${updateCardHtml()}
     <section class="card">
@@ -997,6 +1003,25 @@ function renderSettings() {
   </div>`;
   $$('input[data-input="share"]', view).forEach(setRangeFill);
   refreshRpcStatus();
+}
+
+function eqCardHtml() {
+  const e = normalizeEq(state.settings.eq);
+  return `<section class="card eq-card">
+    <div class="pref-row"><span><b>Эквалайзер</b><span class="hint">Настраивает звук всех сервисов сразу. Выключен — звук без изменений.</span></span>
+      <button class="switch ${e.on ? 'on' : ''}" role="switch" aria-checked="${e.on}" aria-label="Эквалайзер" data-action="eq-toggle"><span></span></button></div>
+    <div class="eq-presets ${e.on ? '' : 'off'}">${EQ_PRESETS.map(([id, name]) => `<button class="chip ${e.preset === id ? 'on' : ''}" data-action="eq-preset" data-v="${id}">${name}</button>`).join('')}${e.preset === 'custom' ? '<button class="chip on" disabled>Свой</button>' : ''}</div>
+    <div class="eq-bands ${e.on ? '' : 'off'}">${EQ_BANDS.map((hz, i) => `<label class="eq-band"><span class="eq-db" id="eq-db-${i}">${e.gains[i] > 0 ? '+' : ''}${e.gains[i]}</span><input type="range" min="-12" max="12" step="1" value="${e.gains[i]}" data-input="eq" data-i="${i}" aria-label="${bandLabel(hz)} Гц" ${e.on ? '' : 'disabled'}><span class="eq-hz">${bandLabel(hz)}</span></label>`).join('')}</div>
+  </section>`;
+}
+
+let eqSaveTimer;
+function saveEq(next, rerender = true) {
+  state.settings = { ...state.settings, eq: next };
+  eq.apply(next);
+  clearTimeout(eqSaveTimer);
+  eqSaveTimer = setTimeout(() => api.settings.set({ eq: next }).catch(() => {}), 300);
+  if (rerender && state.route === 'settings') renderSettings();
 }
 
 const RPC_STATUS = { off: 'выключено', 'no-id': 'выключено', connecting: 'жду Discord… (он должен быть запущен)', connected: 'подключено' };
@@ -1273,6 +1298,9 @@ async function handleAction(el, e) {
     case 'cur-more':
       if (player.current) openMenu(e.clientX, e.clientY, player.current);
       break;
+    case 'fullscreen':
+      fullscreen.show();
+      break;
     case 'like-cur':
       await player.toggleLike();
       if (state.route === 'player') renderPlayer();
@@ -1311,6 +1339,16 @@ async function handleAction(el, e) {
       state.artist.kind = el.dataset.v;
       renderArtist();
       break;
+    case 'eq-toggle': {
+      const e = normalizeEq(state.settings.eq);
+      saveEq({ ...e, on: !e.on });
+      break;
+    }
+    case 'eq-preset': {
+      const p = EQ_PRESETS.find((x) => x[0] === el.dataset.v);
+      if (p) saveEq({ ...normalizeEq(state.settings.eq), on: true, preset: p[0], gains: p[2].slice() });
+      break;
+    }
     case 'rpc-toggle':
       state.settings = await api.settings.set({ discordRpc: !state.settings.discordRpc });
       renderSettings();
@@ -1500,6 +1538,17 @@ view.addEventListener('submit', async (e) => {
 });
 
 view.addEventListener('input', (e) => {
+  if (e.target.dataset.input === 'eq') {
+    const i = Number(e.target.dataset.i);
+    const cur = normalizeEq(state.settings.eq);
+    const gains = cur.gains.slice();
+    gains[i] = Number(e.target.value);
+    const db = $(`#eq-db-${i}`, view);
+    if (db) db.textContent = `${gains[i] > 0 ? '+' : ''}${gains[i]}`;
+    const wasCustom = cur.preset === 'custom';
+    saveEq({ ...cur, preset: 'custom', gains }, !wasCustom);
+    return;
+  }
   if (e.target.dataset.input === 'share') {
     const v = Number(e.target.value);
     setRangeFill(e.target);
@@ -1653,7 +1702,27 @@ player.addEventListener('time', () => {
   updateTime();
   if (state.route === 'player' && state.tab !== 'queue') syncLyrics(false);
 });
+const fullscreen = new FullScreen({
+  player,
+  api,
+  isMac: IS_MAC,
+  ensureLyrics: () => ensureLyrics(),
+  like: () => player.toggleLike(),
+  icons: {
+    play: ICONS.playBig, pause: ICONS.pauseBig, heart: ICONS.heart, heartOn: ICONS.heartOn,
+    prev: '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>',
+    next: '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>'
+  }
+});
 player.addEventListener('like', renderBar);
+player.addEventListener('track', () => fullscreen.update());
+player.addEventListener('state', () => fullscreen.update());
+player.addEventListener('like', () => fullscreen.update());
+player.addEventListener('time', () => fullscreen.tick());
+api.win.onFullscreen((on) => {
+  if (!on) fullscreen.close();
+});
+$('#pb-full').onclick = () => fullscreen.toggle();
 player.addEventListener('track', pushRpc);
 player.addEventListener('state', pushRpc);
 player.addEventListener('track', pushNow);
@@ -1694,7 +1763,17 @@ $('#accounts').addEventListener('click', (e) => {
   }
 });
 document.addEventListener('keydown', (e) => {
-  if (e.target.closest('input, textarea')) return;
+  if (e.target.closest && e.target.closest('input, textarea')) return;
+  // полноэкранный режим: F11 — вкл/выкл, Esc — выход
+  if (e.code === 'F11' || (e.code === 'KeyF' && (e.metaKey || e.ctrlKey) && e.shiftKey)) {
+    e.preventDefault();
+    fullscreen.toggle();
+    return;
+  }
+  if (e.code === 'Escape' && fullscreen.open) {
+    fullscreen.close();
+    return;
+  }
   if (e.code === 'Space') {
     e.preventDefault();
     player.toggle();
@@ -1937,6 +2016,7 @@ function openMixBuilder() {
 (async function init() {
   if (IS_MAC) new Ribbon($('#bg-ribbon'), { lines: 20, cy: 0.58, amp: 1, width: 1.7, accent: '#D8CEFF', alpha: 0.9 });
   state.settings = await api.settings.get();
+  eq.apply(state.settings.eq);
   player.setVolume(state.settings.volume);
   volEl.value = Math.round(state.settings.volume * 100);
   setRangeFill(volEl);
@@ -1989,3 +2069,7 @@ function openMixBuilder() {
     else openOnboarding();
   }
 })();
+
+view.addEventListener('dblclick', (e) => {
+  if (e.target.closest('[data-dbl="fullscreen"]')) fullscreen.show();
+});

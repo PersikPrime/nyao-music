@@ -43,7 +43,9 @@ jobs:
           NYAO_KEY_ALIAS: nyao
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          set -o pipefail
+          # ошибки компиляции — в аннотации запуска, чтобы их было видно без скачивания лога
+          ./gradlew assembleRelease --no-daemon 2>&1 | tee "$RUNNER_TEMP/gradle.log" || { grep -E '^e: ' "$RUNNER_TEMP/gradle.log" | head -20 | sed 's/^/::error::/'; exit 1; }
           # проверка: каким сертификатом подписан APK (отпечаток SHA-256 должен быть одинаковым у всех сборок)
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -i "SHA-256" | head -1
       - name: Имя файла с версией

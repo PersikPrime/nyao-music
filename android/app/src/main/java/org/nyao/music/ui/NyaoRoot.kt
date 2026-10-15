@@ -1,5 +1,24 @@
 package org.nyao.music.ui
 
+import androidx.compose.foundation.layout.widthIn
+
+import androidx.compose.ui.input.pointer.pointerInput
+
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+
+import org.nyao.music.ui.components.NyaoIcons
+
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.graphics.drawscope.clipRect
+
+import androidx.compose.ui.layout.onGloballyPositioned
+
+import androidx.compose.ui.graphics.layer.drawLayer
+
+import androidx.compose.ui.draw.blur
+
+import androidx.compose.ui.draw.drawWithContent
+
 import androidx.compose.runtime.mutableStateOf
 
 import androidx.activity.compose.BackHandler
@@ -39,21 +58,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.LibraryMusic
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.SkipNext
-import androidx.compose.material.icons.rounded.Waves
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -102,21 +110,22 @@ private fun routeOrder(r: Route): Int = when (r) {
     is Route.PlaylistPage -> 5
 }
 
-private data class Tab(val route: Route, val label: String, val icon: ImageVector)
+/** icon — обычная (контурная), iconOn — залитая для выбранной вкладки, как в Material 3 Expressive */
+private data class Tab(val route: Route, val label: String, val icon: ImageVector, val iconOn: ImageVector = icon)
 
 private val TABS = listOf(
-    Tab(Route.Home, "Главная", Icons.Rounded.Home),
-    Tab(Route.Wave, "Волна", Icons.Rounded.Waves),
-    Tab(Route.Library, "Медиатека", Icons.Rounded.LibraryMusic),
-    Tab(Route.Settings, "Настройки", Icons.Rounded.Settings),
+    Tab(Route.Home, "Главная", NyaoIcons.Home, NyaoIcons.HomeFilled),
+    Tab(Route.Wave, "Волна", NyaoIcons.Waves, NyaoIcons.WavesFilled),
+    Tab(Route.Library, "Медиатека", NyaoIcons.LibraryMusic, NyaoIcons.LibraryMusicFilled),
+    Tab(Route.Settings, "Настройки", NyaoIcons.Settings, NyaoIcons.SettingsFilled),
 )
 
 /** Режим «Плеер»: вместо вкладки волны — поиск (волну можно вернуть в настройках) */
 private val PLAYER_TABS = listOf(
-    Tab(Route.Home, "Главная", Icons.Rounded.Home),
-    Tab(Route.Search, "Поиск", Icons.Rounded.Search),
-    Tab(Route.Library, "Медиатека", Icons.Rounded.LibraryMusic),
-    Tab(Route.Settings, "Настройки", Icons.Rounded.Settings),
+    Tab(Route.Home, "Главная", NyaoIcons.Home, NyaoIcons.HomeFilled),
+    Tab(Route.Search, "Поиск", NyaoIcons.Search),
+    Tab(Route.Library, "Медиатека", NyaoIcons.LibraryMusic, NyaoIcons.LibraryMusicFilled),
+    Tab(Route.Settings, "Настройки", NyaoIcons.Settings, NyaoIcons.SettingsFilled),
 )
 
 private fun tabsFor(s: org.nyao.music.data.Settings): List<Tab> = when {
@@ -130,7 +139,7 @@ fun NyaoRoot() {
     val scope = rememberCoroutineScope()
     val model = remember { AppModel(scope) }
     val settings by Repo.prefs.settings.collectAsState()
-    val snackbar = remember { SnackbarHostState() }
+    var toast by remember { mutableStateOf<Toast?>(null) }
     var requiredUpdate by remember { mutableStateOf<org.nyao.music.data.UpdateInfo?>(null) }
     val outdated by Repo.cloud.outdated.collectAsState()
 
@@ -160,7 +169,9 @@ fun NyaoRoot() {
                 else if (u.available) PlaybackEvents.emit("Доступна Nyao Music ${u.label} — обновить можно в Настройках")
             }
         }
-        PlaybackEvents.messages.collect { snackbar.showSnackbar(it) }
+        // новое уведомление сразу заменяет старое (без очереди); одинаковое — просто продлевает показ
+        var seq = 0L
+        PlaybackEvents.messages.collect { text -> toast = Toast(text, ++seq) }
     }
 
     BackHandler(enabled = model.loginFor != null || model.nowPlayingOpen || model.stack.size > 1 || model.route != Route.Home) {
@@ -187,7 +198,7 @@ fun NyaoRoot() {
             })
         }
 
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 140.dp))
+        TopToast(toast, onDismiss = { toast = null }, modifier = Modifier.align(Alignment.TopCenter))
 
         // режим «Плеер»: окно нового микса; после обновления с 0.4 — выбор вида; устаревшая сборка — обновиться
         if (model.mixBuilderOpen) org.nyao.music.ui.screens.MixBuilderDialog(model)
@@ -222,15 +233,82 @@ private fun Content(model: AppModel, wide: Boolean) {
     }
 }
 
+// ---------- Уведомления: капсула сверху ----------
+
+private data class Toast(val text: String, val id: Long) {
+    /** Ошибки и длинные сообщения висят дольше, подтверждения — коротко */
+    val durationMs: Long get() {
+        val problem = Regex("(?i)не |ошиб|не удалось|недоступ|закончил").containsMatchIn(text)
+        return (if (problem) 4500L else 2200L) + (if (text.length > 60) 1500L else 0L)
+    }
+}
+
+/** Капсула, выезжающая сверху: не закрывает кнопки плеера; смахивается вверх или по нажатию */
+@Composable
+private fun TopToast(toast: Toast?, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    var shown by remember { mutableStateOf(toast) }
+    if (toast != null) shown = toast
+    LaunchedEffect(toast?.id) {
+        if (toast != null) {
+            delay(toast.durationMs)
+            onDismiss()
+        }
+    }
+    var drag by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    AnimatedVisibility(
+        toast != null,
+        modifier = modifier.statusBarsPadding().padding(top = 8.dp, start = 16.dp, end = 16.dp),
+        enter = slideInVertically(spring(dampingRatio = 0.75f, stiffness = 500f)) { -it * 2 } + fadeIn(),
+        exit = slideOutVertically { -it * 2 } + fadeOut(),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = NyaoColors.S3,
+            contentColor = NyaoColors.Text,
+            shadowElevation = 10.dp,
+            modifier = Modifier
+                .widthIn(max = 520.dp)
+                .graphicsLayer { translationY = drag.coerceAtMost(0f) }
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragEnd = { if (drag < -30f) onDismiss(); drag = 0f },
+                        onDragCancel = { drag = 0f },
+                    ) { _, dy -> drag += dy }
+                }
+                .clickable(onClick = onDismiss),
+        ) {
+            AnimatedContent(shown?.text ?: "", transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "toast") { text ->
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 // ---------- Телефон: контент + мини-плеер + плавающая панель ----------
 
 @Composable
 private fun PhoneLayout(model: AppModel) {
     val current by PlayerConnection.current.collectAsState()
+    // Снимок экрана под плеером: из него рисуем размытую полосу за мини-плеером и панелью
+    val shot = androidx.compose.ui.graphics.rememberGraphicsLayer()
+    var barsTop by remember { androidx.compose.runtime.mutableFloatStateOf(Float.NaN) }
     Box(Modifier.fillMaxSize()) {
-        Content(model, wide = false)
+        Box(
+            Modifier.fillMaxSize().drawWithContent {
+                shot.record { this@drawWithContent.drawContent() }
+                drawLayer(shot)
+            },
+        ) { Content(model, wide = false) }
+        BottomBlur(shot, barsTop)
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp),
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)
+                .onGloballyPositioned { barsTop = it.positionInParent().y },
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -245,6 +323,34 @@ private fun PhoneLayout(model: AppModel) {
             NowPlayingScreen(model, asPane = false, onClose = { model.nowPlayingOpen = false })
         }
     }
+}
+
+/**
+ * Мягкое размытие под мини-плеером и панелью: снизу контент размыт, кверху размытие плавно сходит на нет.
+ * Настоящее размытие — с Android 12; на старых версиях остаётся только плавное затемнение.
+ */
+@Composable
+private fun BottomBlur(shot: androidx.compose.ui.graphics.layer.GraphicsLayer, barsTop: Float) {
+    if (barsTop.isNaN()) return
+    val bg = MaterialTheme.colorScheme.background
+    val fade = with(androidx.compose.ui.platform.LocalDensity.current) { 56.dp.toPx() }
+    val blur = if (android.os.Build.VERSION.SDK_INT >= 31) Modifier.blur(18.dp, androidx.compose.ui.draw.BlurredEdgeTreatment.Rectangle) else Modifier
+    Box(
+        Modifier.fillMaxSize()
+            .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+            .then(blur)
+            .drawWithContent {
+                val top = (barsTop - fade).coerceAtLeast(0f)
+                clipRect(top = top) { drawLayer(shot) }
+                // сверху размытие плавно исчезает
+                drawRect(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = top, endY = top + fade * 1.6f),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                )
+                // и чуть притемняем, чтобы панель читалась на любом фоне
+                drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Transparent, 1f to bg.copy(alpha = 0.55f), startY = top, endY = size.height))
+            },
+    )
 }
 
 /** Плавающая панель из макета: выбранная вкладка раскрывается в «таблетку» с подписью */
@@ -265,7 +371,7 @@ private fun FloatingToolbar(model: AppModel) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Icon(tab.icon, tab.label, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
+                    Icon(if (selected) tab.iconOn else tab.icon, tab.label, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
                     AnimatedVisibility(selected, enter = expandHorizontally(spring(dampingRatio = 0.7f)) + fadeIn(), exit = shrinkHorizontally(spring(dampingRatio = 0.9f)) + fadeOut()) {
                         Text(tab.label, style = MaterialTheme.typography.labelLarge, color = NyaoColors.OnPrimary, maxLines = 1)
                     }
@@ -302,8 +408,8 @@ private fun MiniPlayer(onOpen: () -> Unit, modifier: Modifier = Modifier) {
             Box(
                 Modifier.size(48.dp).bouncy().clip(RoundedCornerShape(16.dp)).background(pal.accent).clickable { PlayerConnection.toggle() },
                 contentAlignment = Alignment.Center,
-            ) { Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Играть", tint = pal.onAccent) }
-            IconButton(onClick = { PlayerConnection.next() }) { Icon(Icons.Rounded.SkipNext, "Следующий", tint = pal.onContainer) }
+            ) { Icon(if (playing) NyaoIcons.Pause else NyaoIcons.PlayArrow, if (playing) "Пауза" else "Играть", tint = pal.onAccent) }
+            IconButton(onClick = { PlayerConnection.next() }) { Icon(NyaoIcons.SkipNext, "Следующий", tint = pal.onContainer) }
         }
         // Прогресс — тонкая прямая полоска внутри капсулы и без перемотки: нажатие на нижнюю половину
         // мини-плеера открывает экран «Сейчас играет», а не перематывает трек (перемотка — там, на волне)
@@ -332,7 +438,7 @@ private fun WideLayout(model: AppModel, showPane: Boolean) {
                 val selected = model.route == tab.route
                 Column(Modifier.bouncy().clip(RoundedCornerShape(16.dp)).clickable { model.go(tab.route) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box(Modifier.width(56.dp).height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (selected) NyaoColors.Primary else Color.Transparent), contentAlignment = Alignment.Center) {
-                        Icon(tab.icon, null, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
+                        Icon(if (selected) tab.iconOn else tab.icon, null, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
                     }
                     Text(tab.label, style = MaterialTheme.typography.labelMedium, color = if (selected) NyaoColors.Text else NyaoColors.Muted, maxLines = 1)
                 }

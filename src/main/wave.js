@@ -46,6 +46,7 @@ export class WaveMixer {
     this.pool = [];
     this.seen = new Set();
     this.recent = new Set();
+    this.last = [];
     this.refilling = null;
   }
 
@@ -84,48 +85,83 @@ export class WaveMixer {
     return this.refilling;
   }
 
-  take(list) {
-    let fresh = list.filter((t) => t && !this.seen.has(t.id) && !this.recent.has(t.id));
-    // всё в пачке уже звучало недавно — лучше повтор, чем тишина: берём пару треков
-    if (!fresh.length) fresh = list.filter((t) => t && !this.seen.has(t.id)).slice(0, 2);
-    fresh.forEach((t) => this.seen.add(t.id));
-    return fresh;
+  /**
+   * Новое из пачки Яндекса. Ступени, чтобы волна не обрывалась:
+   * 1) не звучало ни в этом запуске, ни недавно; 2) недавно звучало, но не в этом запуске;
+   * 3) повтор из этого запуска, но не из последних 30 треков.
+   */
+  pickFresh(list, strict) {
+    const a = list.filter((t) => t && !this.seen.has(t.id) && !this.recent.has(t.id));
+    if (a.length || strict) return a;
+    const b = list.filter((t) => t && !this.seen.has(t.id));
+    if (b.length) return b.slice(0, 4);
+    return list.filter((t) => t && !this.last.includes(t.id)).slice(0, 3);
   }
 
-  async batch(yaPromise) {
+  remember(id) {
+    this.last.push(id);
+    if (this.last.length > 30) this.last.shift();
+  }
+
+  async batch(yaPromise, retryPromise = yaPromise) {
     const { share } = this.opts();
     const useYt = this.extras.length > 0 && share > 0;
     if (useYt && this.pool.length < 6) await this.refillPool();
     let base = [];
+    let gotAny = false;
+    let lastList = [];
     if (this.ya.loggedIn && share < 100) {
-      try {
-        base = await yaPromise();
-      } catch (e) {
-        if (!useYt) throw e;
+      // Яндекс прислал только уже звучавшее — просим следующую пачку, а не сдаёмся
+      for (let attempt = 0; attempt < 4; attempt++) {
+        let list;
+        try {
+          list = await (attempt === 0 ? yaPromise() : retryPromise());
+        } catch (e) {
+          if (!useYt && attempt === 0) throw e;
+          break;
+        }
+        if (list && list.length) {
+          gotAny = true;
+          lastList = [...lastList, ...list.filter((t) => t && !lastList.some((x) => x.id === t.id))];
+        }
+        base = this.pickFresh(list || [], attempt < 2);
+        if (base.length) break;
       }
+      // новых пачек не дали — лучше повтор из всего полученного, чем тишина
+      if (!base.length && lastList.length) base = this.pickFresh(lastList, false);
     }
-    base = this.take(base);
+    base.forEach((t) => {
+      this.seen.add(t.id);
+      this.remember(t.id);
+    });
     let extraSource = useYt ? this.pool : [];
     if (!base.length && useYt) extraSource = this.pool.slice(0, 6); // волна только из YT
     const { out, usedExtra } = interleave(base, extraSource, base.length ? share : 100);
     const usedTracks = extraSource.slice(0, usedExtra);
     this.pool = this.pool.filter((t) => !usedTracks.includes(t));
-    usedTracks.forEach((t) => this.seen.add(t.id));
+    usedTracks.forEach((t) => {
+      this.seen.add(t.id);
+      this.remember(t.id);
+    });
     if (useYt && this.pool.length < 6) this.refillPool();
-    if (!out.length) throw new Error('Волна пустая: войди хотя бы в один сервис в настройках');
+    if (!out.length) {
+      if (this.ya.loggedIn || this.extras.length) throw new Error(gotAny ? 'Сервисы прислали только уже сыгранное — нажми ещё раз, попробую снова' : 'Сервисы не прислали треков — проверь интернет и попробуй ещё раз');
+      throw new Error('Волна пустая: войди хотя бы в один сервис в настройках');
+    }
     return out;
   }
 
   async start() {
     this.pool = [];
     this.seen = new Set();
+    this.last = [];
     try {
       this.recent = await this.getRecent();
     } catch {
       this.recent = new Set();
     }
     const { diversity, mood } = this.opts();
-    const tracks = this.freshStart(await this.batch(() => this.ya.waveStart({ diversity, mood })));
+    const tracks = this.freshStart(await this.batch(() => this.ya.waveStart({ diversity, mood }), () => this.ya.waveMore([...this.seen])));
     if (this.ya.loggedIn) this.ya.waveFeedback('radioStarted', { source: 'ya' });
     return tracks;
   }
@@ -136,17 +172,17 @@ export class WaveMixer {
    */
   freshStart(tracks) {
     if (tracks.length < 2) return tracks;
-    const head = shuffle(tracks.slice(0, Math.min(5, tracks.length)));
+    const head = shuffle(tracks.slice(0, Math.min(12, tracks.length)));
     const out = [...head, ...tracks.slice(head.length)];
     const firsts = (this.memory && this.memory.get()) || [];
     const i = out.findIndex((t) => !firsts.includes(t.id));
     if (i > 0) out.unshift(...out.splice(i, 1));
-    if (this.memory) this.memory.set([out[0].id, ...firsts.filter((id) => id !== out[0].id)].slice(0, 15));
+    if (this.memory) this.memory.set([out[0].id, ...firsts.filter((id) => id !== out[0].id)].slice(0, 40));
     return out;
   }
 
   async more(queueIds) {
-    return this.batch(() => this.ya.waveMore(queueIds));
+    return this.batch(() => this.ya.waveMore(queueIds), () => this.ya.waveMore([...queueIds, ...[...this.seen].slice(-10)]));
   }
 
   async feedback(type, track, played) {

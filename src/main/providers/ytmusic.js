@@ -144,7 +144,7 @@ export class YTMusicProvider {
     }
   }
 
-  async likedTracks(limit = 300) {
+  async likedTracks(limit = 5000) {
     if (this.likedCache && Date.now() - this.likedCache.at < 10 * 60 * 1000) return this.likedCache.tracks;
     const tracks = await this.playlistTracks('yt:LM', limit);
     this.likedCache = { at: Date.now(), tracks };

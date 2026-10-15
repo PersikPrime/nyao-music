@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import org.nyao.music.ui.components.NyaoIcons
+
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -23,10 +25,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,7 +62,8 @@ import org.nyao.music.ui.components.rememberPlayShape
 import org.nyao.music.ui.theme.NyaoColors
 
 val DIVERSITY = listOf(
-    Triple("favorite", "Любимое", "Больше того, что ты уже лайкал, плюс сами лайки из YouTube Music."),
+    Triple("any", "Всё", "Без ограничений: и любимое, и новое, и популярное — как обычная «Моя волна»."),
+    Triple("favorite", "Любимое", "В основном твои лайки и похожее на них. Если лайков немного, треки будут повторяться."),
     Triple("discover", "Незнакомое", "Только новое: в поток не попадёт ничего из твоих лайков."),
     Triple("popular", "Популярное", "Хиты и то, что сейчас слушают чаще всего."),
 )
@@ -93,7 +92,7 @@ fun WaveScreen(model: AppModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { model.go(Route.Home) }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Назад", tint = NyaoColors.Text) }
+            IconButton(onClick = { model.go(Route.Home) }) { Icon(NyaoIcons.ArrowBack, "Назад", tint = NyaoColors.Text) }
             Text("Моя волна", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
             Box(Modifier.size(48.dp))
         }
@@ -113,7 +112,7 @@ fun WaveScreen(model: AppModel) {
                 contentAlignment = Alignment.Center,
             ) {
                 if (model.waveStarting) CircularProgressIndicator(color = NyaoColors.OnLavender, modifier = Modifier.size(44.dp))
-                else Icon(if (active) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (active) "Пауза" else "Слушать", tint = NyaoColors.OnLavender, modifier = Modifier.size(76.dp))
+                else Icon(if (active) NyaoIcons.Pause else NyaoIcons.PlayArrow, if (active) "Пауза" else "Слушать", tint = NyaoColors.OnLavender, modifier = Modifier.size(76.dp))
             }
         }
         Text("Моя волна", style = MaterialTheme.typography.displaySmall)

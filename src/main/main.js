@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, net, shell, session } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -32,7 +32,7 @@ function readVersion() {
 }
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'nyao', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }
+  { scheme: 'nyao', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } }
 ]);
 
 const fetchFn = (url, opts) => net.fetch(url, opts);
@@ -255,6 +255,32 @@ function registerIpc() {
   handle('win:minimize', () => win.minimize());
   handle('win:maximize', () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   handle('win:close', () => win.close());
+  handle('win:fullscreen', (on) => {
+    win.setFullScreen(!!on);
+    return win.isFullScreen();
+  });
+  // средний цвет обложки — для фона полноэкранного режима (картинку разбираем здесь, без CORS)
+  const coverColors = new Map();
+  handle('cover:color', async (url) => {
+    if (!url) return null;
+    if (coverColors.has(url)) return coverColors.get(url);
+    const res = await net.fetch(url);
+    const img = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()));
+    if (img.isEmpty()) return null;
+    const bmp = img.resize({ width: 24, height: 24, quality: 'good' }).toBitmap(); // BGRA
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < bmp.length; i += 4) {
+      const B = bmp[i], G = bmp[i + 1], R = bmp[i + 2];
+      const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+      // почти чёрное и почти белое меньше влияет на цвет — фон получается «цветом обложки», а не серым
+      const w = mx < 24 || mn > 232 ? 0.15 : 1 + (mx - mn) / 128;
+      r += R * w; g += G * w; b += B * w; n += w;
+    }
+    const color = n ? [r / n, g / n, b / n].map(Math.round) : null;
+    coverColors.set(url, color);
+    if (coverColors.size > 200) coverColors.delete(coverColors.keys().next().value);
+    return color;
+  });
   handle('open:external', (url) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
   });
@@ -503,6 +529,7 @@ function createWindow() {
   win.once('ready-to-show', () => win.show());
   win.on('maximize', () => win.webContents.send('win:state', { maximized: true }));
   win.on('unmaximize', () => win.webContents.send('win:state', { maximized: false }));
+  win.on('leave-full-screen', () => win.webContents.send('win:fullscreen', false));
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -524,7 +551,16 @@ app.whenReady().then(() => {
     }
   }
   initProviders();
-  protocol.handle('nyao', (request) => streams.handle(request));
+  protocol.handle('nyao', async (request) => {
+    const res = await streams.handle(request);
+    // эквалайзер (Web Audio) читает звук только с разрешением CORS
+    try {
+      res.headers.set('access-control-allow-origin', '*');
+    } catch {
+      // заголовки ответа неизменяемые — отдаём как есть
+    }
+    return res;
+  });
   registerIpc();
   configureRpc();
   createWindow();
