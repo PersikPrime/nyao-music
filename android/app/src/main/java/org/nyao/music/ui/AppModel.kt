@@ -24,6 +24,8 @@ sealed interface Route {
     data object Settings : Route
     data class PlaylistPage(val playlist: Playlist) : Route
     data class ArtistPage(val source: String, val id: String?, val name: String) : Route
+    data object Together : Route
+    data object Stats : Route
 }
 
 /** Состояние экранов: живёт, пока живёт окно, чтобы вкладки не грузились заново при каждом переходе. */
@@ -34,6 +36,13 @@ class AppModel(private val scope: CoroutineScope) {
     val route: Route get() = stack.last()
     var nowPlayingOpen by mutableStateOf(false)
     var loginFor by mutableStateOf<String?>(null)
+    /** Шторка Nyao Connect и перенос плейлиста */
+    var connectOpen by mutableStateOf(false)
+    var transferFor by mutableStateOf<Pair<Playlist, List<Track>>?>(null)
+
+    fun invalidatePlaylists() {
+        playlists = null
+    }
 
     fun openArtist(t: Track) {
         nowPlayingOpen = false
@@ -48,7 +57,10 @@ class AppModel(private val scope: CoroutineScope) {
     }
 
     fun go(r: Route) {
-        if (r is Route.PlaylistPage || r is Route.ArtistPage) stack.add(r)
+        if (r is Route.PlaylistPage || r is Route.ArtistPage || r == Route.Together || r == Route.Stats) {
+            nowPlayingOpen = false
+            stack.add(r)
+        }
         else {
             // вкладки верхнего уровня не копятся в истории
             stack.clear()

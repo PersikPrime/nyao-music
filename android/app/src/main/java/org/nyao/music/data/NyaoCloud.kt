@@ -45,7 +45,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
 
     private fun parseUser(o: JSONObject) = CloudUser(o.optString("name", "Telegram"), o.str("username"), o.str("picture"))
 
-    private suspend fun request(method: String, path: String, body: JSONObject? = null): JSONObject {
+    private suspend fun request(method: String, path: String, body: JSONObject? = null, long: Boolean = false): JSONObject {
         val b = Request.Builder().url(BASE + path).header("User-Agent", "NyaoMusic-Android")
             .header("X-Nyao-Build", org.nyao.music.BuildConfig.VERSION_CODE.toString())
         prefs.nyaoToken?.let { b.header("Authorization", "Bearer $it") }
@@ -55,7 +55,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
             "DELETE" -> b.delete(rb)
             else -> b.method(method, rb ?: "{}".toRequestBody(JSON_TYPE))
         }
-        val (code, text) = Net.call(b.build())
+        val (code, text) = if (long) Net.callLong(b.build()) else Net.call(b.build())
         val json = runCatching { JSONObject(text) }.getOrNull() ?: JSONObject()
         if (code == 426) _outdated.value = json.optInt("minBuild", 1).coerceAtLeast(1)
         if (code == 401 && prefs.nyaoToken != null) forget()
@@ -288,20 +288,83 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
     // ---------- «Сейчас играет» ----------
 
     /** Смену трека и паузу шлём сразу, остальное — не чаще раза в 20 секунд */
-    suspend fun setNow(t: Track?, positionSec: Double, playing: Boolean) {
+    suspend fun setNow(t: Track?, positionSec: Double, playing: Boolean, volume: Double? = null, force: Boolean = false) {
         if (!loggedIn) return
         val key = "${t?.id ?: "-"}|$playing"
         val now = System.currentTimeMillis()
-        if (key == lastNowKey && now - lastNowAt < 20_000) return
+        if (!force && key == lastNowKey && now - lastNowAt < 20_000) return
         lastNowKey = key
         lastNowAt = now
         val body = JSONObject().put("position", positionSec).put("playing", playing).put("context", Repo.mode.value.name.lowercase())
-        if (t != null) body.put(
-            "track",
-            JSONObject().put("id", t.id).put("source", t.source).put("srcId", t.srcId).put("title", t.title).put("artist", t.artist)
-                .put("album", t.album).put("albumId", t.albumId ?: JSONObject.NULL).put("duration", t.duration).put("cover", t.cover ?: JSONObject.NULL),
-        )
+        if (volume != null) body.put("volume", volume)
+        if (t != null) body.put("track", trackJson(t))
         request("PUT", "/now", body)
+    }
+
+    // ---------- Живые события, Nyao Connect, «Слушать вместе», итоги ----------
+
+    /** Длинный опрос: ждёт до 25 секунд, пока для этого устройства что-то появится */
+    suspend fun events(cursor: Long): Pair<Long, List<JSONObject>> {
+        val r = request("GET", "/events?cursor=$cursor", long = true)
+        return r.optLong("cursor", cursor) to r.arr("events").objects()
+    }
+
+    suspend fun connectDevices(): List<ConnectDevice> = request("GET", "/connect/devices").arr("devices").objects().map { parseDevice(it) }
+
+    fun parseDevice(d: JSONObject) = ConnectDevice(
+        deviceId = d.optString("deviceId"), device = d.optString("device"), platform = d.optString("platform"),
+        current = d.optBoolean("current"), online = d.optBoolean("online", true),
+        track = d.obj("track")?.let { parseTrack(it) }, positionSec = d.optDouble("position", 0.0), playing = d.optBoolean("playing"),
+        updatedAt = d.optLong("updatedAt", System.currentTimeMillis()), volume = if (d.has("volume") && !d.isNull("volume")) d.optDouble("volume") else null,
+        lastSeen = d.str("lastSeen"),
+    )
+
+    suspend fun connectCmd(deviceId: String, cmd: String, args: JSONObject = JSONObject()) {
+        request("POST", "/connect/$deviceId/cmd", JSONObject().put("cmd", cmd).put("args", args))
+    }
+
+    fun trackJson(t: Track): JSONObject = JSONObject().put("id", t.id).put("source", t.source).put("srcId", t.srcId).put("title", t.title).put("artist", t.artist)
+        .put("album", t.album).put("albumId", t.albumId ?: JSONObject.NULL).put("duration", t.duration).put("cover", t.cover ?: JSONObject.NULL)
+
+    fun parseTrack(t: JSONObject): Track? {
+        val track = Track(
+            id = t.optString("id"), source = t.optString("source"), srcId = t.optString("srcId"),
+            title = t.optString("title"), artist = t.optString("artist"), album = t.optString("album"),
+            albumId = t.str("albumId"), duration = t.optInt("duration"), cover = t.str("cover"),
+        )
+        return if (track.id.isEmpty() || track.srcId.isEmpty()) null else track
+    }
+
+    fun parseRoom(o: JSONObject?, isHost: Boolean? = null): Room? {
+        o ?: return null
+        val st = o.obj("state")
+        return Room(
+            code = o.optString("code"),
+            hostName = o.obj("host")?.optString("name") ?: "Хост",
+            hostPicture = o.obj("host")?.str("picture"),
+            members = o.arr("members").objects().map { it.optString("name") },
+            isHost = isHost ?: o.optBoolean("isHost"),
+            state = st?.let { RoomState(it.obj("track")?.let { t -> parseTrack(t) }, it.optDouble("position", 0.0), it.optBoolean("playing")) },
+        )
+    }
+
+    suspend fun roomCurrent(): Room? = if (!loggedIn) null else parseRoom(request("GET", "/rooms/current").obj("room"))
+    suspend fun roomCreate(): Room = parseRoom(request("POST", "/rooms").obj("room"))!!
+    suspend fun roomJoin(code: String): Room = parseRoom(request("POST", "/rooms/$code/join").obj("room"))!!
+    suspend fun roomLeave(code: String) {
+        runCatching { request("POST", "/rooms/$code/leave") }
+    }
+    suspend fun roomState(code: String, t: Track?, positionSec: Double, playing: Boolean) {
+        val body = JSONObject().put("position", positionSec).put("playing", playing).put("track", t?.let { trackJson(it) } ?: JSONObject.NULL)
+        request("PUT", "/rooms/$code/state", body)
+    }
+    suspend fun roomReact(code: String, emoji: String) {
+        request("POST", "/rooms/$code/react", JSONObject().put("emoji", emoji))
+    }
+
+    suspend fun stats(period: String): JSONObject {
+        val tz = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000
+        return request("GET", "/stats?period=$period&tz=$tz")
     }
 
     suspend fun others(): List<RemoteNow> {
@@ -318,6 +381,22 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         }
     }
 }
+
+/** Устройство для Nyao Connect */
+data class ConnectDevice(
+    val deviceId: String, val device: String, val platform: String, val current: Boolean, val online: Boolean,
+    val track: Track?, val positionSec: Double, val playing: Boolean, val updatedAt: Long, val volume: Double?, val lastSeen: String?,
+) {
+    /** Где сейчас трек: позиция + сколько прошло с последнего сообщения */
+    fun livePosition(now: Long = System.currentTimeMillis()): Double {
+        val p = positionSec + if (playing) (now - updatedAt) / 1000.0 else 0.0
+        val d = track?.duration ?: 0
+        return if (d > 0) minOf(p, d.toDouble()) else p
+    }
+}
+
+data class RoomState(val track: Track?, val positionSec: Double, val playing: Boolean)
+data class Room(val code: String, val hostName: String, val hostPicture: String?, val members: List<String>, val isHost: Boolean, val state: RoomState?)
 
 data class Maintenance(val active: Boolean = false, val title: String = "", val text: String = "", val until: String = "")
 

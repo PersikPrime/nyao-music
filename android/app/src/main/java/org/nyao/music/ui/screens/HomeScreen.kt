@@ -139,6 +139,7 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
             item(key = "continue-" + r.deviceId) { ContinueCard(model, r, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) }
         }
         item { WaveHero(model, Modifier.appear(0, 40f).padding(horizontal = 16.dp)) }
+        item { SocialRow(model, Modifier.appear(1).padding(start = 16.dp, end = 16.dp, top = 12.dp)) }
 
         if (!anyAccount) {
             item {
@@ -196,6 +197,27 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                 }
             }
             if (h.yaPlaylists.isEmpty() && h.ytSections.isEmpty()) item { Hint("Здесь пока пусто — запусти волну или загляни в поиск.") }
+        }
+    }
+}
+
+/** Устройства (Nyao Connect), «Слушать вместе» и «Итоги» */
+@Composable
+private fun SocialRow(model: AppModel, modifier: Modifier = Modifier) {
+    val room by org.nyao.music.playback.Together.room.collectAsState()
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(
+            Triple(NyaoIcons.Devices, "Устройства") { model.connectOpen = true },
+            Triple(NyaoIcons.Group, if (room != null) "В комнате" else "Вместе") { model.go(Route.Together) },
+            Triple(NyaoIcons.BarChart, "Итоги") { model.go(Route.Stats) },
+        ).forEach { (icon, label, open) ->
+            Column(
+                Modifier.weight(1f).bouncy().clip(RoundedCornerShape(24.dp)).background(if (label == "В комнате") NyaoColors.Tonal else NyaoColors.S2).clickable(onClick = open).padding(vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(icon, null, tint = NyaoColors.Lavender, modifier = Modifier.size(24.dp))
+                Text(label, style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
 }

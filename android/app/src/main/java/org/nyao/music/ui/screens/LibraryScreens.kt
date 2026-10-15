@@ -278,6 +278,8 @@ fun PlaylistScreen(model: AppModel, playlist: Playlist) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { model.back() }) { Icon(NyaoIcons.ArrowBack, "Назад", tint = NyaoColors.Text) }
                 Spacer(Modifier.weight(1f))
+                // перенести в другой сервис
+                if (!tracks.isNullOrEmpty()) IconButton(onClick = { model.transferFor = playlist to tracks }) { Icon(NyaoIcons.SwapHoriz, "Перенести в другой сервис", tint = NyaoColors.Text) }
                 // свой микс можно удалить
                 if (playlist.id.startsWith("mix:")) TextButton(onClick = {
                     Repo.mixStore.delete(playlist.id)

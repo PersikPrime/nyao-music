@@ -309,6 +309,19 @@ class YtMusicApi(private val prefs: Prefs) {
         return out.values.filter { it.srcId != videoId }
     }
 
+    /** Новый приватный плейлист (перенос плейлистов), как делает веб-версия. → id вида yt:PL… */
+    suspend fun createPlaylist(title: String, videoIds: List<String>): String {
+        if (!loggedIn) throw ApiException("Войди в YouTube Music, чтобы создавать плейлисты")
+        val r = post("playlist/create", JSONObject().put("title", title.take(150)).put("privacyStatus", "PRIVATE").put("videoIds", JSONArray(videoIds.take(100))))
+        val id = r.str("playlistId") ?: throw ApiException("YouTube Music не создал плейлист")
+        videoIds.drop(100).chunked(100).forEach { chunk ->
+            val actions = JSONArray()
+            chunk.forEach { v -> actions.put(JSONObject().put("action", "ACTION_ADD_VIDEO").put("addedVideoId", v).put("dedupeOption", "DEDUPE_OPTION_SKIP")) }
+            post("browse/edit_playlist", JSONObject().put("playlistId", id).put("actions", actions))
+        }
+        return "yt:$id"
+    }
+
     suspend fun like(videoId: String, on: Boolean) {
         if (!loggedIn) throw ApiException("Войди в YouTube Music, чтобы ставить лайки")
         post(if (on) "like/like" else "like/removelike", JSONObject().put("target", JSONObject().put("videoId", videoId)))

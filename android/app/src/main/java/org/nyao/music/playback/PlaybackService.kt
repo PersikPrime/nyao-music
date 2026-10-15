@@ -75,6 +75,8 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         Repo.init(this)
+        // пока играет музыка, телефоном можно управлять с компьютера (Nyao Connect)
+        Live.hold(this, "service")
 
         val http = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
@@ -351,6 +353,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        Live.release("service")
         NyaoWidget.push(this, NyaoWidget.Companion.State())
         scope.cancel()
         equalizer.release()

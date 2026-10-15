@@ -288,6 +288,70 @@ object Repo {
         }.getOrDefault(TrackDetails())
     }
 
+    // ---------- «Слушать вместе» и перенос плейлистов ----------
+
+    private fun usable(s: String) = up(s) && when (s) {
+        SOURCE_YT, SOURCE_SC -> true
+        SOURCE_YA -> ya.loggedIn
+        SOURCE_VK -> vk.loggedIn
+        else -> false
+    }
+
+    private suspend fun searchIn(source: String, q: String): List<Track> = when (source) {
+        SOURCE_YA -> ya.search(q)
+        SOURCE_YT -> yt.search(q)
+        SOURCE_SC -> sc.search(q)
+        SOURCE_VK -> vk.search(q)
+        else -> emptyList()
+    }
+
+    /** Трек из чужого сервиса → тот, что можно включить здесь (свой сервис или найденный похожий) */
+    suspend fun playable(t: Track): Track? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (usable(t.source)) return@withContext t.also { rememberTrack(it) }
+        for (s in listOf(SOURCE_YA, SOURCE_VK, SOURCE_YT, SOURCE_SC).filter { usable(it) }) {
+            Match.find(t) { q -> searchIn(s, q) }?.let { rememberTrack(it); return@withContext it }
+        }
+        null
+    }
+
+    data class TransferTarget(val id: String, val name: String, val ok: Boolean)
+    data class TransferResult(val found: Int, val total: Int, val missing: List<Track>, val playlistId: String?)
+
+    fun transferTargets(): List<TransferTarget> = listOf(
+        TransferTarget("mix", "Nyao-микс", true),
+        TransferTarget(SOURCE_YA, "Яндекс Музыка", ya.loggedIn && up(SOURCE_YA)),
+        TransferTarget(SOURCE_YT, "YouTube Music", yt.loggedIn && up(SOURCE_YT)),
+    )
+
+    /** Перенос: каждый трек ищем в целевом сервисе и собираем новый плейлист (порядок сохраняется) */
+    suspend fun transfer(tracks: List<Track>, title: String, target: String, onProgress: (done: Int, total: Int, found: Int) -> Unit): TransferResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val out = arrayOfNulls<Track>(tracks.size)
+        val done = java.util.concurrent.atomic.AtomicInteger()
+        val found = java.util.concurrent.atomic.AtomicInteger()
+        val sem = kotlinx.coroutines.sync.Semaphore(4)
+        tracks.mapIndexed { i, t ->
+            async {
+                sem.acquire()
+                try {
+                    out[i] = if (target == "mix" || t.source == target) t else Match.find(t) { q -> searchIn(target, q) }
+                } finally {
+                    sem.release()
+                }
+                if (out[i] != null) found.incrementAndGet()
+                onProgress(done.incrementAndGet(), tracks.size, found.get())
+            }
+        }.forEach { it.await() }
+        val matched = out.filterNotNull().distinctBy { it.id }
+        val missing = tracks.filterIndexed { i, _ -> out[i] == null }
+        val title2 = title.take(80).ifBlank { "Перенесённый плейлист" }
+        val id = if (matched.isEmpty()) null else when (target) {
+            "mix" -> mixStore.create(title2, matched).id
+            SOURCE_YA -> ya.createPlaylist(title2, matched)
+            else -> yt.createPlaylist(title2, matched.map { it.srcId })
+        }
+        TransferResult(matched.size, tracks.size, missing, id)
+    }
+
     suspend fun radioStart(t: Track): List<Track> = remember(radio.start(t))
     suspend fun radioMore(queueIds: List<String>): List<Track> = remember(radio.more(queueIds))
     suspend fun waveStart(): List<Track> = remember(wave.start())

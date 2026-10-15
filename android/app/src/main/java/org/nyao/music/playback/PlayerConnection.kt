@@ -86,7 +86,7 @@ object PlayerConnection {
         if (newId != lastNowId || c.isPlaying != lastNowPlaying) {
             lastNowId = newId
             lastNowPlaying = c.isPlaying
-            pushNow()
+            pushNowMain()
         }
         _queue.value = (0 until c.mediaItemCount).mapNotNull { Repo.track(c.getMediaItemAt(it).mediaId) }
         _index.value = c.currentMediaItemIndex
@@ -127,12 +127,18 @@ object PlayerConnection {
         ioScope.launch { runCatching { Repo.lastfm.scrobble(if (t.duration > 0) t else t.copy(duration = dur), listened) } }
     }
 
-    private fun pushNow() {
+    /** «Сейчас играет» на сервер (пульт на других устройствах) и, если ведём комнату, — в неё */
+    fun pushNow(force: Boolean = false) {
+        mainScope.launch { pushNowMain(force) }
+    }
+
+    private fun pushNowMain(force: Boolean = false) {
         val c = controller ?: return
         val t = c.currentMediaItem?.mediaId?.let { Repo.track(it) }
         val pos = c.currentPosition / 1000.0
         val playing = c.isPlaying
-        ioScope.launch { runCatching { Repo.cloud.setNow(t, pos, playing) } }
+        Together.push()
+        ioScope.launch { runCatching { Repo.cloud.setNow(t, pos, playing, Live.volume(), force) } }
         if (playing && t != null) ioScope.launch { runCatching { Repo.lastfm.nowPlaying(t) } }
     }
 
@@ -148,9 +154,22 @@ object PlayerConnection {
                     lastPosMs = c.currentPosition
                     if (c.duration > 0) lastDurMs = c.duration
                 }
-                if (++n % 15 == 0 && c.isPlaying) pushNow()
+                if (++n % 15 == 0 && c.isPlaying) pushNowMain()
                 if (n % 150 == 0) ioScope.launch { runCatching { Repo.cloud.flush() } }
             }
+        }
+    }
+
+    /** Список с нужного трека и места (команда с другого устройства, «Слушать вместе») */
+    fun playListAt(list: List<Track>, index: Int, label: String, positionMs: Long, play: Boolean = true) {
+        if (list.isEmpty()) return
+        list.forEach { Repo.rememberTrack(it) }
+        Repo.mode.value = Repo.Mode.LIST
+        Repo.queueLabel.value = label
+        withController { c ->
+            c.setMediaItems(list.map { Repo.mediaItem(it) }, index.coerceIn(0, list.lastIndex), positionMs.coerceAtLeast(0L))
+            c.prepare()
+            if (play) c.play() else c.pause()
         }
     }
 
@@ -304,7 +323,10 @@ object PlayerConnection {
         if (c.currentPosition > 3000 || !c.hasPreviousMediaItem()) c.seekTo(0) else c.seekToPreviousMediaItem()
     }
 
-    fun seekTo(ms: Long) = withController { it.seekTo(ms) }
+    fun seekTo(ms: Long) = withController {
+        it.seekTo(ms)
+        Together.push()
+    }
 
     fun playAt(index: Int) = withController { c ->
         c.seekTo(index, 0L)

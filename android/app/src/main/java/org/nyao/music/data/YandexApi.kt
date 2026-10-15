@@ -303,6 +303,22 @@ class YandexApi(private val prefs: Prefs) {
         }
     }
 
+    /** Новый приватный плейлист с треками (перенос плейлистов). → id вида ya:uid:kind */
+    suspend fun createPlaylist(title: String, tracks: List<Track>): String {
+        val uid = uid()
+        val pl = obj("POST", "/users/$uid/playlists/create", form = mapOf("title" to title.take(100), "visibility" to "private"))
+        val kind = pl.opt("kind")?.toString() ?: throw ApiException("Яндекс не создал плейлист")
+        var revision = pl.optInt("revision", 1)
+        tracks.chunked(100).forEachIndexed { i, chunk ->
+            val items = JSONArray()
+            chunk.forEach { t -> items.put(JSONObject().put("id", t.srcId.substringBefore(':')).apply { t.albumId?.let { put("albumId", it) } }) }
+            val diff = JSONArray().put(JSONObject().put("op", "insert").put("at", i * 100).put("tracks", items))
+            val r = obj("POST", "/users/$uid/playlists/$kind/change-relative", form = mapOf("diff" to diff.toString(), "revision" to revision.toString()))
+            revision = if (r.has("revision")) r.optInt("revision") else revision + 1
+        }
+        return "ya:$uid:$kind"
+    }
+
     suspend fun albumTracks(id: String): List<Track> {
         val r = obj("GET", "/albums/${id.removePrefix("yaalbum:")}/with-tracks")
         val vols = r.arr("volumes")

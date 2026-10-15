@@ -126,7 +126,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     Text("ИГРАЕТ ИЗ", style = MaterialTheme.typography.labelSmall, color = pal.sub)
                     Text(label.ifEmpty { "Очередь" }, style = MaterialTheme.typography.titleSmall, color = pal.onContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Spacer(Modifier.size(48.dp))
+                IconButton(onClick = { model.connectOpen = true }) { Icon(NyaoIcons.Devices, "Устройства и «Слушать вместе»", tint = pal.onContainer) }
             }
         }
         item {

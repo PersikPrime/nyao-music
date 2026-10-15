@@ -33,4 +33,15 @@ class MainActivity : ComponentActivity() {
             NyaoTheme { NyaoRoot() }
         }
     }
+
+    // пока приложение на экране, оно на связи для Nyao Connect и «Слушать вместе»
+    override fun onStart() {
+        super.onStart()
+        org.nyao.music.playback.Live.hold(this, "ui")
+    }
+
+    override fun onStop() {
+        org.nyao.music.playback.Live.release("ui")
+        super.onStop()
+    }
 }
