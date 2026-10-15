@@ -1,6 +1,8 @@
 // Мост между окном и главным процессом: окно видит только эти функции.
 const { contextBridge, ipcRenderer } = require('electron');
 
+const on = (channel, cb) => ipcRenderer.on(channel, (_e, payload) => cb(payload));
+
 async function call(channel, ...args) {
   const res = await ipcRenderer.invoke(channel, ...args);
   if (!res || !res.ok) throw new Error((res && res.error) || 'Неизвестная ошибка');
@@ -55,6 +57,26 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   home: () => call('home'),
   releases: (force) => call('home:releases', !!force),
+  connect: {
+    devices: () => call('connect:devices'),
+    cmd: (deviceId, cmd, args) => call('connect:cmd', deviceId, cmd, args)
+  },
+  room: {
+    current: () => call('room:current'),
+    create: () => call('room:create'),
+    join: (code) => call('room:join', code),
+    leave: (code) => call('room:leave', code),
+    state: (code, st) => call('room:state', code, st),
+    react: (code, emoji) => call('room:react', code, emoji)
+  },
+  stats: (period, year) => call('stats', period, year),
+  matchPlayable: (track) => call('match:playable', track),
+  transfer: {
+    targets: () => call('transfer:targets'),
+    start: (job) => call('transfer:start', job),
+    onProgress: (fn) => on('transfer:progress', fn)
+  },
+  onLive: (fn) => on('live:event', fn),
   library: {
     playlists: () => call('library:playlists'),
     liked: () => call('library:liked'),

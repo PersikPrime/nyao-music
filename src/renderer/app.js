@@ -5,6 +5,7 @@ import { layoutChoiceHtml } from './layouts.js';
 import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain } from './eq.js';
 import { FullScreen } from './fullscreen.js';
 import { releaseAgo } from './releases.js';
+import { REACTIONS, JOIN_BASE, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
 
 const api = window.nyao;
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -37,6 +38,10 @@ const state = {
   artist: { ref: null, data: null, error: null, kind: 'album' },
   album: { ref: null, data: null, error: null },
   npArtist: { ref: null, data: null },
+  connect: { devices: null, error: null },
+  room: null, // «Слушать вместе»: снимок комнаты + isHost
+  roomSync: { hostTrackId: null },
+  stats: { period: 'month', data: null, error: null, loading: false },
   version: ''
 };
 const lists = {}; // списки на экране: клики по строкам берут трек отсюда
@@ -159,14 +164,19 @@ const ICONS = {
   plus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   search: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>',
   back: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>',
-  wave: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0"/></svg>'
+  wave: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0"/></svg>',
+  transfer: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h14l-3.5-3.5M20 16H6l3.5 3.5"/></svg>',
+  prev: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>',
+  next: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>'
 };
 const NAV = [
   ['home', 'Главная', 'M4 10.5 12 4l8 6.5V20h-5v-6H9v6H4z'],
   ['search', 'Поиск', 'M11 4.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13M20 20l-4.2-4.2'],
   ['wave', 'Моя волна', 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0'],
   ['player', 'Сейчас играет', 'M9 18V6l11-2v12M9 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0M20 16a3 3 0 1 1-6 0a3 3 0 1 1 6 0'],
-  ['library', 'Медиатека', 'M5 4v16M10 4v16M15 5l4 15']
+  ['library', 'Медиатека', 'M5 4v16M10 4v16M15 5l4 15'],
+  ['together', 'Вместе', 'M9 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.6a3.4 3.4 0 0 1 0 6.3M18 14.8c1.8.7 3 2.4 3.5 5.2'],
+  ['stats', 'Итоги', 'M5 20V11M12 20V5M19 20v-6']
 ];
 const SETTINGS_ICON = 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1';
 
@@ -335,6 +345,8 @@ function go(route, params = {}, push = true) {
   if (route === 'album') loadAlbum(params.ref);
   if (route === 'player') loadNpArtist();
   if (route === 'settings' && state.cloud.loggedIn) loadCloudDevices();
+  if (route === 'together') loadRoom();
+  if (route === 'stats') loadStats();
 }
 function back() {
   const prev = state.stack.pop();
@@ -692,6 +704,7 @@ function renderLibrary() {
           <button class="icbtn" data-action="pl-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
           <span class="grow"></span>
           ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}${lib.tracks.some((t) => t.source === 'sc') ? `<span class="dotsrc sc" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sc').length}` : ''}${lib.tracks.some((t) => t.source === 'vk') ? `<span class="dotsrc vk" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'vk').length}` : ''}</span>` : ''}
+          ${lib.tracks && lib.tracks.length ? `<button class="icbtn" data-action="pl-transfer" aria-label="Перенести в другой сервис" title="Перенести в другой сервис">${ICONS.transfer}</button>` : ''}
           ${sel.source === 'mix' && !isLiked(sel) ? `<button class="icbtn" data-action="del-mix" aria-label="Удалить микс">${ICONS.ban}</button>` : ''}
         </div>
       </div>
@@ -998,13 +1011,14 @@ function continueHtml() {
   </section>`;
 }
 let nowTimer;
-function pushNow() {
+function pushNow(force = false) {
+  roomPush();
   if (!api.cloud || !state.cloud.loggedIn) return;
   clearTimeout(nowTimer);
   nowTimer = setTimeout(() => {
     const t = player.current;
-    api.cloud.now({ track: t, position: player.audio.currentTime || 0, playing: player.playing, context: player.mode || '' }).catch(() => {});
-  }, 800);
+    api.cloud.now({ track: t, position: player.audio.currentTime || 0, playing: player.playing, context: player.mode || '', volume: player.audio.volume, force: force === true }).catch(() => {});
+  }, force === true ? 100 : 800);
 }
 
 function renderSettings() {
@@ -1225,7 +1239,7 @@ function pushRpc() {
   }, 400);
 }
 
-const RENDER = { home: renderHome, wave: renderWave, player: renderPlayer, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum };
+const RENDER = { home: renderHome, wave: renderWave, player: renderPlayer, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats };
 
 // ---------- Загрузка данных ----------
 async function loadStatus() {
@@ -1450,13 +1464,506 @@ function askText(label, value = '') {
   });
 }
 
+// ---------- Nyao Connect: пульт для других устройств ----------
+function devIcon(platform) {
+  return platform === 'android'
+    ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="6.5" y="2.5" width="11" height="19" rx="3"/><path d="M11 18.5h2"/></svg>'
+    : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2.5"/><path d="M8 20h8M12 16v4"/></svg>';
+}
+function connectCardHtml(d) {
+  const t = d.track;
+  const status = d.online ? (t ? (d.playing ? 'Играет' : 'На паузе') : 'В сети') : `Не в сети${d.lastSeen ? ' · ' + ago(new Date(d.lastSeen).getTime()) : ''}`;
+  return `<div class="cx-dev ${d.online ? 'on' : ''}">
+    <div class="cx-top"><span class="cx-ic">${devIcon(d.platform)}</span><div class="cx-name"><b>${esc(d.device)}</b><span>${esc(status)}</span></div><span class="cx-dot" aria-hidden="true"></span></div>
+    ${t ? `<div class="cx-track">${coverHtml(t, 'sm')}<div class="cx-meta"><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></div></div>` : ''}
+    ${d.online ? `<div class="cx-ctl">
+        <button class="ic" data-action="cx-cmd" data-cmd="prev" data-id="${esc(d.deviceId)}" aria-label="Предыдущий">${ICONS.prev}</button>
+        <button class="play" data-action="cx-cmd" data-cmd="toggle" data-id="${esc(d.deviceId)}" aria-label="${d.playing ? 'Пауза' : 'Играть'}">${d.playing ? ICONS.pause : ICONS.play}</button>
+        <button class="ic" data-action="cx-cmd" data-cmd="next" data-id="${esc(d.deviceId)}" aria-label="Следующий">${ICONS.next}</button>
+        ${d.volume != null ? `<input type="range" class="cx-vol" min="0" max="100" value="${Math.round(d.volume * 100)}" data-cx-vol="${esc(d.deviceId)}" aria-label="Громкость на «${esc(d.device)}»">` : ''}
+      </div>
+      <div class="cx-acts">
+        ${t ? `<button class="btn" data-action="cx-take" data-id="${esc(d.deviceId)}">Забрать сюда</button>` : ''}
+        ${player.current ? `<button class="btn primary" data-action="cx-send" data-id="${esc(d.deviceId)}">Включить там</button>` : ''}
+      </div>` : ''}
+  </div>`;
+}
+function renderConnect() {
+  const el = $('#connect');
+  if (el.hidden) return;
+  if (!state.cloud.loggedIn) {
+    el.innerHTML = `<div class="cx-head"><b>Nyao Connect</b><span>Управляй музыкой на своих устройствах</span></div>
+      <div class="hint">Войди в аккаунт Nyao на этом и другом устройстве — и сможешь переключать треки на телефоне с компьютера и наоборот.</div>
+      <button class="btn primary" data-action="go" data-route="settings">Войти в аккаунт Nyao</button>`;
+    return;
+  }
+  const devs = state.connect.devices;
+  const others = (devs || []).filter((d) => !d.current).sort((a, b) => b.online - a.online);
+  const t = player.current;
+  el.innerHTML = `<div class="cx-head"><b>Nyao Connect</b><button class="icbtn" data-action="cx-refresh" aria-label="Обновить" title="Обновить"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg></button></div>
+    <div class="cx-dev me on"><div class="cx-top"><span class="cx-ic">${devIcon(api.platform)}</span><div class="cx-name"><b>Это устройство</b><span>${t ? esc(t.title) + ' · ' + esc(t.artist) : 'Ничего не играет'}</span></div><span class="cx-dot"></span></div></div>
+    ${state.connect.error ? `<div class="hint err">${esc(state.connect.error)}</div>` : ''}
+    ${devs == null ? '<div class="skeleton" style="height:120px"></div>' : others.length ? others.map(connectCardHtml).join('') : '<div class="hint">Других устройств пока нет — войди в аккаунт Nyao на телефоне или другом компьютере.</div>'}
+    <button class="btn cx-together" data-action="go" data-route="together">${NAV.find((n) => n[0] === 'together') ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="${NAV.find((n) => n[0] === 'together')[2]}"/></svg>` : ''}Слушать вместе с друзьями</button>`;
+  $$('.cx-vol', el).forEach(setRangeFill);
+}
+async function loadConnect() {
+  if (!state.cloud.loggedIn) return renderConnect();
+  try {
+    state.connect.devices = await api.connect.devices();
+    state.connect.error = null;
+  } catch (e) {
+    state.connect.error = e.message;
+  }
+  renderConnect();
+}
+function toggleConnect() {
+  const el = $('#connect');
+  el.hidden = !el.hidden;
+  if (!el.hidden) {
+    renderConnect();
+    loadConnect();
+  }
+}
+
+/** Команда с другого устройства (Nyao Connect) */
+function remoteCommand(e) {
+  const a = e.args || {};
+  const from = (e.from && e.from.device) || 'другое устройство';
+  switch (e.cmd) {
+    case 'toggle':
+      player.toggle();
+      break;
+    case 'play':
+      if (player.current && !player.playing) player.toggle();
+      break;
+    case 'pause':
+      if (player.playing) player.audio.pause();
+      break;
+    case 'next':
+      player.next(true);
+      break;
+    case 'prev':
+      player.prev();
+      break;
+    case 'seek':
+      player.seek(a.position);
+      break;
+    case 'volume':
+      player.setVolume(a.volume);
+      volEl.value = Math.round(a.volume * 100);
+      setRangeFill(volEl);
+      api.settings.set({ volume: a.volume }).catch(() => {});
+      break;
+    case 'like':
+      if (player.current) player.toggleLike().catch(() => {});
+      break;
+    case 'playTracks':
+      if (!a.tracks || !a.tracks.length) break;
+      if (state.room && !state.room.isHost) leaveRoom(true);
+      playListAt(a.tracks, a.index || 0, a.title || `С «${from}»`, a.position || 0, a.play !== false);
+      toast(`Музыка перенесена с «${from}»`);
+      break;
+  }
+  setTimeout(() => pushNow(true), 400);
+}
+/** Включить список с нужного трека и места */
+function playListAt(tracks, index, label, position = 0, play = true) {
+  player.playList(tracks, index, label);
+  const once = () => {
+    player.audio.removeEventListener('loadedmetadata', once);
+    if (position > 2) player.seek(position);
+    if (!play) player.audio.pause();
+  };
+  player.audio.addEventListener('loadedmetadata', once);
+}
+function copyText(text) {
+  try {
+    navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+}
+
+// ---------- «Слушать вместе» ----------
+async function loadRoom() {
+  if (state.cloud.loggedIn) {
+    try {
+      const r = await api.room.current();
+      if (r && (!state.room || state.room.code !== r.code)) state.roomSync = { hostTrackId: null };
+      state.room = r;
+      if (r && !r.isHost) applyRoom(r.state);
+    } catch {
+      // нет связи — покажем, что есть
+    }
+  }
+  if (state.route === 'together') renderTogether();
+}
+async function joinRoom(input) {
+  const code = parseRoomCode(input);
+  if (!code) return toast('Код комнаты — 6 букв и цифр', true);
+  try {
+    state.room = await api.room.join(code);
+    state.roomSync = { hostTrackId: null };
+    toast(state.room.isHost ? 'Это твоя комната' : `Ты слушаешь вместе с ${state.room.host.name}`);
+    if (!state.room.isHost) applyRoom(state.room.state);
+  } catch (e) {
+    toast(e.message, true);
+  }
+  if (state.route === 'together') renderTogether();
+  renderBar();
+}
+async function leaveRoom(silent = false) {
+  const r = state.room;
+  if (!r) return;
+  state.room = null;
+  state.roomSync = { hostTrackId: null };
+  await api.room.leave(r.code).catch(() => {});
+  if (!silent) toast(r.isHost ? 'Комната закрыта' : 'Ты вышел из комнаты');
+  if (state.route === 'together') renderTogether();
+  renderBar();
+}
+let roomTimer;
+let roomLastBeat = 0;
+/** Хост: сообщаем комнате, что играет (сразу при смене трека/паузе, иначе раз в 15 секунд) */
+function roomPush(now = false) {
+  if (!state.room || !state.room.isHost) return;
+  clearTimeout(roomTimer);
+  roomTimer = setTimeout(() => {
+    roomLastBeat = Date.now();
+    const t = player.current;
+    api.room.state(state.room.code, { track: t, position: player.audio.currentTime || 0, playing: player.playing }).catch((e) => {
+      if (/только тот|403/.test(e.message)) {
+        state.room = null;
+        if (state.route === 'together') renderTogether();
+      }
+    });
+  }, now ? 0 : 300);
+}
+let roomBusy = false;
+/** Гость: догоняем хоста — тот же трек (или найденный в своих сервисах), то же место */
+async function applyRoom(st) {
+  if (!state.room || state.room.isHost || roomBusy) return;
+  const plan = roomSyncPlan({ hostTrackId: state.roomSync.hostTrackId, position: player.audio.currentTime || 0, playing: player.playing }, st);
+  if (plan.load) {
+    roomBusy = true;
+    const started = Date.now();
+    try {
+      const t = await api.matchPlayable(st.track).catch(() => null);
+      state.roomSync.hostTrackId = st.track.id;
+      if (!t) {
+        player.audio.pause();
+        toast(`«${st.track.title}» нет в твоих сервисах — ждём следующий трек`, true);
+        return;
+      }
+      const pos = (st.position || 0) + (st.playing ? (Date.now() - started) / 1000 : 0);
+      playListAt([t], 0, `Вместе с ${state.room ? state.room.host.name : ''}`, pos, st.playing);
+    } finally {
+      roomBusy = false;
+    }
+    return;
+  }
+  if (plan.seek != null) player.seek(plan.seek);
+  if (plan.play === true) player.audio.play().catch(() => {});
+  if (plan.play === false) player.audio.pause();
+}
+function showReaction(emoji, name) {
+  const layer = $('#react-layer') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'react-layer' }));
+  const el = document.createElement('div');
+  el.className = 'react-fly';
+  el.style.left = `${10 + Math.random() * 80}%`;
+  el.innerHTML = `<span class="e">${esc(emoji)}</span><span class="n">${esc(name || '')}</span>`;
+  layer.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+function renderTogether() {
+  const r = state.room;
+  const head = '<h1 class="page">Слушать вместе</h1>';
+  if (!state.cloud.loggedIn) {
+    view.innerHTML = `<div class="scroll together">${head}
+      <div class="card"><div class="field"><label>Нужен аккаунт Nyao</label><div class="hint">Комнаты работают через аккаунт Nyao (вход через Telegram). Токены музыкальных сервисов остаются на устройстве.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Войти</button></div></div></div>`;
+    return;
+  }
+  if (!r) {
+    view.innerHTML = `<div class="scroll together">${head}
+      <p class="muted tg-lead">Одна музыка на всех: хост включает треки, а у остальных они играют одновременно — каждый слушает в своём сервисе. Если трека там нет, Nyao найдёт его в другом.</p>
+      <div class="tg-start">
+        <section class="tg-card create"><canvas id="tg-ribbon"></canvas>
+          <span class="eyebrow">Ты ведёшь</span><h2>Создать комнату</h2><p>Получишь код и ссылку — отправь друзьям.</p>
+          <button class="btn primary" data-action="room-create">Создать</button></section>
+        <section class="tg-card"><span class="eyebrow">Тебя позвали</span><h2>Войти по коду</h2><p>Код из 6 знаков или ссылка-приглашение.</p>
+          <form data-form="room-join" class="tg-join"><input name="code" maxlength="64" placeholder="Например, K7QM2X" aria-label="Код комнаты" autocomplete="off"><button class="btn primary">Войти</button></form></section>
+      </div></div>`;
+    new Ribbon($('#tg-ribbon'), { lines: 10, cy: 0.6, amp: 0.7, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+    return;
+  }
+  const st = r.state;
+  const t = st && st.track;
+  const people = [{ name: r.host.name, picture: r.host.picture, host: true }, ...r.members];
+  view.innerHTML = `<div class="scroll together">${head}
+    <section class="tg-room">
+      <div class="tg-code-box">
+        <span class="eyebrow">${r.isHost ? 'Твоя комната' : 'Комната ' + esc(r.host.name)}</span>
+        <button class="tg-code" data-action="room-code" title="Скопировать код">${esc(r.code)}</button>
+        <div class="tg-acts"><button class="btn" data-action="room-copy">Скопировать ссылку</button><button class="btn" data-action="room-leave">${r.isHost ? 'Закрыть комнату' : 'Выйти'}</button></div>
+      </div>
+      <div class="tg-now">
+        ${t ? `${coverHtml(t)}<div class="tg-meta"><span class="eyebrow">${st.playing ? 'Сейчас играет у всех' : 'На паузе'}</span><b>${esc(t.title)}</b><span>${badge(t.source)}${esc(t.artist)}</span></div>`
+          : `<div class="tg-meta"><span class="eyebrow">Тишина</span><b>${r.isHost ? 'Включи что-нибудь — все услышат' : 'Ждём, пока ' + esc(r.host.name) + ' включит музыку'}</b></div>`}
+      </div>
+    </section>
+    <div class="tg-cols">
+      <section class="card"><span class="eyebrow">В комнате · ${people.length}</span>
+        <div class="tg-people">${people.map((p) => `<div class="tg-person">${p.picture ? `<img src="${esc(p.picture)}" alt="">` : `<span class="av">${esc((p.name || '?').slice(0, 1))}</span>`}<b>${esc(p.name)}</b>${p.host ? '<span class="tag">ведёт</span>' : ''}</div>`).join('')}</div>
+        <span class="hint">${r.isHost ? 'Всё, что ты включаешь, ставишь на паузу или перематываешь, повторяется у всех.' : 'Музыку выбирает ' + esc(r.host.name) + '. Пауза у тебя — только у тебя: при следующем треке ты снова догонишь.'}</span>
+      </section>
+      <section class="card"><span class="eyebrow">Реакции</span>
+        <div class="tg-reacts">${REACTIONS.map((e) => `<button data-action="room-react" data-e="${e}" aria-label="Реакция ${e}">${e}</button>`).join('')}</div>
+        <span class="hint">Видны всем в комнате.</span>
+      </section>
+    </div>
+  </div>`;
+}
+function onRoomEvent(e) {
+  if (e.type === 'room-closed') {
+    if (state.room && state.room.code === e.code) {
+      state.room = null;
+      toast('Хост закрыл комнату');
+    }
+  } else if (e.type === 'room') {
+    if (!state.room || state.room.code !== e.room.code) return;
+    state.room = { ...e.room, isHost: state.room.isHost };
+    if (e.joined) toast(`${e.joined} в комнате`);
+    if (e.left) toast(`${e.left} вышел`);
+    if (!state.room.isHost) applyRoom(e.room.state);
+  } else if (e.type === 'react') {
+    showReaction(e.emoji, e.name);
+    return;
+  }
+  if (state.route === 'together') renderTogether();
+  renderBar();
+}
+
+// ---------- Итоги ----------
+async function loadStats() {
+  if (!state.cloud.loggedIn) return renderStats();
+  const period = state.stats.period;
+  state.stats.loading = true;
+  state.stats.error = null;
+  if (state.route === 'stats') renderStats();
+  try {
+    const data = await api.stats(period);
+    if (state.stats.period !== period) return;
+    state.stats.data = data;
+  } catch (e) {
+    state.stats.error = e.message;
+  }
+  state.stats.loading = false;
+  if (state.route === 'stats') renderStats();
+}
+function statTrack(t) {
+  const i = String(t.trackId).indexOf(':');
+  return { id: t.trackId, source: t.source || t.trackId.slice(0, i), srcId: t.trackId.slice(i + 1), title: t.title, artist: t.artist, cover: t.cover, duration: t.duration || 0 };
+}
+function renderStats() {
+  const s = state.stats.data;
+  const seg = `<div class="pill-seg" role="radiogroup" aria-label="Период">${PERIODS.map(([v, l]) => `<button role="radio" aria-checked="${state.stats.period === v}" class="${state.stats.period === v ? 'on' : ''}" data-action="stats-period" data-v="${v}">${l}</button>`).join('')}</div>`;
+  let body;
+  if (!state.cloud.loggedIn) {
+    body = `<div class="card"><div class="field"><label>Нужен аккаунт Nyao</label><div class="hint">Итоги собираются из истории прослушиваний со всех твоих устройств — она хранится в аккаунте Nyao.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Войти</button></div></div>`;
+  } else if (state.stats.error) {
+    body = `<div class="card"><div class="hint err">${esc(state.stats.error)}</div></div>`;
+  } else if (!s) {
+    body = '<div class="skeleton" style="height:240px"></div><div class="skeleton" style="height:160px;margin-top:16px"></div>';
+  } else if (!s.plays) {
+    body = '<div class="empty">За этот период пока нечего подводить — послушай что-нибудь, и здесь появятся итоги.</div>';
+  } else {
+    const tracks = s.topTracks.map(statTrack);
+    lists['stats-top'] = tracks;
+    const maxH = Math.max(...s.hours, 1);
+    const total = Object.values(s.sources).reduce((a, b) => a + b, 0) || 1;
+    const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+    const maxD = Math.max(...s.weekdays, 1);
+    const topA = s.topArtists[0];
+    body = `<section class="st-hero"><canvas id="st-ribbon"></canvas>
+        <span class="eyebrow">${esc(periodTitle(s.period, s.from))}</span>
+        <div class="st-big">${num(s.minutes)}</div>
+        <div class="st-sub">${pl(s.minutes, 'минута', 'минуты', 'минут')} музыки · ${num(s.plays)} ${pl(s.plays, 'прослушивание', 'прослушивания', 'прослушиваний')}</div>
+        ${topA ? `<div class="st-topa">${coverHtml({ cover: topA.cover }, 'sm')}<span>Главный исполнитель — <b>${esc(topA.name)}</b>, ${minutesText(topA.minutes)}</span></div>` : ''}
+      </section>
+      <div class="st-facts">${statFacts(s).map((f) => `<div class="st-fact"><b>${esc(f.big)}</b><span>${esc(f.label)}</span></div>`).join('')}</div>
+      <div class="st-cols">
+        <section class="card"><span class="eyebrow">Исполнители</span>
+          <ol class="st-artists">${s.topArtists.map((a, i) => `<li><span class="n">${i + 1}</span>${coverHtml({ cover: a.cover }, 'sm')}<div><b>${esc(a.name)}</b><span>${minutesText(a.minutes)} · ${a.tracks} ${pl(a.tracks, 'трек', 'трека', 'треков')}</span></div></li>`).join('')}</ol></section>
+        <section class="card"><div class="sec-head"><span class="eyebrow">Треки</span><button class="link" data-action="stats-play">Слушать все</button></div>
+          ${tracksHtml(tracks, 'stats-top')}</section>
+      </div>
+      <div class="st-cols">
+        <section class="card"><span class="eyebrow">Когда слушаешь</span>
+          <div class="st-hours">${s.hours.map((m, h) => `<span style="height:${Math.max(3, (m / maxH) * 100)}%" title="${h}:00 — ${minutesText(m)}"></span>`).join('')}</div>
+          <div class="st-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+          <div class="st-week">${s.weekdays.map((m, i) => `<div><span style="opacity:${0.25 + (m / maxD) * 0.75}"></span><b>${days[i]}</b></div>`).join('')}</div></section>
+        <section class="card"><span class="eyebrow">Сервисы</span>
+          <div class="st-src">${Object.entries(s.sources).map(([k, m]) => `<div class="row"><span>${badge(k)}${esc(srcName(k) || 'Другое')}</span><b>${Math.round((m / total) * 100)}%</b><i style="width:${Math.max(2, (m / total) * 100)}%" class="b-${esc(k)}"></i></div>`).join('')}</div>
+          ${s.first ? `<span class="hint">Первый трек периода: «${esc(s.first.title)}» — ${esc(s.first.artist)}</span>` : ''}</section>
+      </div>`;
+  }
+  view.innerHTML = `<div class="scroll stats"><div class="st-head"><h1 class="page">Итоги</h1>${seg}</div>${body}</div>`;
+  if ($('#st-ribbon')) new Ribbon($('#st-ribbon'), { lines: 14, cy: 0.55, amp: 1, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+}
+
+// ---------- Перенос плейлиста в другой сервис ----------
+async function openTransfer(sel, tracks) {
+  const targets = (await api.transfer.targets()).filter((t) => t.id !== sel.source || sel.id === 'liked');
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-wrap';
+  wrap.id = 'xfer';
+  const title = sel.id.startsWith('liked') ? 'Мне нравится' : sel.title;
+  const first = (targets.find((t) => t.ok) || targets[0] || {}).id;
+  wrap.innerHTML = `<div class="modal" role="dialog" aria-label="Перенос плейлиста">
+    <h2>Перенести плейлист</h2>
+    <span class="muted">«${esc(title)}» · ${tracks.length} ${pl(tracks.length, 'трек', 'трека', 'треков')}. Каждый трек найдём в выбранном сервисе, ненайденные покажем списком.</span>
+    <div class="xf-targets">${targets.map((t) => `<label class="xf-t ${t.ok ? '' : 'off'}"><input type="radio" name="xf" value="${t.id}" ${t.id === first && t.ok ? 'checked' : ''} ${t.ok ? '' : 'disabled'}>
+      <span class="xf-dot ${t.id}"></span><span><b>${esc(t.name)}</b><small>${t.id === 'mix' ? 'Плейлист внутри Nyao, синхронизируется между устройствами' : t.ok ? 'Создадим приватный плейлист' : 'Нужен вход в этот сервис'}</small></span></label>`).join('')}</div>
+    <label class="field"><span class="lbl">Название</span><input class="xf-name" value="${esc(title)}" maxlength="80"></label>
+    <div class="xf-progress" hidden><div class="xf-bar"><i></i></div><span class="muted xf-count"></span></div>
+    <div class="xf-result" hidden></div>
+    <div class="modal-foot"><button class="btn" data-x="close">Отмена</button><button class="btn primary" data-x="go" ${first ? '' : 'disabled'}>Перенести</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  let running = false;
+  const close = () => {
+    if (!running) wrap.remove();
+  };
+  wrap.addEventListener('mousedown', (e) => {
+    if (e.target === wrap) close();
+  });
+  wrap.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-x]');
+    if (!b) return;
+    if (b.dataset.x === 'close') return close();
+    if (b.dataset.x === 'open') {
+      wrap.remove();
+      await loadLibrary(true);
+      if (b.dataset.id) selectPlaylist(b.dataset.id);
+      go('library');
+      return;
+    }
+    if (b.dataset.x !== 'go' || running) return;
+    const target = ($('input[name="xf"]:checked', wrap) || {}).value;
+    if (!target) return toast('Выбери, куда переносить', true);
+    running = true;
+    b.disabled = true;
+    $('.xf-progress', wrap).hidden = false;
+    $('.xf-count', wrap).textContent = 'Ищу треки…';
+    try {
+      const r = await api.transfer.start({ tracks, title: $('.xf-name', wrap).value.trim() || title, target });
+      const res = $('.xf-result', wrap);
+      res.hidden = false;
+      res.innerHTML = `<b>${r.playlistId ? 'Готово' : 'Ничего не нашлось'}: перенесено ${r.found} из ${r.total}</b>
+        ${r.missing.length ? `<details><summary>Не нашлись (${r.missing.length})</summary><ul>${r.missing.slice(0, 200).map((m) => `<li>${esc(m.artist)} — ${esc(m.title)}</li>`).join('')}</ul></details>` : ''}`;
+      $('.modal-foot', wrap).innerHTML = `<button class="btn" data-x="close">Закрыть</button>${r.playlistId ? `<button class="btn primary" data-x="open" data-id="${esc(r.playlistId)}">Открыть</button>` : ''}`;
+    } catch (err) {
+      toast(err.message, true);
+      b.disabled = false;
+    } finally {
+      running = false;
+    }
+  });
+}
+if (api.transfer) {
+  api.transfer.onProgress((p) => {
+    const w = $('#xfer');
+    if (!w) return;
+    $('.xf-bar i', w).style.width = `${Math.round((p.done / Math.max(1, p.total)) * 100)}%`;
+    $('.xf-count', w).textContent = `Проверено ${p.done} из ${p.total} · найдено ${p.found}`;
+  });
+}
+
 // ---------- Обработчики экрана ----------
 async function handleAction(el, e) {
   const a = el.dataset.action;
   switch (a) {
     case 'go':
+      $('#connect').hidden = true;
       go(el.dataset.route);
       break;
+    case 'cx-cmd': {
+      const d = (state.connect.devices || []).find((x) => x.deviceId === el.dataset.id);
+      await api.connect.cmd(el.dataset.id, el.dataset.cmd);
+      if (d && el.dataset.cmd === 'toggle') {
+        d.position = livePosition(d);
+        d.updatedAt = Date.now();
+        d.playing = !d.playing;
+        renderConnect();
+      }
+      break;
+    }
+    case 'cx-take': {
+      const d = (state.connect.devices || []).find((x) => x.deviceId === el.dataset.id);
+      if (!d || !d.track) break;
+      if (state.room && !state.room.isHost) await leaveRoom(true);
+      player.resume(d.track, livePosition(d), `С «${d.device}»`);
+      api.connect.cmd(d.deviceId, 'pause').catch(() => {});
+      $('#connect').hidden = true;
+      break;
+    }
+    case 'cx-send': {
+      const d = (state.connect.devices || []).find((x) => x.deviceId === el.dataset.id);
+      if (!d || !player.current) break;
+      const q = queueForTransfer(player.queue, player.index);
+      await api.connect.cmd(d.deviceId, 'playTracks', { ...q, position: player.audio.currentTime || 0, title: player.label || '' });
+      player.audio.pause();
+      toast(`Играет на «${d.device}»`);
+      $('#connect').hidden = true;
+      break;
+    }
+    case 'cx-refresh':
+      await loadConnect();
+      break;
+    case 'room-create':
+      state.room = await api.room.create();
+      state.roomSync = { hostTrackId: null };
+      roomPush(true);
+      toast('Комната создана — поделись кодом');
+      renderTogether();
+      renderBar();
+      break;
+    case 'room-leave':
+      await leaveRoom();
+      break;
+    case 'room-copy':
+      copyText(JOIN_BASE + state.room.code);
+      toast('Ссылка скопирована');
+      break;
+    case 'room-code':
+      copyText(state.room.code);
+      toast('Код скопирован');
+      break;
+    case 'room-react':
+      if (state.room) api.room.react(state.room.code, el.dataset.e).catch((err) => toast(err.message, true));
+      break;
+    case 'stats-period':
+      state.stats.period = el.dataset.v;
+      state.stats.data = null;
+      loadStats();
+      break;
+    case 'stats-play': {
+      const tracks = lists['stats-top'] || [];
+      if (tracks.length) player.playList(tracks, 0, 'Итоги: любимое');
+      break;
+    }
+    case 'pl-transfer': {
+      const all = [...likedEntries(), ...(state.lib.lists || [])];
+      const sel = all.find((p) => p.id === state.lib.selected);
+      if (sel && state.lib.tracks) openTransfer(sel, state.lib.tracks);
+      break;
+    }
     case 'back':
       back();
       break;
@@ -1755,6 +2262,10 @@ view.addEventListener('submit', async (e) => {
   const form = e.target.closest('[data-form]');
   if (!form) return;
   e.preventDefault();
+  if (form.dataset.form === 'room-join') {
+    joinRoom(new FormData(form).get('code').toString());
+    return;
+  }
   const q = new FormData(form).get('q').toString().trim();
   if (!q) return;
   state.search = { q, res: null, filter: 'all', loading: true };
@@ -1973,6 +2484,48 @@ api.onControl((cmd) => {
   else if (cmd === 'prev') player.prev();
   else if (cmd === 'like' && player.current) player.toggleLike().then(() => toast(player.liked.has(player.current.id) ? 'Добавлено в «Мне нравится»' : 'Убрано из «Мне нравится»')).catch(() => {});
 });
+if (api.onLive) {
+  api.onLive((e) => {
+    if (e.type === 'cmd') return remoteCommand(e);
+    if (e.type === 'now') {
+      const list = state.connect.devices;
+      if (list) {
+        const i = list.findIndex((d) => d.deviceId === e.deviceId);
+        const d = { ...(i > -1 ? list[i] : { deviceId: e.deviceId }), ...e, online: true };
+        if (i > -1) list[i] = d;
+        else list.push(d);
+        renderConnect();
+      }
+      return;
+    }
+    onRoomEvent(e);
+  });
+}
+$('#pb-connect').onclick = toggleConnect;
+$('#connect').addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  try {
+    await handleAction(el, e);
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+let cxVolTimer;
+$('#connect').addEventListener('input', (e) => {
+  const id = e.target.dataset.cxVol;
+  if (!id) return;
+  setRangeFill(e.target);
+  clearTimeout(cxVolTimer);
+  cxVolTimer = setTimeout(() => api.connect.cmd(id, 'volume', { volume: e.target.value / 100 }).catch((err) => toast(err.message, true)), 250);
+});
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('#connect') && !e.target.closest('#pb-connect')) $('#connect').hidden = true;
+});
+setInterval(() => {
+  if (state.room && state.room.isHost && player.playing && Date.now() - roomLastBeat > 15_000) roomPush(true);
+}, 5000);
+player.audio.addEventListener('seeked', () => roomPush());
 api.win.onFullscreen((on) => {
   if (!on) fullscreen.close();
 });

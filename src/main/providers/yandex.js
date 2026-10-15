@@ -238,6 +238,19 @@ export class YandexProvider {
     };
   }
 
+  /** Новый приватный плейлист с треками (для переноса). → id вида ya:uid:kind */
+  async createPlaylist(title, tracks) {
+    const { uid } = await this.getAccount();
+    const pl = await this.request('POST', `/users/${uid}/playlists/create`, { form: { title: String(title).slice(0, 100), visibility: 'private' } });
+    let revision = pl.revision;
+    for (let i = 0; i < tracks.length; i += 100) {
+      const chunk = tracks.slice(i, i + 100).map((t) => ({ id: String(t.srcId).split(':')[0], ...(t.albumId ? { albumId: String(t.albumId) } : {}) }));
+      const r = await this.request('POST', `/users/${uid}/playlists/${pl.kind}/change-relative`, { form: { diff: JSON.stringify([{ op: 'insert', at: i, tracks: chunk }]), revision: String(revision) } });
+      revision = r && r.revision != null ? r.revision : revision + 1;
+    }
+    return `ya:${uid}:${pl.kind}`;
+  }
+
   /** Подробности трека для «О треке»: год, жанр, лейбл, номер в альбоме, метка «18+» */
   async trackDetails(trackId) {
     const res = await this.request('GET', `/tracks/${String(trackId).split(':')[0]}`);

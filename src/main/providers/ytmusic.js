@@ -355,6 +355,20 @@ export class YTMusicProvider {
     return ((shelf && shelf.contents) || []).filter((i) => /^MPRE/.test(i.id || '')).map((i) => YTMusicProvider.albumCard(i));
   }
 
+  /** Новый приватный плейлист (для переноса). Как веб-версия YouTube Music. → id вида yt:PL… */
+  async createPlaylist(title, videoIds) {
+    if (!this.cookie) throw new Error('Войди в YouTube Music, чтобы создавать плейлисты');
+    const yt = await this.client();
+    const first = videoIds.slice(0, 100);
+    const res = await yt.actions.execute('/playlist/create', { client: 'YTMUSIC', title: String(title).slice(0, 150), privacyStatus: 'PRIVATE', videoIds: first });
+    const id = res && res.data && res.data.playlistId;
+    if (!id) throw new Error(`YouTube Music не создал плейлист${res && res.status_code ? ` (HTTP ${res.status_code})` : ''}`);
+    for (let i = 100; i < videoIds.length; i += 100) {
+      await yt.actions.execute('/browse/edit_playlist', { client: 'YTMUSIC', playlistId: id, actions: videoIds.slice(i, i + 100).map((v) => ({ action: 'ACTION_ADD_VIDEO', addedVideoId: v, dedupeOption: 'DEDUPE_OPTION_SKIP' })) });
+    }
+    return `yt:${id}`;
+  }
+
   async like(track, on = true) {
     // Не через yt.interact: в youtubei.js 18 он шлёт target строкой и через клиент TV,
     // который не принимает вход по cookies → 400. Шлём как веб-версия YouTube Music.

@@ -339,11 +339,11 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     // ---------- «Слушать вместе» ----------
     ['GET', /^\/rooms\/current$/, async ({ s }) => {
       const r = hub.roomOf(s.sid);
-      return { room: r ? { ...hub.snapshot(r), host: r.hostSid === s.sid } : null };
+      return { room: r ? { ...hub.snapshot(r), isHost: r.hostSid === s.sid } : null };
     }, true],
     ['POST', /^\/rooms$/, async ({ s }) => {
       const room = hub.createRoom(s.sid, s.uid, { name: s.user.name || 'Хост', picture: s.user.picture, device: s.device });
-      return { room: { ...room, host: true } };
+      return { room: { ...room, isHost: true } };
     }, true],
     ['POST', /^\/rooms\/([A-Za-z0-9]{6})\/join$/, async ({ s, m }) => {
       let room;
@@ -353,14 +353,14 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         throw new HttpError(e.status || 400, e.message);
       }
       if (!room) throw new HttpError(404, 'Комнаты с таким кодом нет — проверь код');
-      return { room: { ...room, host: hub.roomOf(s.sid).hostSid === s.sid } };
+      return { room: { ...room, isHost: hub.roomOf(s.sid).hostSid === s.sid } };
     }, true],
     ['POST', /^\/rooms\/([A-Za-z0-9]{6})\/leave$/, async ({ s, m }) => ({ ok: hub.leaveRoom(m[1].toUpperCase(), s.sid) }), true],
     ['PUT', /^\/rooms\/([A-Za-z0-9]{6})\/state$/, async ({ s, m, req }) => {
       const body = await readJson(req);
       const room = hub.setRoomState(m[1].toUpperCase(), s.sid, { track: cleanTrack(body.track), position: body.position, playing: body.playing });
       if (!room) throw new HttpError(403, 'Управлять может только тот, кто создал комнату');
-      return { room: { ...room, host: true } };
+      return { room: { ...room, isHost: true } };
     }, true],
     ['POST', /^\/rooms\/([A-Za-z0-9]{6})\/react$/, async ({ s, m, req }) => {
       const body = await readJson(req);

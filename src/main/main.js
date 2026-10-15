@@ -17,6 +17,9 @@ import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
 import { NyaoCloud, API_BASE } from './cloud.js';
 import { LastFm } from './lastfm.js';
 import { Radio } from './radio.js';
+import { LiveEvents } from './live.js';
+import { transferPlaylist, TARGETS } from './transfer.js';
+import { findMatch } from './match.js';
 import os from 'node:os';
 import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch } from './auth.js';
 
@@ -55,7 +58,7 @@ async function pollStatus() {
 }
 const up = (id) => !svcStatus.outages.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
-let ya, yt, sc, vk, wave, streams, catalog, win, cloud, lastfm, radio;
+let ya, yt, sc, vk, wave, streams, catalog, win, cloud, lastfm, radio, live;
 
 /** Ключи Last.fm кладёт сборка (из секретов GitHub) в lastfm-keys.json рядом; без него Last.fm выключен */
 function lastfmKeys() {
@@ -147,6 +150,9 @@ function initProviders() {
     device: `${os.hostname().replace(/\.local$/, '')} · ${process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux'}`,
     log: (m) => console.log(m)
   });
+  // команды с других устройств, «сейчас играет» на них и «Слушать вместе» — в окно
+  live = new LiveEvents({ cloud, onEvent: (e) => send('live:event', e), log: (m) => console.log(m) });
+  live.start();
   const waveMemFile = path.join(app.getPath('userData'), 'wave-memory.json');
   const lk = lastfmKeys();
   lastfm = new LastFm({
@@ -383,7 +389,7 @@ function registerIpc() {
       updateTray();
     }
     if (info && info.playing && info.track) lastfm.nowPlaying(info.track).catch(() => {});
-    return cloud.setNow(info).catch(() => {});
+    return cloud.setNow(info || {}).catch(() => {});
   });
   handle('track:details', async (track) => {
     if (!track) return {};
@@ -397,6 +403,72 @@ function registerIpc() {
   handle('lastfm:connect', () => lastfm.connect());
   handle('lastfm:cancel', () => lastfm.cancel());
   handle('lastfm:disconnect', () => lastfm.disconnect());
+  // ---------- Nyao Connect, «Слушать вместе», итоги ----------
+  const needCloud = () => {
+    if (!cloud.loggedIn) throw new Error('Нужен вход в аккаунт Nyao (настройки → Аккаунт Nyao)');
+  };
+  handle('connect:devices', async () => {
+    needCloud();
+    return (await cloud.request('GET', '/connect/devices')).devices || [];
+  });
+  handle('connect:cmd', async (deviceId, cmd, args) => {
+    needCloud();
+    return cloud.request('POST', `/connect/${encodeURIComponent(deviceId)}/cmd`, { cmd, args: args || {} });
+  });
+  handle('room:current', async () => (cloud.loggedIn ? (await cloud.request('GET', '/rooms/current')).room : null));
+  handle('room:create', async () => {
+    needCloud();
+    return (await cloud.request('POST', '/rooms')).room;
+  });
+  handle('room:join', async (code) => {
+    needCloud();
+    const c = String(code || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (c.length !== 6) throw new Error('Код комнаты — 6 букв и цифр');
+    return (await cloud.request('POST', `/rooms/${c}/join`)).room;
+  });
+  handle('room:leave', (code) => cloud.request('POST', `/rooms/${encodeURIComponent(code)}/leave`).catch(() => null));
+  handle('room:state', (code, st) => cloud.request('PUT', `/rooms/${encodeURIComponent(code)}/state`, st));
+  handle('room:react', (code, emoji) => cloud.request('POST', `/rooms/${encodeURIComponent(code)}/react`, { emoji }));
+  handle('stats', async (period, year) => {
+    needCloud();
+    const qs = new URLSearchParams({ period: period || 'month', tz: String(-new Date().getTimezoneOffset()), ...(year ? { year: String(year) } : {}) });
+    return cloud.request('GET', `/stats?${qs}`);
+  });
+  // трек из другого сервиса → тот, что можно включить здесь (для «Слушать вместе»)
+  const providers = () => ({ ya, yt, sc, vk });
+  const usable = (s) => up(s) && (s === 'yt' || s === 'sc' || (s === 'ya' && ya.loggedIn) || (s === 'vk' && vk.loggedIn));
+  handle('match:playable', async (track) => {
+    if (!track) return null;
+    if (usable(track.source)) return track;
+    const order = ['ya', 'vk', 'yt', 'sc'].filter(usable);
+    for (const s of order) {
+      const m = await findMatch(track, (q) => providers()[s].search(q));
+      if (m) return m.track;
+    }
+    return null;
+  });
+  handle('transfer:targets', () => Object.entries(TARGETS).map(([id, name]) => ({ id, name, ok: id === 'mix' || (id === 'ya' ? ya.loggedIn && up('ya') : yt.loggedIn && up('yt')) })));
+  handle('transfer:start', async ({ tracks, title, target }) => {
+    const r = await transferPlaylist({
+      tracks,
+      title: String(title || 'Перенесённый плейлист').slice(0, 80),
+      target,
+      search: (s, q) => providers()[s].search(q),
+      create: async (to, name, list) => {
+        if (to === 'mix') {
+          const all = readMixes();
+          const mix = { id: `mix:${crypto.randomUUID()}`, title: name, tracks: list };
+          all.unshift(mix);
+          writeMixes(all);
+          return mix.id;
+        }
+        if (to === 'ya') return ya.createPlaylist(name, list);
+        return yt.createPlaylist(name, list.map((t) => t.srcId));
+      },
+      onProgress: (p) => send('transfer:progress', p)
+    });
+    return r;
+  });
   handle('cloud:others', () => cloud.others());
   handle('cloud:history', () => cloud.history().slice(0, 200));
   handle('cloud:top', (opts) => cloud.top(opts || {}));

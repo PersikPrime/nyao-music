@@ -60,12 +60,13 @@ test('Слушать вместе: комната, участники, сост�
     const guest = { token: (await login(call, 'Телефон')).token };
     const created = (await call('POST', '/rooms', host)).json.room;
     assert.match(created.code, /^[A-Z2-9]{6}$/);
-    assert.equal(created.host, true);
+    assert.equal(created.isHost, true);
+    assert.equal(created.host.name, 'Takko');
     assert.equal((await call('POST', '/rooms', host)).json.room.code, created.code, 'повторно — та же комната');
     assert.equal((await call('POST', '/rooms/ZZZZZZ/join', guest)).status, 404);
     const hostCur = (await call('GET', '/events?wait=0', host)).json.cursor;
     const joined = (await call('POST', `/rooms/${created.code.toLowerCase()}/join`, guest)).json.room;
-    assert.equal(joined.host, false);
+    assert.equal(joined.isHost, false);
     assert.equal(joined.members.length, 1);
     const hostEv = (await call('GET', `/events?cursor=${hostCur}&wait=0`, host)).json.events;
     assert.equal(hostEv[0].joined, 'Takko');
