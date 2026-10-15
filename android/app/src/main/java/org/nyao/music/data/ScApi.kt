@@ -127,10 +127,10 @@ class ScApi(private val prefs: Prefs) {
         return items.mapNotNull { full[it.opt("id").toString()] }
     }
 
-    suspend fun likedTracks(limit: Int = 300): List<Track> {
+    suspend fun likedTracks(limit: Int = 5000): List<Track> {
         val out = ArrayList<JSONObject>()
         var res = obj("/users/${uid()}/track_likes", mapOf("limit" to "200"))
-        for (page in 0 until 5) {
+        for (page in 0 until 30) {
             res.arr("collection").objects().mapNotNullTo(out) { it.obj("track") }
             val next = res.str("next_href")
             if (out.size >= limit || next == null) break

@@ -241,13 +241,13 @@ class YtMusicApi(private val prefs: Prefs) {
     }
 
     /** Треки плейлиста/альбома с подгрузкой продолжений */
-    suspend fun browseTracks(browseId: String, limit: Int = 300): List<Track> {
+    suspend fun browseTracks(browseId: String, limit: Int = 5000): List<Track> {
         val out = LinkedHashMap<String, Track>()
         var r = post("browse", JSONObject().put("browseId", browseId))
         var pages = 0
         while (true) {
             tracksIn(r).forEach { out.putIfAbsent(it.id, it) }
-            if (out.size >= limit || ++pages > 12) break
+            if (out.size >= limit || ++pages > 60) break
             val token = findAll(r, "continuationCommand").firstOrNull()?.str("token")
             val legacy = findAll(r, "nextContinuationData").firstOrNull()?.str("continuation")
             r = when {
@@ -297,7 +297,7 @@ class YtMusicApi(private val prefs: Prefs) {
     /** Пул YT-треков для волны: радио по случайным лайкам (как wavePool в десктопе) */
     suspend fun wavePool(diversity: String, exclude: Set<String>, size: Int = 25): List<Track> {
         val liked = try {
-            likedTracks()
+            browseTracks("VLLM", 300) // для подбора волны хватает части лайков
         } catch (_: Exception) {
             emptyList()
         }

@@ -285,7 +285,8 @@ fun ConnectedGroup(
             ) {
                 Text(
                     label,
-                    style = MaterialTheme.typography.labelLarge,
+                    // четыре кнопки в ряд на телефоне — шрифт помельче, чтобы слова влезали
+                    style = if (items.size >= 4) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
                     color = if (on) NyaoColors.OnLavender else NyaoColors.Text,
                     maxLines = 1,
                     softWrap = false,

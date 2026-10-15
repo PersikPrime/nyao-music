@@ -175,15 +175,15 @@ export class YandexProvider {
 
   async tracksByIds(ids) {
     const out = [];
-    for (let i = 0; i < ids.length; i += 100) {
-      const chunk = ids.slice(i, i + 100);
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
       const res = await this.request('POST', '/tracks', { form: { 'track-ids': chunk.join(','), 'with-positions': 'false' } });
       out.push(...(res || []).map(mapTrack).filter(Boolean));
     }
     return out;
   }
 
-  async likedTracks(limit = 300) {
+  async likedTracks(limit = 10000) {
     const { uid } = await this.getAccount();
     const res = await this.request('GET', `/users/${uid}/likes/tracks`);
     const ids = ((res.library && res.library.tracks) || []).slice(0, limit).map((t) => (t.albumId ? `${t.id}:${t.albumId}` : t.id));

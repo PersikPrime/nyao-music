@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 data class Settings(
     val ytmShare: Int = 30,
-    val diversity: String = "favorite",
+    val diversity: String = "any",
     val mood: String? = null,
     val onboarded: Boolean = false,
     /** Вид приложения: "player" (своя музыка на первом плане) или "wave" (акцент на волну); null — ещё не выбран */
@@ -16,6 +16,10 @@ data class Settings(
     val splitLiked: Boolean = false,
     /** Вкладка «Волна» в панели в режиме «Плеер» */
     val waveTab: Boolean = false,
+    /** Эквалайзер: 10 полос (31 Гц … 16 кГц), дБ от -12 до 12 — как на ПК */
+    val eqOn: Boolean = false,
+    val eqPreset: String = "flat",
+    val eqGains: List<Int> = List(10) { 0 },
 ) {
     val isWaveLayout: Boolean get() = layout == "wave"
 }
@@ -31,12 +35,16 @@ class Prefs(context: Context) {
 
     private fun read() = Settings(
         ytmShare = sp.getInt("ytmShare", 30),
-        diversity = sp.getString("diversity", "favorite") ?: "favorite",
+        diversity = sp.getString("diversity", "any") ?: "any",
         mood = sp.getString("mood", null),
         onboarded = sp.getBoolean("onboarded", false),
         layout = sp.getString("layout", null),
         splitLiked = sp.getBoolean("splitLiked", false),
         waveTab = sp.getBoolean("waveTab", false),
+        eqOn = sp.getBoolean("eqOn", false),
+        eqPreset = sp.getString("eqPreset", "flat") ?: "flat",
+        eqGains = (sp.getString("eqGains", null) ?: "").split(",").mapNotNull { it.trim().toIntOrNull() }
+            .takeIf { it.size == 10 }?.map { it.coerceIn(-12, 12) } ?: List(10) { 0 },
     )
 
     /** Вызывается, когда меняется то, что синхронизируется через аккаунт Nyao: "wave" или "prefs" */
@@ -54,6 +62,11 @@ class Prefs(context: Context) {
     fun setMood(v: String?) = update { if (v == null) remove("mood") else putString("mood", v) }.also { onSyncChange?.invoke("wave") }
     fun setLayout(v: String) = update { putString("layout", if (v == "wave") "wave" else "player") }.also { onSyncChange?.invoke("prefs") }
     fun setSplitLiked(v: Boolean) = update { putBoolean("splitLiked", v) }.also { onSyncChange?.invoke("prefs") }
+    fun setEq(on: Boolean, preset: String, gains: List<Int>) = update {
+        putBoolean("eqOn", on)
+        putString("eqPreset", preset)
+        putString("eqGains", gains.joinToString(",") { it.coerceIn(-12, 12).toString() })
+    }
     fun setWaveTab(v: Boolean) = update { putBoolean("waveTab", v) }.also { onSyncChange?.invoke("prefs") }
 
     /** Когда ключ синхронизации («wave», «prefs», «mixes») последний раз менялся на этом устройстве */

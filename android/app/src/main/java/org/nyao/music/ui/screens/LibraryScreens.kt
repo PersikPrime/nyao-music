@@ -35,6 +35,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
@@ -301,10 +303,60 @@ fun PlaylistScreen(model: AppModel, playlist: Playlist) {
                     color = NyaoColors.Muted,
                     modifier = Modifier.padding(top = 4.dp),
                 )
-                PlayButtons(tracks ?: emptyList(), playlist.title, Modifier.padding(top = 18.dp, bottom = 18.dp))
+                PlayButtons(tracks ?: emptyList(), playlist.title, Modifier.padding(top = 18.dp, bottom = 8.dp))
+                OfflineButton(model, playlist, tracks)
             }
         }
         if (tracks == null) item { Loading() } else trackGroup(model, tracks, playlist.title, current?.id, likedIds)
+    }
+}
+
+/** Скачать плейлист для прослушивания без интернета (Яндекс и YouTube; SoundCloud и VK — пока нельзя) */
+@Composable
+private fun OfflineButton(model: AppModel, playlist: Playlist, tracks: List<Track>?) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val st by org.nyao.music.playback.Offline.state.collectAsState()
+    val mod = Modifier.padding(bottom = 14.dp)
+    if (tracks.isNullOrEmpty()) return
+    if (playlist.id == org.nyao.music.playback.Offline.PLAYLIST_ID) {
+        TextButton(onClick = {
+            org.nyao.music.playback.Offline.removeAll()
+            model.message("Скачанное удалено")
+            model.back()
+        }, modifier = mod) { Text("Удалить всё скачанное") }
+        return
+    }
+    val prog = st.progress[playlist.id]
+    val ids = st.ids
+    val can = tracks.count { org.nyao.music.playback.Offline.canDownload(it) }
+    val have = tracks.count { it.id in ids && org.nyao.music.playback.Offline.canDownload(it) }
+    when {
+        prog != null -> Row(mod, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            androidx.compose.material3.CircularProgressIndicator(
+                progress = { if (prog.second == 0) 0f else prog.first / prog.second.toFloat() },
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 3.dp,
+            )
+            Text("Скачиваю ${prog.first} из ${prog.second}", style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted)
+            TextButton(onClick = { org.nyao.music.playback.Offline.cancel(playlist.id) }) { Text("Отменить") }
+        }
+        can == 0 -> Text("SoundCloud и VK пока нельзя скачать для офлайна", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = mod)
+        have >= can -> androidx.compose.material3.OutlinedButton(onClick = {
+            org.nyao.music.playback.Offline.remove(playlist.id, tracks)
+            model.message("Загрузка «${playlist.title}» удалена")
+        }, modifier = mod) {
+            Icon(Icons.Rounded.DownloadDone, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text("Скачано · удалить")
+        }
+        else -> androidx.compose.material3.FilledTonalButton(onClick = {
+            org.nyao.music.playback.Offline.download(ctx, playlist.id, playlist.title, tracks)
+            model.message("Скачиваю «${playlist.title}» — можно слушать дальше")
+        }, modifier = mod) {
+            Icon(Icons.Rounded.Download, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text(if (have > 0) "Докачать (${can - have})" else "Скачать для офлайна")
+        }
     }
 }
 

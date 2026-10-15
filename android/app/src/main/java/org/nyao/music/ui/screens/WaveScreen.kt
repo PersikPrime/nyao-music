@@ -64,7 +64,8 @@ import org.nyao.music.ui.components.rememberPlayShape
 import org.nyao.music.ui.theme.NyaoColors
 
 val DIVERSITY = listOf(
-    Triple("favorite", "Любимое", "Больше того, что ты уже лайкал, плюс сами лайки из YouTube Music."),
+    Triple("any", "Всё", "Без ограничений: и любимое, и новое, и популярное — как обычная «Моя волна»."),
+    Triple("favorite", "Любимое", "В основном твои лайки и похожее на них. Если лайков немного, треки будут повторяться."),
     Triple("discover", "Незнакомое", "Только новое: в поток не попадёт ничего из твоих лайков."),
     Triple("popular", "Популярное", "Хиты и то, что сейчас слушают чаще всего."),
 )

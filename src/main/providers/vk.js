@@ -257,11 +257,11 @@ export class VKProvider {
   }
 
   /** «Моя музыка» */
-  async likedTracks(limit = 500) {
+  async likedTracks(limit = 5000) {
     if (!this.uid) await this.refresh();
     const out = [];
     let offset = 0;
-    for (let page = 0; page < 10 && out.length < limit; page++) {
+    for (let page = 0; page < 60 && out.length < limit; page++) {
       const data = await this.post('load_section', { owner_id: this.uid, playlist_id: -1, offset, type: 'playlist', access_hash: '', is_loading_all: 1 });
       const pl = findPlaylist(data);
       const items = collectAudios(pl ? pl.list : data);

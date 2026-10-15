@@ -17,12 +17,18 @@ import java.io.File
 object PlaybackCache {
     const val MAX_BYTES = 1024L * 1024 * 1024
     @Volatile private var cache: SimpleCache? = null
+    @Volatile private var db: StandaloneDatabaseProvider? = null
+
+    /** Одна база на оба кэша (прослушанное и скачанное) */
+    fun database(context: Context): StandaloneDatabaseProvider = db ?: synchronized(this) {
+        db ?: StandaloneDatabaseProvider(context.applicationContext).also { db = it }
+    }
 
     fun get(context: Context): SimpleCache = cache ?: synchronized(this) {
         cache ?: SimpleCache(
             File(context.applicationContext.cacheDir, "audio"),
             LeastRecentlyUsedCacheEvictor(MAX_BYTES),
-            StandaloneDatabaseProvider(context.applicationContext),
+            database(context),
         ).also { cache = it }
     }
 

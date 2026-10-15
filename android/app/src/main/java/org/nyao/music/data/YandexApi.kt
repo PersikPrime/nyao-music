@@ -201,14 +201,14 @@ class YandexApi(private val prefs: Prefs) {
 
     private suspend fun tracksByIds(ids: List<String>): List<Track> {
         val out = ArrayList<Track>()
-        ids.chunked(100).forEach { chunk ->
+        ids.chunked(200).forEach { chunk ->
             val res = arr("POST", "/tracks", form = mapOf("track-ids" to chunk.joinToString(","), "with-positions" to "false"))
             out += res.objects().mapNotNull { mapTrack(it) }
         }
         return out
     }
 
-    suspend fun likedTracks(limit: Int = 300): List<Track> {
+    suspend fun likedTracks(limit: Int = 10000): List<Track> {
         val res = obj("GET", "/users/${uid()}/likes/tracks")
         val ids = res.path("library")?.arr("tracks").objects().take(limit).map {
             val id = it.optString("id")

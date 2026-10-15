@@ -73,46 +73,83 @@ class WaveMixer(
         refill = scope.launch { refillPool() }
     }
 
-    private suspend fun batch(yaCall: suspend () -> List<Track>): List<Track> {
+    /**
+     * Из пачки Яндекса берём новое. Ступени, чтобы волна не обрывалась:
+     * 1) не звучало ни в этом запуске, ни недавно; 2) недавно звучало, но не в этом запуске;
+     * 3) повтор из этого запуска, но не из последних 30 треков.
+     */
+    private fun pickFresh(base: List<Track>, strict: Boolean): List<Track> {
+        val a = base.filter { it.id !in seen && it.id !in recent }
+        if (a.isNotEmpty() || strict) return a
+        val b = base.filter { it.id !in seen }
+        if (b.isNotEmpty()) return b.take(4)
+        val last = lastPlayed.toSet()
+        return base.filter { it.id !in last }.take(3)
+    }
+
+    private suspend fun batch(yaCall: suspend () -> List<Track>, retryCall: suspend () -> List<Track> = yaCall): List<Track> {
         val s = prefs.settings.value
         val useYt = hasExtras && s.ytmShare > 0
         if (useYt && lock.withLock { pool.size } < 6) {
             refill?.join()
             if (lock.withLock { pool.size } < 6) refillPool()
         }
-        var base: List<Track> = emptyList()
+        var fresh: List<Track> = emptyList()
+        var gotAny = false
+        var lastList: List<Track> = emptyList()
         if (ya.loggedIn && s.ytmShare < 100) {
-            base = try {
-                yaCall()
-            } catch (e: Exception) {
-                if (!useYt) throw e
-                emptyList()
+            // Яндекс прислал только уже звучавшее — просим следующую пачку, а не сдаёмся
+            for (attempt in 0 until 4) {
+                val base = try {
+                    if (attempt == 0) yaCall() else retryCall()
+                } catch (e: Exception) {
+                    if (!useYt && attempt == 0) throw e
+                    break
+                }
+                if (base.isNotEmpty()) {
+                    gotAny = true
+                    lastList = (lastList + base).distinctBy { it.id }
+                }
+                fresh = lock.withLock { pickFresh(base, strict = attempt < 2) }
+                if (fresh.isNotEmpty()) break
             }
+            // новых пачек не дали — лучше повтор из того, что есть, чем тишина
+            if (fresh.isEmpty() && lastList.isNotEmpty()) fresh = lock.withLock { pickFresh(lastList, strict = false) }
         }
         val result = lock.withLock {
-            // недавно звучавшее пропускаем; если пропустили всё — лучше пара повторов, чем тишина
-            val fresh = base.filter { it.id !in seen && it.id !in recent }.ifEmpty { base.filter { it.id !in seen }.take(2) }
-            fresh.forEach { seen += it.id }
+            fresh.forEach { seen += it.id; remember(it.id) }
             val extraSource = if (!useYt) emptyList() else if (fresh.isEmpty()) pool.take(6) else pool.toList()
             val (out, used) = interleave(fresh, extraSource, if (fresh.isEmpty()) 100 else s.ytmShare)
             val usedTracks = extraSource.take(used)
             pool.removeAll(usedTracks.toSet())
-            usedTracks.forEach { seen += it.id }
+            usedTracks.forEach { seen += it.id; remember(it.id) }
             out
         }
         if (useYt) refillInBackground()
-        if (result.isEmpty()) throw ApiException("Волна пустая: войди хотя бы в один сервис в настройках")
+        if (result.isEmpty()) throw ApiException(
+            if (ya.loggedIn || hasExtras) (if (gotAny) "Сервисы прислали только уже сыгранное — нажми ещё раз, попробую снова" else "Сервисы не прислали треков — проверь интернет и попробуй ещё раз")
+            else "Волна пустая: войди хотя бы в один сервис в настройках",
+        )
         return result
+    }
+
+    /** Последние сыгранные — их не повторяем даже в крайнем случае */
+    private val lastPlayed = ArrayDeque<String>()
+
+    private fun remember(id: String) {
+        lastPlayed.addLast(id)
+        while (lastPlayed.size > 30) lastPlayed.removeFirst()
     }
 
     suspend fun start(): List<Track> {
         lock.withLock {
             pool.clear()
             seen.clear()
+            lastPlayed.clear()
         }
         recent = runCatching { recentProvider() }.getOrDefault(emptySet())
         val s = prefs.settings.value
-        val tracks = freshStart(batch { ya.waveStart(s.diversity, s.mood) })
+        val tracks = freshStart(batch({ ya.waveStart(s.diversity, s.mood) }, { ya.waveMore(seen.toList(), s.diversity, s.mood) }))
         if (ya.loggedIn) ya.waveFeedback("radioStarted", null)
         return tracks
     }
@@ -120,18 +157,18 @@ class WaveMixer(
     /** Начало волны каждый раз новое: перемешиваем первые треки и не начинаем с того же, что в прошлые разы */
     private fun freshStart(tracks: List<Track>): List<Track> {
         if (tracks.size < 2) return tracks
-        val n = minOf(5, tracks.size)
+        val n = minOf(12, tracks.size)
         val out = (tracks.take(n).shuffled() + tracks.drop(n)).toMutableList()
         val firsts = prefs.waveFirsts
         val i = out.indexOfFirst { it.id !in firsts }
         if (i > 0) out.add(0, out.removeAt(i))
-        prefs.waveFirsts = (listOf(out[0].id) + firsts.filter { it != out[0].id }).take(15)
+        prefs.waveFirsts = (listOf(out[0].id) + firsts.filter { it != out[0].id }).take(40)
         return out
     }
 
     suspend fun more(queueIds: List<String>): List<Track> {
         val s = prefs.settings.value
-        return batch { ya.waveMore(queueIds, s.diversity, s.mood) }
+        return batch({ ya.waveMore(queueIds, s.diversity, s.mood) }, { ya.waveMore(queueIds + seen.toList().takeLast(10), s.diversity, s.mood) })
     }
 
     suspend fun feedback(type: String, track: Track?, played: Int) {

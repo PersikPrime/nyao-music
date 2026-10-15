@@ -545,3 +545,13 @@ details textarea, details input[type=text] { flex: 1; min-width: 0; background: 
 .mb-row .meta span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mb-row .muted { font-size: 12px; text-align: right; }
 .icbtn.sm { width: 34px; height: 34px; font-size: 13px; }
+
+/* Эквалайзер */
+.eq-card { display: flex; flex-direction: column; gap: 14px; }
+.eq-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.eq-bands { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; padding: 8px 4px 0; }
+.eq-presets.off, .eq-bands.off { opacity: .45; }
+.eq-band { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.eq-band input[type=range] { writing-mode: vertical-lr; direction: rtl; width: 28px; height: 140px; accent-color: var(--accent); background: none; }
+.eq-db { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 14px; }
+.eq-hz { font-size: 11px; color: var(--muted); }

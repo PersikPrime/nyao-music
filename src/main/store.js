@@ -7,7 +7,7 @@ import path from 'node:path';
 const DEFAULT_SETTINGS = {
   volume: 0.8,
   ytmShare: 30,          // доля треков YouTube Music в «Моей волне», %
-  waveDiversity: 'favorite', // favorite | discover | popular
+  waveDiversity: 'any', // any | favorite | discover | popular
   waveMood: null,        // null | active | fun | calm | sad
   autoplay: true,
   quality: 'high',
@@ -16,7 +16,8 @@ const DEFAULT_SETTINGS = {
   onboarded: false,
   layout: null,          // 'player' | 'wave'; null — ещё не выбран (предложим выбрать при запуске)
   splitLiked: false,     // «Мне нравится» отдельно по сервисам
-  waveTab: false         // вкладка «Моя волна» в меню в режиме «Плеер»
+  waveTab: false,        // вкладка «Моя волна» в меню в режиме «Плеер»
+  eq: null               // эквалайзер { on, preset, gains[10] }; null — выключен
 };
 
 function dataPath(name) {

@@ -60,6 +60,7 @@ object Repo {
         vk = VkApi(prefs)
         cloud = NyaoCloud(prefs, context.applicationContext.filesDir)
         mixStore = MixStore(context.applicationContext.filesDir)
+        org.nyao.music.playback.Offline.init(context)
         // изменения настроек волны, вида и миксов уезжают на другие устройства
         prefs.onSyncChange = { key -> bg.launch { runCatching { cloud.pushState(key, stateData(key)) } } }
         mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
@@ -197,12 +198,13 @@ object Repo {
         val a = async { if (ya.loggedIn) runCatching { ya.playlists() }.getOrDefault(emptyList()) else emptyList() }
         val b = async { if (yt.loggedIn) runCatching { yt.playlists() }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (sc.loggedIn) runCatching { sc.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        a.await() + b.await() + c.await()
+        listOfNotNull(org.nyao.music.playback.Offline.asPlaylist()) + a.await() + b.await() + c.await()
     }
 
     suspend fun playlistTracks(id: String): List<Track> = remember(
         when {
             // «Мне нравится» одного сервиса и свои миксы
+            id == org.nyao.music.playback.Offline.PLAYLIST_ID -> org.nyao.music.playback.Offline.state.value.tracks
             id == "liked" -> likedTracks()
             id.startsWith("liked:") -> likedTracks().filter { it.source == id.removePrefix("liked:") }
             id.startsWith("mix:") -> mixStore.get(id)?.tracks ?: emptyList()

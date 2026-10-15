@@ -82,7 +82,7 @@ private val MIX_STYLES = listOf(
 )
 
 private val MOOD_NAMES = mapOf("active" to "Бодрое", "fun" to "Весёлое", "calm" to "Спокойное", "sad" to "Грустное")
-private val CHAR_NAMES = mapOf("favorite" to "Любимое", "discover" to "Незнакомое", "popular" to "Популярное")
+private val CHAR_NAMES = mapOf("any" to "Всё", "favorite" to "Любимое", "discover" to "Незнакомое", "popular" to "Популярное")
 
 @Composable
 fun HomeScreen(model: AppModel, wide: Boolean) {

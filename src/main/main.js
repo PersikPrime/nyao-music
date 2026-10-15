@@ -32,7 +32,7 @@ function readVersion() {
 }
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'nyao', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }
+  { scheme: 'nyao', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } }
 ]);
 
 const fetchFn = (url, opts) => net.fetch(url, opts);
@@ -524,7 +524,16 @@ app.whenReady().then(() => {
     }
   }
   initProviders();
-  protocol.handle('nyao', (request) => streams.handle(request));
+  protocol.handle('nyao', async (request) => {
+    const res = await streams.handle(request);
+    // эквалайзер (Web Audio) читает звук только с разрешением CORS
+    try {
+      res.headers.set('access-control-allow-origin', '*');
+    } catch {
+      // заголовки ответа неизменяемые — отдаём как есть
+    }
+    return res;
+  });
   registerIpc();
   configureRpc();
   createWindow();
