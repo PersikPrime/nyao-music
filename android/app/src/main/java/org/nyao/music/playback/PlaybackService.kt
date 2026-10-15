@@ -173,8 +173,11 @@ class PlaybackService : MediaSessionService() {
     }
 
     private val listener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) = updateWidget()
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             applyNorm()
+            updateWidget()
             val prev = lastId?.let { Repo.track(it) }
             val wave = Repo.mode.value == Repo.Mode.WAVE
             if (wave && prev != null && prev.id != mediaItem?.mediaId) {
@@ -204,6 +207,46 @@ class PlaybackService : MediaSessionService() {
             val s = Repo.prefs.settings.value
             equalizer.attach(audioSessionId, s.eqOn, s.eqGains)
         }
+    }
+
+    // ---------- Виджет ----------
+    private var widgetCoverUrl: String? = null
+    private var widgetCover: android.graphics.Bitmap? = null
+
+    private fun updateWidget() {
+        val item = player.currentMediaItem
+        val t = item?.mediaId?.let { Repo.track(it) }
+        val title = t?.title ?: item?.mediaMetadata?.title?.toString() ?: "Nyao Music"
+        val artist = t?.artist ?: item?.mediaMetadata?.artist?.toString() ?: ""
+        val cover = t?.cover
+        NyaoWidget.push(this, NyaoWidget.Companion.State(title, artist, player.isPlaying, widgetCover.takeIf { cover == widgetCoverUrl }, live = true))
+        if (cover != null && cover != widgetCoverUrl) {
+            widgetCoverUrl = cover
+            scope.launch {
+                val bmp = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val req = coil3.request.ImageRequest.Builder(this@PlaybackService).data(cover).size(256).let { coil3.request.allowHardware(it, false) }.build()
+                        (coil3.SingletonImageLoader.get(this@PlaybackService).execute(req) as? coil3.request.SuccessResult)?.image?.let { coil3.toBitmap(it) }
+                    }.getOrNull()
+                }
+                if (widgetCoverUrl == cover) {
+                    widgetCover = bmp
+                    NyaoWidget.push(this@PlaybackService, NyaoWidget.Companion.State(title, artist, player.isPlaying, bmp, live = true))
+                }
+            }
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            NyaoWidget.ACTION_TOGGLE -> if (player.isPlaying) player.pause() else {
+                if (player.playbackState == Player.STATE_IDLE) player.prepare()
+                player.play()
+            }
+            NyaoWidget.ACTION_NEXT -> if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+            NyaoWidget.ACTION_PREV -> player.seekToPrevious()
+        }
+        return super.onStartCommand(intent, flags, startId)
     }
 
     private fun applyVolume() {
@@ -306,6 +349,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        NyaoWidget.push(this, NyaoWidget.Companion.State())
         scope.cancel()
         equalizer.release()
         runCatching { enhancer?.release() }
