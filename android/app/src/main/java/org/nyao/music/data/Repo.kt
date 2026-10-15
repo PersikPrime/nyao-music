@@ -70,7 +70,7 @@ object Repo {
         if (::prefs.isInitialized) return
         prefs = Prefs(context.applicationContext)
         ya = YandexApi(prefs)
-        yt = YtMusicApi(prefs)
+        yt = YtMusicApi(prefs, context.applicationContext.filesDir)
         ytStreams = YtStreams(yt)
         sc = ScApi(prefs)
         vk = VkApi(prefs)

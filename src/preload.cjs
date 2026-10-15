@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   openExternal: (url) => call('open:external', url),
   vkLog: () => call('vk:openLog'),
+  ytLog: () => call('yt:openLog'),
   version: () => call('app:version'),
   onOutdated: (cb) => ipcRenderer.on('app:outdated', (_e, min) => cb(min)),
   updates: {

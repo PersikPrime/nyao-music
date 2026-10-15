@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { settings, secrets } from './store.js';
 import { YandexProvider } from './providers/yandex.js';
 import { YTMusicProvider } from './providers/ytmusic.js';
+import { shapeOf } from './providers/ytraw.js';
 import { SoundCloudProvider } from './providers/soundcloud.js';
 import { VKProvider } from './providers/vk.js';
 import { checkUpdate, downloadAsset } from './updates.js';
@@ -119,12 +120,28 @@ async function syncCloud() {
   }
 }
 
+// Отчёт о сбоях YouTube: стек ошибки и «форма» ответа (только имена полей) — без cookies и данных аккаунта
+function ytLog(op, err, meta = {}) {
+  try {
+    const file = path.join(app.getPath('userData'), 'yt-debug.log');
+    try {
+      if (fs.statSync(file).size > 2_000_000) fs.renameSync(file, file + '.old');
+    } catch {}
+    const { response, ...rest } = meta || {};
+    const lines = [`${new Date().toISOString()} [${op}] v${readVersion().name}.${readVersion().build} ${JSON.stringify(rest)}`];
+    if (err) lines.push('  ' + String((err && err.stack) || err).split('\n').slice(0, 10).join('\n  '));
+    if (response) lines.push('  shape: ' + JSON.stringify(shapeOf(response)).slice(0, 60_000));
+    fs.appendFileSync(file, lines.join('\n') + '\n');
+    if (err) console.warn('[yt]', op, err && err.message);
+  } catch {}
+}
+
 function initProviders() {
   ya = new YandexProvider({ token: secrets.get('yandexToken'), fetch: fetchFn });
   // YouTube — через fetch из Node (как в npm run yt-test): сеть Electron может подменять заголовки,
   // по которым googlevideo проверяет ссылку
   const nodeFetch = globalThis.fetch.bind(globalThis);
-  yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch });
+  yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch, log: ytLog });
   sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch });
   // VK Музыка (dev): всё через сессию окна входа VK; сырые ответы при сбоях — в vk-debug.log
   const vkLog = path.join(app.getPath('userData'), 'vk-debug.log');
@@ -367,6 +384,11 @@ function registerIpc() {
   handle('rpc:update', (info) => rpc.update(info));
   handle('rpc:status', () => rpc.status);
   handle('sc:pending', () => readPending());
+  handle('yt:openLog', () => {
+    const file = path.join(app.getPath('userData'), 'yt-debug.log');
+    if (!fs.existsSync(file)) fs.writeFileSync(file, 'Сбоев YouTube пока не было.\n');
+    return shell.openPath(file);
+  });
   handle('vk:openLog', () => shell.openPath(path.join(app.getPath('userData'), 'vk-debug.log')));
 
   // ---------- Аккаунт Nyao ----------

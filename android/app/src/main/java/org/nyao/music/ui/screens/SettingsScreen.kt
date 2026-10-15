@@ -137,16 +137,23 @@ private fun ServiceCard(model: AppModel, source: String) {
                 Button(onClick = { model.loginFor = source }) { Text("Войти") }
             }
         }
-        if (isVk) {
-            TextButton(onClick = { vkLog = Repo.vk.debugText().ifBlank { "Сбоев пока не было." } }) { Text("Что-то не работает?") }
+        val isYt = !ya && !isSc && !isVk
+        if (isYt && acc != null) {
+            // Отчёт о сбоях плейлистов: стек и структура ответа, без cookies
+            TextButton(onClick = {
+                vkLog = Repo.yt.diagFile?.takeIf { it.exists() }?.readText()?.takeLast(120_000)?.ifBlank { null } ?: "Сбоев YouTube пока не было."
+            }) { Text("Плейлисты не открываются? Отчёт") }
+        }
+        if (isVk || isYt) {
+            if (isVk) TextButton(onClick = { vkLog = Repo.vk.debugText().ifBlank { "Сбоев пока не было." } }) { Text("Что-то не работает?") }
             vkLog?.let { log ->
                 val clip = androidx.compose.ui.platform.LocalClipboardManager.current
                 androidx.compose.material3.AlertDialog(
                     onDismissRequest = { vkLog = null },
-                    title = { Text("Журнал VK") },
+                    title = { Text(if (isVk) "Журнал VK" else "Отчёт YouTube") },
                     text = {
                         Text(
-                            log,
+                            if (log.length > 20_000) "…" + log.takeLast(20_000) else log,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
                         )
@@ -155,7 +162,7 @@ private fun ServiceCard(model: AppModel, source: String) {
                     dismissButton = { TextButton(onClick = { vkLog = null }) { Text("Закрыть") } },
                 )
             }
-            return@Column
+            if (isVk) return@Column
         }
         TextButton(onClick = { manual = !manual }) {
             Text(if (ya) "Вставить OAuth-токен вручную" else if (isSc) "Вставить токен вручную (cookie oauth_token)" else "Вставить cookies вручную (если Google не пускает)")

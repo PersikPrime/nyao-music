@@ -876,6 +876,7 @@ function svcCard(svc) {
         <div class="st">${st ? `Вход выполнен: ${esc(st.name)}${st.error ? ' (токен не принят — войди заново)' : ''}${extra}` : svc === 'sc' ? 'Не подключено · поиск работает и без входа' : 'Не подключено'}</div></div>
       ${st ? `<button class="btn danger" data-action="logout" data-svc="${svc}">Выйти</button>` : `<button class="btn primary" data-action="login" data-svc="${svc}">Войти</button>`}
     </div>
+    ${svc === 'yt' ? `<div class="hint svc-diag">Плейлисты не открываются? <button class="link-plain" data-action="yt-log">Открой отчёт</button> и пришли его разработчику — там только ошибки и структура ответа YouTube, без cookies и личных данных.</div>` : ''}
     <details><summary>${SVC_HELP[svc].manual}</summary>
       <div class="manual">${SVC_HELP[svc].input}
       ${svc === 'vk' ? '' : `<button class="btn" data-action="manual-save" data-svc="${svc}">Сохранить</button>`}</div>
@@ -2344,6 +2345,9 @@ async function handleAction(el, e) {
       break;
     case 'vk-log':
       api.vkLog && api.vkLog();
+      break;
+    case 'yt-log':
+      api.ytLog && api.ytLog();
       break;
     case 'manual-save': {
       const svc = el.dataset.svc;

@@ -796,3 +796,7 @@ body.fs-on .toast { z-index: 1000; }
 .lyr-credit { margin-top: 24px; font-size: 12px; color: var(--dim); font-weight: 400; }
 
 .lyr-diag { margin-top: 10px; font-size: 12px; color: var(--dim); }
+
+/* 0.7 (43): отчёт YouTube в карточке сервиса */
+.svc-diag { margin: 10px 0 2px; font-size: 12px; }
+.svc-diag .link-plain { color: var(--accent); font-size: 12px; }
