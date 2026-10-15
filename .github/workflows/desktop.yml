@@ -35,7 +35,8 @@ jobs:
         env:
           LASTFM_KEY: ${{ secrets.NYAO_LASTFM_KEY }}
           LASTFM_SECRET: ${{ secrets.NYAO_LASTFM_SECRET }}
-        run: node -e "require('fs').writeFileSync('src/main/lastfm-keys.json', JSON.stringify({ key: process.env.LASTFM_KEY || '', secret: process.env.LASTFM_SECRET || '' }))"
+        run: |
+          node -e "require('fs').writeFileSync('src/main/lastfm-keys.json', JSON.stringify({ key: process.env.LASTFM_KEY || '', secret: process.env.LASTFM_SECRET || '' }))"
       - name: Сборка
         env:
           # Подписи разработчика нет — сборка неподписанная (на Mac — ad-hoc подпись)
