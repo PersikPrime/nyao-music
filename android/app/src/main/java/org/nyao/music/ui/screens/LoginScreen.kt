@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import org.nyao.music.ui.components.NyaoIcons
+
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.Uri
@@ -16,8 +18,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -139,7 +139,7 @@ fun LoginScreen(source: String, onClose: (Boolean) -> Unit) {
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { close(false) }) { Icon(Icons.Rounded.Close, "Закрыть") }
+            IconButton(onClick = { close(false) }) { Icon(NyaoIcons.Close, "Закрыть") }
             Text(
                 if (ya) "Вход в Яндекс Музыку" else if (isSc) "Вход в SoundCloud" else if (isVk) "Вход во VK" else "Вход в YouTube Music",
                 style = MaterialTheme.typography.titleMedium,

@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import org.nyao.music.ui.components.NyaoIcons
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
@@ -26,8 +28,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -198,7 +198,7 @@ private fun Accounts(model: AppModel) {
             }
             if (acc != null) {
                 Box(Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Check, "Подключено", tint = MaterialTheme.colorScheme.onPrimary)
+                    Icon(NyaoIcons.Check, "Подключено", tint = MaterialTheme.colorScheme.onPrimary)
                 }
             } else {
                 FilledTonalButton(onClick = { model.loginFor = svc }) { Text("Войти") }

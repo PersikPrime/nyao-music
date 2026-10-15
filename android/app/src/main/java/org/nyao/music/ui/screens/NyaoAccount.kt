@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import org.nyao.music.ui.components.NyaoIcons
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.expandVertically
@@ -15,11 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Computer
-import androidx.compose.material.icons.rounded.PhoneAndroid
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -136,7 +133,7 @@ fun NyaoAccountCard(model: AppModel) {
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(NyaoColors.S2).padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(if (d.platform == "android") Icons.Rounded.PhoneAndroid else Icons.Rounded.Computer, null, tint = NyaoColors.Lavender)
+                    Icon(if (d.platform == "android") NyaoIcons.PhoneAndroid else NyaoIcons.Computer, null, tint = NyaoColors.Lavender)
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                         Text(d.device.ifBlank { "Устройство" }, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(if (d.current) "это устройство" else "был ${ago(d.lastSeen)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -179,9 +176,9 @@ fun ContinueCard(model: AppModel, r: RemoteNow, modifier: Modifier = Modifier) {
                 Text("${r.track.artist} · ${formatTime(minOf(pos.toInt(), if (r.track.duration > 0) r.track.duration else pos.toInt()))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Box(Modifier.size(48.dp).clip(CircleShape).background(NyaoColors.Lavender), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.PlayArrow, "Продолжить", tint = NyaoColors.OnLavender)
+                Icon(NyaoIcons.PlayArrow, "Продолжить", tint = NyaoColors.OnLavender)
             }
-            IconButton(onClick = { model.dismissOther(r) }) { Icon(Icons.Rounded.Close, "Скрыть", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            IconButton(onClick = { model.dismissOther(r) }) { Icon(NyaoIcons.Close, "Скрыть", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
 }

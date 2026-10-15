@@ -1,5 +1,7 @@
 package org.nyao.music.ui
 
+import org.nyao.music.ui.components.NyaoIcons
+
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.graphics.drawscope.clipRect
 
@@ -50,15 +52,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.LibraryMusic
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.SkipNext
-import androidx.compose.material.icons.rounded.Waves
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -113,21 +106,22 @@ private fun routeOrder(r: Route): Int = when (r) {
     is Route.PlaylistPage -> 5
 }
 
-private data class Tab(val route: Route, val label: String, val icon: ImageVector)
+/** icon — обычная (контурная), iconOn — залитая для выбранной вкладки, как в Material 3 Expressive */
+private data class Tab(val route: Route, val label: String, val icon: ImageVector, val iconOn: ImageVector = icon)
 
 private val TABS = listOf(
-    Tab(Route.Home, "Главная", Icons.Rounded.Home),
-    Tab(Route.Wave, "Волна", Icons.Rounded.Waves),
-    Tab(Route.Library, "Медиатека", Icons.Rounded.LibraryMusic),
-    Tab(Route.Settings, "Настройки", Icons.Rounded.Settings),
+    Tab(Route.Home, "Главная", NyaoIcons.Home, NyaoIcons.HomeFilled),
+    Tab(Route.Wave, "Волна", NyaoIcons.Waves, NyaoIcons.WavesFilled),
+    Tab(Route.Library, "Медиатека", NyaoIcons.LibraryMusic, NyaoIcons.LibraryMusicFilled),
+    Tab(Route.Settings, "Настройки", NyaoIcons.Settings, NyaoIcons.SettingsFilled),
 )
 
 /** Режим «Плеер»: вместо вкладки волны — поиск (волну можно вернуть в настройках) */
 private val PLAYER_TABS = listOf(
-    Tab(Route.Home, "Главная", Icons.Rounded.Home),
-    Tab(Route.Search, "Поиск", Icons.Rounded.Search),
-    Tab(Route.Library, "Медиатека", Icons.Rounded.LibraryMusic),
-    Tab(Route.Settings, "Настройки", Icons.Rounded.Settings),
+    Tab(Route.Home, "Главная", NyaoIcons.Home, NyaoIcons.HomeFilled),
+    Tab(Route.Search, "Поиск", NyaoIcons.Search),
+    Tab(Route.Library, "Медиатека", NyaoIcons.LibraryMusic, NyaoIcons.LibraryMusicFilled),
+    Tab(Route.Settings, "Настройки", NyaoIcons.Settings, NyaoIcons.SettingsFilled),
 )
 
 private fun tabsFor(s: org.nyao.music.data.Settings): List<Tab> = when {
@@ -314,7 +308,7 @@ private fun FloatingToolbar(model: AppModel) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Icon(tab.icon, tab.label, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
+                    Icon(if (selected) tab.iconOn else tab.icon, tab.label, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
                     AnimatedVisibility(selected, enter = expandHorizontally(spring(dampingRatio = 0.7f)) + fadeIn(), exit = shrinkHorizontally(spring(dampingRatio = 0.9f)) + fadeOut()) {
                         Text(tab.label, style = MaterialTheme.typography.labelLarge, color = NyaoColors.OnPrimary, maxLines = 1)
                     }
@@ -351,8 +345,8 @@ private fun MiniPlayer(onOpen: () -> Unit, modifier: Modifier = Modifier) {
             Box(
                 Modifier.size(48.dp).bouncy().clip(RoundedCornerShape(16.dp)).background(pal.accent).clickable { PlayerConnection.toggle() },
                 contentAlignment = Alignment.Center,
-            ) { Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Играть", tint = pal.onAccent) }
-            IconButton(onClick = { PlayerConnection.next() }) { Icon(Icons.Rounded.SkipNext, "Следующий", tint = pal.onContainer) }
+            ) { Icon(if (playing) NyaoIcons.Pause else NyaoIcons.PlayArrow, if (playing) "Пауза" else "Играть", tint = pal.onAccent) }
+            IconButton(onClick = { PlayerConnection.next() }) { Icon(NyaoIcons.SkipNext, "Следующий", tint = pal.onContainer) }
         }
         // Прогресс — тонкая прямая полоска внутри капсулы и без перемотки: нажатие на нижнюю половину
         // мини-плеера открывает экран «Сейчас играет», а не перематывает трек (перемотка — там, на волне)
@@ -381,7 +375,7 @@ private fun WideLayout(model: AppModel, showPane: Boolean) {
                 val selected = model.route == tab.route
                 Column(Modifier.bouncy().clip(RoundedCornerShape(16.dp)).clickable { model.go(tab.route) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box(Modifier.width(56.dp).height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (selected) NyaoColors.Primary else Color.Transparent), contentAlignment = Alignment.Center) {
-                        Icon(tab.icon, null, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
+                        Icon(if (selected) tab.iconOn else tab.icon, null, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
                     }
                     Text(tab.label, style = MaterialTheme.typography.labelMedium, color = if (selected) NyaoColors.Text else NyaoColors.Muted, maxLines = 1)
                 }
