@@ -162,6 +162,24 @@ export class SoundCloudProvider {
     return this.remember(res.collection || []);
   }
 
+  /** Подробности трека: жанр, год загрузки, лейбл, прослушивания */
+  async trackDetails(srcId) {
+    let t = this.raw.get(String(srcId));
+    if (!t || !t.created_at) {
+      t = ((await this.request('GET', '/tracks', { query: { ids: srcId } })) || [])[0] || t;
+      if (t) this.raw.set(String(srcId), t);
+    }
+    if (!t) return {};
+    const pm = t.publisher_metadata || {};
+    return {
+      year: t.release_date ? Number(String(t.release_date).slice(0, 4)) : t.created_at ? Number(String(t.created_at).slice(0, 4)) : null,
+      genre: t.genre || null,
+      label: t.label_name || pm.publisher || null,
+      plays: Number.isFinite(t.playback_count) ? t.playback_count : null,
+      explicit: pm.explicit === true
+    };
+  }
+
   async related(srcId) {
     const res = await this.request('GET', `/tracks/${srcId}/related`, { query: { limit: 30 } });
     return this.remember(res.collection || []);

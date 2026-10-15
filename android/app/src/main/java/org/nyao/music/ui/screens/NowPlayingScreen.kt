@@ -314,6 +314,8 @@ private fun trackLink(t: org.nyao.music.data.Track): String = when (t.source) {
 private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClose: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    var details by remember(t.id) { mutableStateOf<org.nyao.music.data.TrackDetails?>(null) }
+    androidx.compose.runtime.LaunchedEffect(t.id) { details = Repo.trackDetails(t) }
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onClose) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding(),
@@ -340,6 +342,12 @@ private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClos
                 Info("Альбом", t.album)
                 Info("Длительность", if (t.duration > 0) org.nyao.music.data.formatTime(t.duration) else "")
                 Info("Сервис", org.nyao.music.data.sourceName(t.source))
+                Info("Год", details?.year?.toString().orEmpty())
+                Info("Жанр", details?.genre.orEmpty())
+                Info("Лейбл", details?.label.orEmpty())
+                Info("Номер в альбоме", details?.position.orEmpty())
+                Info("Прослушиваний", details?.plays?.let { java.text.NumberFormat.getInstance(java.util.Locale("ru")).format(it) }.orEmpty())
+                Info("Возраст", if (details?.explicit == true) "18+" else "")
                 Info("ID в сервисе", t.srcId)
             }
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

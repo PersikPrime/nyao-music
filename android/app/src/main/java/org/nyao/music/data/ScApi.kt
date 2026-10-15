@@ -180,6 +180,19 @@ class ScApi(private val prefs: Prefs) {
         return pool.values.shuffled().take(size)
     }
 
+    /** Подробности трека: жанр, год, лейбл, прослушивания */
+    suspend fun trackDetails(srcId: String): TrackDetails {
+        val t = raw[srcId]?.takeIf { it.has("created_at") } ?: freshTrack(srcId)
+        val pm = t.obj("publisher_metadata")
+        return TrackDetails(
+            year = (t.str("release_date") ?: t.str("created_at"))?.take(4)?.toIntOrNull(),
+            genre = t.str("genre"),
+            label = t.str("label_name") ?: pm?.str("publisher"),
+            plays = if (t.has("playback_count")) t.optLong("playback_count") else null,
+            explicit = pm?.optBoolean("explicit") == true,
+        )
+    }
+
     /** Забыть сохранённый трек: при следующем запросе возьмём свежий (с новым track_authorization) */
     fun forget(srcId: String) {
         raw.remove(srcId)

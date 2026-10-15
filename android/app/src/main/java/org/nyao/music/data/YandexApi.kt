@@ -215,6 +215,20 @@ class YandexApi(private val prefs: Prefs) {
         }
     }
 
+    /** Подробности трека: год, жанр, лейбл, номер в альбоме, «18+» */
+    suspend fun trackDetails(trackId: String): TrackDetails {
+        val t = arr("GET", "/tracks/${trackId.substringBefore(":")}").objects().firstOrNull() ?: return TrackDetails()
+        val al = t.arr("albums").objects().firstOrNull()
+        val pos = al?.obj("trackPosition")
+        return TrackDetails(
+            year = al?.optInt("year")?.takeIf { it > 0 } ?: al?.str("releaseDate")?.take(4)?.toIntOrNull(),
+            genre = al?.str("genre"),
+            label = al?.arr("labels")?.let { a -> (0 until a.length()).mapNotNull { i -> (a.opt(i) as? JSONObject)?.str("name") ?: (a.opt(i) as? String) } }?.joinToString(", ")?.ifBlank { null },
+            position = pos?.optInt("index")?.takeIf { it > 0 }?.let { i -> "$i" + (al?.optInt("trackCount")?.takeIf { it > 0 }?.let { " из $it" } ?: "") },
+            explicit = t.str("contentWarning") == "explicit",
+        )
+    }
+
     // ---------- Медиатека ----------
 
     private suspend fun tracksByIds(ids: List<String>): List<Track> {

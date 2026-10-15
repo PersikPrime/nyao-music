@@ -551,15 +551,38 @@ function renderPlayer() {
         ${t.album ? `<span>Альбом</span><span>${esc(t.album)}</span>` : ''}
         <span>Источник</span><span>${srcName(t.source)}</span>
         <span>Откуда</span><span>${esc(player.label || '—')}</span>
+        <span id="facts-more" style="display:contents"></span>
       </div></div>` : ''}
     </aside>
   </div>`;
+  if (t) loadTrackFacts(t);
   if (state.tab === 'lyrics') renderLyrics();
   else if (state.tab === 'queue') {
     $$('#qlist .trow').forEach((r) => (r.draggable = true));
     const cur = $('#qlist .trow.cur');
     if (cur) cur.scrollIntoView({ block: 'center' });
   } else ensureLyrics().then(() => syncLyrics(true));
+}
+
+// «Об этом треке»: год, жанр, лейбл — догружаются у сервиса
+const factsCache = new Map();
+async function loadTrackFacts(t) {
+  let d = factsCache.get(t.id);
+  if (!d) {
+    d = await api.trackDetails(t).catch(() => ({}));
+    factsCache.set(t.id, d || {});
+  }
+  const el = $('#facts-more');
+  if (!el || !player.current || player.current.id !== t.id || !d) return;
+  const rows = [
+    ['Год', d.year],
+    ['Жанр', d.genre],
+    ['Лейбл', d.label],
+    ['Номер в альбоме', d.position],
+    ['Прослушиваний', Number.isFinite(d.plays) ? d.plays.toLocaleString('ru-RU') : null],
+    ['Возраст', d.explicit ? '18+' : null]
+  ].filter((r) => r[1]);
+  el.innerHTML = rows.map(([k, v]) => `<span>${k}</span><span>${esc(v)}</span>`).join('');
 }
 
 async function ensureLyrics() {

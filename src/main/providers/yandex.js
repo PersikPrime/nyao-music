@@ -238,6 +238,22 @@ export class YandexProvider {
     };
   }
 
+  /** Подробности трека для «О треке»: год, жанр, лейбл, номер в альбоме, метка «18+» */
+  async trackDetails(trackId) {
+    const res = await this.request('GET', `/tracks/${String(trackId).split(':')[0]}`);
+    const t = (Array.isArray(res) ? res[0] : res) || {};
+    const al = (t.albums || [])[0] || {};
+    const pos = al.trackPosition || {};
+    return {
+      year: al.year || (al.releaseDate ? Number(String(al.releaseDate).slice(0, 4)) : null),
+      genre: al.genre || null,
+      label: (al.labels || []).map((l) => (typeof l === 'string' ? l : l.name)).filter(Boolean).join(', ') || null,
+      position: pos.index ? `${pos.index}${al.trackCount ? ' из ' + al.trackCount : ''}` : null,
+      explicit: t.contentWarning === 'explicit' || t.explicit === true,
+      artists: (t.artists || []).map((a) => a.name)
+    };
+  }
+
   async playlistTracks(playlistId) {
     const [, owner, kind] = playlistId.split(':');
     const res = await this.request('GET', `/users/${owner}/playlists/${kind}`, { query: { 'rich-tracks': 'true' } });

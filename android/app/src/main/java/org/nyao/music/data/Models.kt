@@ -89,3 +89,13 @@ fun <T> alternate(a: List<T>, b: List<T>): List<T> {
     }
     return out
 }
+
+/** Подробности трека для «О треке» — что сервис сообщает */
+data class TrackDetails(
+    val year: Int? = null,
+    val genre: String? = null,
+    val label: String? = null,
+    val position: String? = null,
+    val plays: Long? = null,
+    val explicit: Boolean = false,
+)

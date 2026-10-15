@@ -241,6 +241,16 @@ object Repo {
         SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()))
     }
 
+    suspend fun trackDetails(t: Track): TrackDetails = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            when (t.source) {
+                SOURCE_YA -> if (ya.loggedIn) ya.trackDetails(t.srcId) else TrackDetails()
+                SOURCE_SC -> sc.trackDetails(t.srcId)
+                else -> TrackDetails()
+            }
+        }.getOrDefault(TrackDetails())
+    }
+
     suspend fun radioStart(t: Track): List<Track> = remember(radio.start(t))
     suspend fun radioMore(queueIds: List<String>): List<Track> = remember(radio.more(queueIds))
     suspend fun waveStart(): List<Track> = remember(wave.start())

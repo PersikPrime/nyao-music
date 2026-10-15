@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('nyao', {
     onFullscreen: (cb) => ipcRenderer.on('win:fullscreen', (_e, on) => cb(on))
   },
   coverColor: (url) => call('cover:color', url),
+  trackDetails: (track) => call('track:details', track),
   radio: {
     start: (track) => call('radio:start', track),
     more: (ids) => call('radio:more', ids)

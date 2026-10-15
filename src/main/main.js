@@ -380,6 +380,12 @@ function registerIpc() {
     if (info && info.playing && info.track) lastfm.nowPlaying(info.track).catch(() => {});
     return cloud.setNow(info).catch(() => {});
   });
+  handle('track:details', async (track) => {
+    if (!track) return {};
+    if (track.source === 'ya' && ya.loggedIn) return ya.trackDetails(track.srcId);
+    if (track.source === 'sc') return sc.trackDetails(track.srcId);
+    return {};
+  });
   handle('radio:start', (track) => radio.start(track));
   handle('radio:more', (ids) => radio.more(ids));
   handle('lastfm:status', () => lastfm.status());
