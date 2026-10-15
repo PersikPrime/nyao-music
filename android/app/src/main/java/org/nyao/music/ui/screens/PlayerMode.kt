@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -53,6 +54,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -281,8 +285,53 @@ fun ViewSettingsCard() {
     ) {
         Text("Вид приложения", style = MaterialTheme.typography.titleMedium)
         LayoutChoice(s.layout ?: "player", { Repo.prefs.setLayout(it) })
+        AccentChoice(s.accent) { Repo.prefs.setAccent(it) }
         SwitchRow("«Мне нравится» по сервисам", "Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud", s.splitLiked) { Repo.prefs.setSplitLiked(it) }
         if (!s.isWaveLayout) SwitchRow("Вкладка «Волна» в панели", "В режиме «Плеер» волна — плитка на главной", s.waveTab) { Repo.prefs.setWaveTab(it) }
+    }
+}
+
+/** Акцентный цвет — как выбор цветов в Android 16 */
+@Composable
+private fun AccentChoice(current: String, onPick: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column {
+            Text("Акцентный цвет", style = MaterialTheme.typography.titleSmall)
+            Text("Красит кнопки, выделение, прогресс и волну. «Из обложки» — под текущий трек.", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            org.nyao.music.ui.theme.Accent.ids.forEach { (id, label) ->
+                val on = id == current
+                Column(
+                    Modifier.clip(RoundedCornerShape(16.dp)).clickable(role = androidx.compose.ui.semantics.Role.RadioButton) { onPick(id) }
+                        .semantics { selected = on; contentDescription = "Акцент: $label" }
+                        .padding(4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    val ring = if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, androidx.compose.foundation.shape.CircleShape).padding(4.dp) else Modifier.padding(4.dp)
+                    Box(ring) {
+                        if (id == "cover") {
+                            Box(
+                                Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape).background(
+                                    androidx.compose.ui.graphics.Brush.sweepGradient(listOf(Color(0xFFFFB4A2), Color(0xFFFFD60A), Color(0xFF7CE0C3), Color(0xFF8FB4FF), Color(0xFFC6B8FF), Color(0xFFFFB4A2)))
+                                )
+                            )
+                        } else {
+                            val p = org.nyao.music.ui.theme.AccentPalette.preset(id)
+                            Row(Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape)) {
+                                Box(Modifier.weight(1f).fillMaxHeight().background(p.a))
+                                Column(Modifier.weight(1f).fillMaxHeight()) {
+                                    Box(Modifier.weight(1f).fillMaxWidth().background(p.container))
+                                    Box(Modifier.weight(1f).fillMaxWidth().background(p.hero))
+                                }
+                            }
+                        }
+                    }
+                    Text(label, style = MaterialTheme.typography.labelSmall, color = if (on) MaterialTheme.colorScheme.onSurface else NyaoColors.Muted)
+                }
+            }
+        }
     }
 }
 

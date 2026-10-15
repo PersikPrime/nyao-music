@@ -54,6 +54,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import org.nyao.music.ui.components.bouncy
 import org.nyao.music.ui.components.appear
 import androidx.compose.ui.draw.clip
@@ -203,7 +205,8 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
                         }
                     }
                     item {
-                        Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            LikesDownloadChip(model, liked)
                             PillChip("Все · ${liked.size}", filter == "all", { filter = "all" })
                             if (ya > 0) PillChip("Яндекс · $ya", filter == SOURCE_YA, { filter = SOURCE_YA })
                             if (yt > 0) PillChip("YouTube · $yt", filter == SOURCE_YT, { filter = SOURCE_YT })
@@ -357,6 +360,63 @@ private fun OfflineButton(model: AppModel, playlist: Playlist, tracks: List<Trac
             Icon(NyaoIcons.Download, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.size(8.dp))
             Text(if (have > 0) "Докачать (${can - have})" else "Скачать для офлайна")
+        }
+    }
+}
+
+/** «Скачать все лайки» — рядом с фильтрами в «Мне нравится» */
+@Composable
+private fun LikesDownloadChip(model: AppModel, liked: List<Track>) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val st by org.nyao.music.playback.Offline.state.collectAsState()
+    val id = "liked"
+    val prog = st.progress[id]
+    val can = liked.count { org.nyao.music.playback.Offline.canDownload(it) }
+    val have = liked.count { it.id in st.ids && org.nyao.music.playback.Offline.canDownload(it) }
+    if (can == 0) return
+    val done = prog == null && have >= can
+    Row(
+        Modifier.height(36.dp).bouncy().clip(RoundedCornerShape(18.dp))
+            .background(if (done) NyaoColors.S2 else NyaoColors.Tonal)
+            .clickable {
+                when {
+                    prog != null -> {
+                        org.nyao.music.playback.Offline.cancel(id)
+                        model.message("Загрузка лайков остановлена")
+                    }
+                    done -> model.message("Все лайки уже скачаны — удалить можно в «Скачанном»")
+                    else -> {
+                        org.nyao.music.playback.Offline.download(ctx, id, "Мне нравится", liked)
+                        model.message("Скачиваю лайки (${can - have}) — можно слушать дальше")
+                    }
+                }
+            }
+            .semantics { contentDescription = if (prog != null) "Скачиваю лайки, ${prog.first} из ${prog.second}. Нажми, чтобы отменить" else if (done) "Все лайки скачаны" else "Скачать все лайки" }
+            .padding(start = 12.dp, end = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (prog != null) {
+            androidx.compose.material3.CircularProgressIndicator(
+                progress = { if (prog.second == 0) 0f else prog.first / prog.second.toFloat() },
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.5.dp,
+                color = NyaoColors.Lavender,
+            )
+            Text("${prog.first} / ${prog.second}", style = MaterialTheme.typography.labelLarge, color = NyaoColors.Text, maxLines = 1)
+            Icon(NyaoIcons.Close, null, tint = NyaoColors.Muted, modifier = Modifier.size(16.dp))
+        } else {
+            Icon(if (done) NyaoIcons.DownloadDone else NyaoIcons.Download, null, tint = if (done) NyaoColors.Muted else NyaoColors.Lavender, modifier = Modifier.size(18.dp))
+            Text(
+                when {
+                    done -> "Лайки скачаны"
+                    have > 0 -> "Докачать лайки (${can - have})"
+                    else -> "Скачать все лайки"
+                },
+                style = MaterialTheme.typography.labelLarge,
+                color = if (done) NyaoColors.Muted else NyaoColors.Text,
+                maxLines = 1,
+            )
         }
     }
 }

@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
         setContent {
+            org.nyao.music.ui.theme.AccentSync()
             NyaoTheme { NyaoRoot() }
         }
     }
