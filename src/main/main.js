@@ -664,6 +664,14 @@ function registerIpc() {
   handle('stream:error', (trackId) => streams.lastError(trackId));
   handle('lyrics', (track) => findLyricsChain(track, {
     fetch: fetchFn,
+    log: (m) => {
+      console.log(m);
+      try {
+        fs.appendFileSync(path.join(app.getPath('userData'), 'lyrics-debug.log'), `${new Date().toISOString()} ${m}\n`);
+      } catch {
+        // не страшно
+      }
+    },
     ya: ya.loggedIn && up('ya') ? ya : null,
     yt: up('yt') ? yt : null,
     matchYa: async (t) => {

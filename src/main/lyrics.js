@@ -37,8 +37,8 @@ export async function findLyrics(track, fetch = globalThis.fetch) {
       const list = await tryGet(`https://lrclib.net/api/search?${new URLSearchParams({ q: `${artist} ${title}` })}`);
       data = Array.isArray(list) ? list.find((l) => l.syncedLyrics) || list[0] : null;
     }
-  } catch {
-    return null;
+  } catch (e) {
+    throw Object.assign(new Error(e.message || 'сеть'), { status: e.status });
   }
   if (!data) return null;
   if (data.syncedLyrics) return { synced: true, lines: parseLrc(data.syncedLyrics), source: 'LRCLIB' };
@@ -54,30 +54,51 @@ function plainLines(text) {
  * Лучший текст из всех источников: с таймингами лучше, чем без.
  * ya, yt — провайдеры (или null, если сервис недоступен); matchYa(track) → трек Яндекса для трека другого сервиса.
  */
-export async function findLyricsChain(track, { fetch = globalThis.fetch, ya = null, yt = null, matchYa = null } = {}) {
+export async function findLyricsChain(track, { fetch = globalThis.fetch, ya = null, yt = null, matchYa = null, log = () => {} } = {}) {
   let plain = null;
+  const diag = [];
+  const why = (e) => (e && e.status ? `ошибка ${e.status}` : `ошибка: ${String((e && e.message) || e).slice(0, 80)}`);
   const yaName = (p) => (p ? `Яндекс Музыка · ${p}` : 'Яндекс Музыка');
   // 1) Яндекс: сам трек или найденный в Яндексе такой же
   let yaId = track.source === 'ya' ? track.srcId : null;
+  if (!ya) diag.push('Яндекс: нет входа');
   if (ya && !yaId && matchYa) {
     const m = await matchYa(track).catch(() => null);
     if (m) yaId = m.srcId;
+    else diag.push('Яндекс: такого трека нет');
   }
   if (ya && yaId) {
-    const lrc = await ya.lyrics(yaId, 'LRC').catch(() => null);
-    const lines = lrc ? parseLrc(lrc.text) : [];
-    if (lines.length) return { synced: true, lines, source: yaName(lrc.provider) };
-    const txt = await ya.lyrics(yaId, 'TEXT').catch(() => null);
-    if (txt) plain = { synced: false, lines: plainLines(txt.text), source: yaName(txt.provider) };
+    try {
+      const lrc = await ya.lyrics(yaId, 'LRC');
+      const lines = lrc ? parseLrc(lrc.text) : [];
+      if (lines.length) return { synced: true, lines, source: yaName(lrc.provider) };
+      const txt = await ya.lyrics(yaId, 'TEXT');
+      if (txt) plain = { synced: false, lines: plainLines(txt.text), source: yaName(txt.provider) };
+      else diag.push('Яндекс: текста нет');
+    } catch (e) {
+      diag.push(`Яндекс: ${why(e)}`);
+      log(`[lyrics] ${track.id} Яндекс: ${e.stack || e.message}`);
+    }
   }
   // 2) LRCLIB
-  const lr = await findLyrics(track, fetch).catch(() => null);
+  let lr = null;
+  try {
+    lr = await findLyrics(track, fetch);
+  } catch (e) {
+    diag.push(`LRCLIB: ${why(e)}`);
+  }
   if (lr && lr.synced) return lr;
+  if (!lr) diag.push('LRCLIB: текста нет');
   if (!plain && lr) plain = lr;
   // 3) YouTube Music (без таймингов)
   if (!plain && yt && track.source === 'yt') {
-    const t = await yt.lyrics(track.srcId).catch(() => null);
+    const t = await yt.lyrics(track.srcId).catch((e) => {
+      diag.push(`YouTube Music: ${why(e)}`);
+      return null;
+    });
     if (t) plain = { synced: false, lines: plainLines(t), source: 'YouTube Music' };
   }
-  return plain;
+  if (plain) return plain;
+  log(`[lyrics] ${track.id} «${track.artist} — ${track.title}»: ${diag.join(' · ')}`);
+  return { synced: false, lines: [], source: null, diag };
 }

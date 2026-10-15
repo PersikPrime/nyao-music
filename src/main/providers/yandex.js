@@ -391,12 +391,12 @@ export class YandexProvider {
     try {
       r = await this.request('GET', `/tracks/${id}/lyrics`, { query: { format, timeStamp: String(ts), sign } });
     } catch (e) {
-      if (e.status === 404 || e.status === 400 || e.status === 403) return null;
+      if (e.status === 404) return null; // у трека нет текста
       throw e;
     }
     if (!r || !r.downloadUrl) return null;
     const res = await this.fetch(r.downloadUrl);
-    if (!res.ok) return null;
+    if (!res.ok) throw Object.assign(new Error(`файл текста: HTTP ${res.status}`), { status: res.status });
     const text = await res.text();
     const major = r.major && (r.major.prettyName || r.major.name);
     return text.trim() ? { text, provider: major ? String(major).replace(/^MUSIXMATCH$/i, 'Musixmatch').replace(/^LYRICFIND$/i, 'LyricFind') : null } : null;

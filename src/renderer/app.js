@@ -630,7 +630,7 @@ async function renderLyrics() {
   const el = $('#lyrics');
   if (!el || state.lyrics.id !== (player.current && player.current.id)) return;
   if (!d || !d.lines.length) {
-    el.innerHTML = '<div class="empty">Текст не найден — искали в Яндекс Музыке, LRCLIB и YouTube Music</div>';
+    el.innerHTML = `<div class="empty">Текст не найден — искали в Яндекс Музыке, LRCLIB и YouTube Music${d && d.diag && d.diag.length ? `<div class="lyr-diag">${esc(d.diag.join(' · '))}</div>` : ''}</div>`;
     return;
   }
   el.classList.toggle('plain', !d.synced);

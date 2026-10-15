@@ -794,3 +794,5 @@ body.fs-on .toast { z-index: 1000; }
 .st-hero .st-refresh { position: absolute; top: 18px; right: 18px; background: rgba(0,0,0,.35); border-color: rgba(255,255,255,.18); color: #fff; z-index: 1; }
 
 .lyr-credit { margin-top: 24px; font-size: 12px; color: var(--dim); font-weight: 400; }
+
+.lyr-diag { margin-top: 10px; font-size: 12px; color: var(--dim); }
