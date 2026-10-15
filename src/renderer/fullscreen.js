@@ -52,6 +52,7 @@ export class FullScreen {
     el.hidden = true;
     el.innerHTML = `
       <div class="fs-top">
+        <button class="fs-round fs-qbtn" data-fs="queue" aria-label="Очередь" title="Очередь" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h10M17 15v6l4-3z"/></svg></button>
         <button class="fs-round" data-fs="exit" aria-label="Выйти из полного экрана" title="Выйти из полного экрана (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
       </div>
       <div class="fs-stage">
@@ -75,7 +76,11 @@ export class FullScreen {
           <div class="fs-credit"></div>
           <button class="fs-now" data-fs="now"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>К текущей строке</button>
         </div>
-      </div>`;
+      </div>
+      <aside class="fs-queue" aria-label="Очередь">
+        <div class="fs-q-head"><span>Очередь</span><button class="fs-round" data-fs="queue" aria-label="Закрыть очередь"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+        <div class="fs-q-list"></div>
+      </aside>`;
     document.body.appendChild(el);
     this.el = el;
     const $ = (s) => el.querySelector(s);
@@ -86,6 +91,11 @@ export class FullScreen {
     el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-fs]');
       const line = e.target.closest('[data-t]');
+      const qi = e.target.closest('[data-qi]');
+      if (qi) {
+        player.playAt(Number(qi.dataset.qi));
+        return;
+      }
       if (line) {
         player.seek(Number(line.dataset.t));
         return;
@@ -93,6 +103,7 @@ export class FullScreen {
       if (!b) return;
       const a = b.dataset.fs;
       if (a === 'exit') this.close();
+      else if (a === 'queue') this.toggleQueue();
       else if (a === 'now') this.collapse();
       else if (a === 'play') player.toggle();
       else if (a === 'prev') player.prev();
@@ -129,6 +140,12 @@ export class FullScreen {
     if (!this.open || !this.el) return;
     const left = this.$('.fs-left');
     if (left) this.el.style.setProperty('--fs-lh', `${left.offsetHeight}px`);
+    // без текста обложка встаёт по центру: сдвиг от её места в сетке до середины экрана
+    const stage = this.$('.fs-stage');
+    if (left && stage) {
+      const ls = left.offsetLeft + left.offsetWidth / 2;
+      this.el.style.setProperty('--fs-shift', `${Math.round(stage.clientWidth / 2 - ls)}px`);
+    }
     const box = this.$('.fs-lyrics');
     if (box && !box.classList.contains('plain')) {
       const pad = `${Math.round(box.clientHeight / 2)}px`;
@@ -160,6 +177,48 @@ export class FullScreen {
     this.layout();
     this.lastLine = -2;
     this.tick(true);
+  }
+
+  /** Очередь — панель справа поверх текста; та же кнопка или Esc закрывают */
+  toggleQueue(on = !this.queueOpen) {
+    this.queueOpen = !!on;
+    if (!this.el) return;
+    this.el.classList.toggle('queue', this.queueOpen);
+    this.el.querySelectorAll('[data-fs="queue"]').forEach((b) => b.setAttribute('aria-pressed', String(this.queueOpen)));
+    if (this.queueOpen) this.renderQueue(true);
+  }
+
+  renderQueue(scroll) {
+    if (!this.el || !this.queueOpen) return;
+    const { player } = this.d;
+    const q = player.queue || [];
+    const from = Math.max(0, player.index - 3);
+    const items = q.slice(from, from + 150);
+    const list = this.$('.fs-q-list');
+    const key = `${player.index}|${q.length}|${q[player.index] && q[player.index].id}`;
+    if (this.queueKey === key && !scroll) return;
+    this.queueKey = key;
+    list.innerHTML = items.length ? items.map((t, k) => {
+      const i = from + k;
+      return `<button class="fs-q-row${i === player.index ? ' cur' : ''}${i < player.index ? ' past' : ''}" data-qi="${i}"><span class="fs-q-art">${t.cover ? `<img src="${esc(t.cover)}" alt="" loading="lazy">` : ''}</span><span class="fs-q-meta"><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></span>${t.duration ? `<span class="fs-q-dur">${fmt(t.duration)}</span>` : ''}</button>`;
+    }).join('') : `<div class="fs-q-empty">${player.mode === 'wave' ? 'Моя волна подберёт следующий трек сама' : 'Очередь пуста'}</div>`;
+    if (scroll) {
+      const cur = list.querySelector('.cur');
+      if (cur) list.scrollTop = Math.max(0, cur.offsetTop - 80);
+    }
+  }
+
+  /** Esc: сначала закрывает очередь, потом сам полный экран */
+  escape() {
+    if (this.queueOpen) {
+      this.toggleQueue(false);
+      return true;
+    }
+    if (this.open) {
+      this.close();
+      return true;
+    }
+    return false;
   }
 
   toggle() {
@@ -215,6 +274,7 @@ export class FullScreen {
     $('.fs-like').innerHTML = liked ? this.d.icons.heartOn : this.d.icons.heart;
     $('.fs-like').classList.toggle('on', liked);
     if (!player.playing) this.el.classList.remove('idle');
+    this.renderQueue();
     if (this.trackId === t.id) return this.tick();
     this.trackId = t.id;
     this.lastLine = -2;
@@ -254,10 +314,19 @@ export class FullScreen {
     lb.title = avail ? (this.showLyrics ? 'Скрыть текст' : 'Показать текст') : d === undefined ? 'Ищу текст…' : 'Для этого трека текста нет';
     this.$('.fs-credit').textContent = has ? `Текст: ${d.source || 'LRCLIB'}` : '';
     if (!has) {
-      box.innerHTML = '';
+      // скрыли кнопкой — текст остаётся под обложкой, чтобы уехать за неё анимацией
+      if (!avail) box.innerHTML = '';
       return;
     }
     box.classList.toggle('plain', !d.synced);
+    if (box.dataset.track === this.trackId && box.childElementCount) {
+      requestAnimationFrame(() => {
+        this.layout();
+        this.tick(true);
+      });
+      return;
+    }
+    box.dataset.track = this.trackId;
     box.innerHTML = (d.synced ? '' : '<div class="fs-plain-label">Текст без таймингов</div>') +
       d.lines.map((l, i) => `<p data-i="${i}" ${d.synced ? `data-t="${l.time}"` : ''}>${esc(l.text) || '♪'}</p>`).join('');
     this.lastLine = -2;

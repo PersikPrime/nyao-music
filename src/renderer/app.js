@@ -34,7 +34,7 @@ const state = {
   home: null,
   lib: { lists: null, filter: 'all', selected: 'liked', tracks: null, counts: null },
   search: { q: '', res: null, filter: 'all', loading: false },
-  tab: 'cover',
+  drawer: null,
   lyrics: { id: null, data: undefined },
   artist: { ref: null, data: null, error: null, kind: 'album' },
   album: { ref: null, data: null, error: null },
@@ -175,7 +175,6 @@ const NAV = [
   ['home', 'Главная', 'M4 10.5 12 4l8 6.5V20h-5v-6H9v6H4z'],
   ['search', 'Поиск', 'M11 4.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13M20 20l-4.2-4.2'],
   ['wave', 'Моя волна', 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0'],
-  ['player', 'Сейчас играет', 'M9 18V6l11-2v12M9 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0M20 16a3 3 0 1 1-6 0a3 3 0 1 1 6 0'],
   ['library', 'Медиатека', 'M5 4v16M10 4v16M15 5l4 15'],
   ['together', 'Вместе', 'M9 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.6a3.4 3.4 0 0 1 0 6.3M18 14.8c1.8.7 3 2.4 3.5 5.2'],
   ['stats', 'Итоги', 'M5 20V11M12 20V5M19 20v-6']
@@ -332,6 +331,8 @@ function renderAccounts() {
 }
 
 function go(route, params = {}, push = true) {
+  // «Сейчас играет» больше не вкладка (0.7.43): старые ссылки открывают выезжающую панель
+  if (route === 'player') return openDrawer('info');
   if (push && (state.route !== route || JSON.stringify(state.params) !== JSON.stringify(params))) {
     state.stack.push({ route: state.route, params: state.params });
     if (state.stack.length > 30) state.stack.shift();
@@ -345,7 +346,6 @@ function go(route, params = {}, push = true) {
   if (route === 'library') loadLibrary();
   if (route === 'artist') loadArtist(params.ref);
   if (route === 'album') loadAlbum(params.ref);
-  if (route === 'player') loadNpArtist();
   if (route === 'settings' && state.cloud.loggedIn) loadCloudDevices();
   if (route === 'together') loadRoom();
   if (route === 'stats') loadStats();
@@ -507,7 +507,7 @@ function renderWave() {
       <div class="center">
         <h1 class="wave-title">Моя волна</h1>
         <button class="wave-play" data-action="wave-toggle" aria-label="${playing ? 'Пауза' : 'Слушать волну'}">${playing ? ICONS.pauseBig : ICONS.playBig}</button>
-        ${waveOn && t ? `<button class="now-pill" data-action="go" data-route="player">${coverHtml(t, '')}<span class="ttl">${esc(t.title)}</span><span class="muted">${esc(t.artist)}</span>${badge(t.source)}</button>` : ''}
+        ${waveOn && t ? `<button class="now-pill" data-action="fullscreen" title="Полный экран">${coverHtml(t, '')}<span class="ttl">${esc(t.title)}</span><span class="muted">${esc(t.artist)}</span>${badge(t.source)}</button>` : ''}
       </div>
     </section>
     <section class="wave-panels">${waveControlsHtml()}</section>
@@ -520,65 +520,80 @@ function renderWave() {
   new Ribbon($('#wave-ribbon'), { lines: 18, cy: 0.5, amp: 1, accent: '#C6B8FF' });
 }
 
-function renderPlayer() {
+// ---------- Выезжающая панель справа: «Об исполнителе / Далее / Об этом треке» и очередь ----------
+// Открывается кнопками в плеере, закрывается той же кнопкой, крестиком или Esc
+function openDrawer(mode = 'info') {
+  state.drawer = mode;
+  const el = $('#drawer');
+  el.classList.add('open');
+  el.setAttribute('aria-hidden', 'false');
+  el.removeAttribute('inert');
+  el.setAttribute('aria-label', mode === 'queue' ? 'Очередь' : 'Об исполнителе и треке');
+  renderDrawer(true);
+  if (mode === 'info') loadNpArtist();
+  syncDrawerButtons();
+}
+function closeDrawer() {
+  if (!state.drawer) return false;
+  state.drawer = null;
+  const el = $('#drawer');
+  el.classList.remove('open');
+  el.setAttribute('aria-hidden', 'true');
+  el.setAttribute('inert', '');
+  syncDrawerButtons();
+  return true;
+}
+function toggleDrawer(mode) {
+  if (state.drawer === mode) closeDrawer();
+  else openDrawer(mode);
+}
+function syncDrawerButtons() {
+  $('#pb-panel').classList.toggle('on', state.drawer === 'info');
+  $('#pb-panel').setAttribute('aria-pressed', String(state.drawer === 'info'));
+  $('#pb-queue').classList.toggle('on', state.drawer === 'queue');
+  $('#pb-queue').setAttribute('aria-pressed', String(state.drawer === 'queue'));
+}
+function queueListHtml() {
+  return tracksHtml(player.queue, 'queue', { action: 'q-play' });
+}
+function renderDrawer(scrollToCur) {
+  const el = $('#drawer');
+  if (!state.drawer || !el) return;
   const t = player.current;
-  const tabs = [['cover', 'Обложка'], ['lyrics', 'Текст'], ['queue', 'Очередь']];
-  let body = '';
-  if (state.tab === 'cover') {
-    body = t ? `<div class="np-cover">
-      <div class="np-art-wrap" data-dbl="fullscreen" title="Двойной клик — полный экран">${coverHtml(t, 'np-art')}</div>
-      <div class="np-info">
-        <div class="src-chips"><span class="src-chip">${badge(t.source)}Играет из ${srcName(t.source, true)}</span>${player.label ? `<span class="src-chip" style="padding-left:10px">${esc(player.label)}</span>` : ''}</div>
-        <h1>${esc(t.title)}</h1>
-        <div class="by">${t.artistRef ? `<button class="link-plain" data-action="open-artist" data-ref="${esc(t.artistRef)}">${esc(t.artist)}</button>` : esc(t.artist)}${t.album ? ` <span class="muted">·</span> ${t.albumRef ? `<button class="link-plain" data-action="open-album" data-ref="${esc(t.albumRef)}">${esc(t.album)}</button>` : esc(t.album)}` : ''}</div>
-        <div class="row-actions">
-          <button class="btn ${player.liked.has(t.id) ? 'primary' : ''}" data-action="like-cur">${player.liked.has(t.id) ? ICONS.heartOn : ICONS.heart}${player.liked.has(t.id) ? 'В «Мне нравится»' : 'Нравится'}</button>
-          <button class="btn" data-action="cur-more">${ICONS.plus}В микс</button>
-          ${player.mode === 'wave' ? `<button class="btn" data-action="go" data-route="wave">${ICONS.tune}Волна</button>` : ''}
-          <button class="btn" data-action="fullscreen">${FS_ICON}Полный экран</button>
-        </div>
-        <div class="lyric-peek" data-action="tab" data-v="lyrics"><span class="eyebrow">Текст</span><span class="cur" id="peek-cur">…</span><span class="nx" id="peek-nx"></span></div>
-      </div>
-    </div>` : `<div class="empty">Ничего не играет.<br><br><button class="btn primary" data-action="wave-toggle">${ICONS.play}Моя волна</button></div>`;
-  } else if (state.tab === 'lyrics') {
-    body = '<div class="lyrics" id="lyrics"></div>';
-  } else {
-    body = `<div class="qwrap"><div class="eyebrow" style="margin-bottom:8px">${player.mode === 'wave' ? 'Моя волна · без конца' : player.queue.length ? `Очередь · ${player.queue.length}` : 'Очередь пуста'}</div><div id="qlist">${tracksHtml(player.queue, 'queue', { action: 'q-play' })}</div></div>`;
+  const head = (title) => `<div class="dr-head"><span class="dr-title">${title}</span><button class="ic dr-close" data-action="drawer-close" aria-label="Закрыть панель" title="Закрыть (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
+  if (state.drawer === 'queue') {
+    const label = player.mode === 'wave' ? 'Моя волна · без конца' : player.queue.length ? `${player.label ? esc(player.label) + ' · ' : ''}${player.queue.length}` : 'Очередь пуста';
+    el.innerHTML = `${head('Очередь')}<div class="dr-sub">${label}</div><div class="dr-scroll"><div id="qlist">${queueListHtml()}</div></div>`;
+    $$('#qlist .trow', el).forEach((r) => (r.draggable = true));
+    if (scrollToCur) {
+      const cur = $('#qlist .trow.cur', el);
+      if (cur) cur.scrollIntoView({ block: 'center' });
+    }
+    return;
   }
   const nx = player.queue[player.index + 1];
-  const a = state.npArtist.data;
-  view.innerHTML = `<div class="np">
-    <div class="np-main">
-      <div class="np-tabs" role="tablist">${tabs.map(([v, l]) => `<button role="tab" aria-selected="${state.tab === v}" class="${state.tab === v ? 'on' : ''}" data-action="tab" data-v="${v}">${l}</button>`).join('')}</div>
-      <div class="np-body" id="np-body">${body}</div>
+  const a = state.npArtist.data && t && state.npArtist.ref === t.artistRef ? state.npArtist.data : null;
+  el.innerHTML = `${head('Сейчас играет')}<div class="dr-scroll">
+    ${t ? `<div class="np-card artist" ${t.artistRef ? `data-action="open-artist" data-ref="${esc(t.artistRef)}"` : ''}>
+      <div class="ph">${a && a.cover ? `<img src="${esc(a.cover)}" alt="">` : ''}<span class="eyebrow" style="position:absolute;left:16px;top:14px;color:#fff">Об исполнителе</span></div>
+      <div class="bd"><span style="font-size:18px;font-weight:700">${esc(a ? a.name : t.artist)}</span>
+      <span class="muted" style="font-size:12px">${a ? [a.refs.ya ? 'есть в Яндексе' : '', a.refs.yt ? 'есть в YouTube Music' : ''].filter(Boolean).join(' · ') : t.artistRef ? 'Загружаю…' : ''}</span>
+      ${a && a.description ? `<span class="np-desc">${esc(a.description)}</span>` : ''}</div>
+    </div>` : '<div class="empty">Ничего не играет.<br><br><button class="btn primary" data-action="wave-toggle">' + ICONS.play + 'Моя волна</button></div>'}
+    <div class="np-card">
+      <div class="h"><span>Далее</span><button class="link" data-action="drawer-queue">Открыть очередь</button></div>
+      ${nx ? `<div class="np-next" data-action="q-play" data-i="${player.index + 1}">${coverHtml(nx, 'xs')}<div style="flex:1;min-width:0"><div class="np-next-t">${esc(nx.title)}</div><div class="muted" style="font-size:12px">${esc(nx.artist)}</div></div>${badge(nx.source)}</div>` : '<span class="muted" style="font-size:13px">Дальше пусто</span>'}
     </div>
-    <aside class="np-aside">
-      ${t ? `<div class="np-card artist" ${t.artistRef ? `data-action="open-artist" data-ref="${esc(t.artistRef)}"` : ''}>
-        <div class="ph">${a && a.cover ? `<img src="${esc(a.cover)}" alt="">` : ''}<span class="eyebrow" style="position:absolute;left:16px;top:14px;color:#fff">Об исполнителе</span></div>
-        <div class="bd"><span style="font-size:18px;font-weight:700">${esc(a ? a.name : t.artist)}</span>
-        <span class="muted" style="font-size:12px">${a ? [a.refs.ya ? 'есть в Яндексе' : '', a.refs.yt ? 'есть в YouTube Music' : ''].filter(Boolean).join(' · ') : 'Загружаю…'}</span>
-        ${a && a.description ? `<span style="font-size:13px;color:var(--text2);line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(a.description)}</span>` : ''}</div>
-      </div>` : ''}
-      <div class="np-card">
-        <div class="h"><span>Далее</span><button class="link" data-action="tab" data-v="queue">Открыть очередь</button></div>
-        ${nx ? `<div style="display:flex;align-items:center;gap:12px;cursor:pointer" data-action="q-play" data-i="${player.index + 1}">${coverHtml(nx, 'xs')}<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nx.title)}</div><div class="muted" style="font-size:12px">${esc(nx.artist)}</div></div>${badge(nx.source)}</div>` : '<span class="muted" style="font-size:13px">Дальше пусто</span>'}
-      </div>
-      ${t ? `<div class="np-card"><div class="h"><span>Об этом треке</span></div><div class="facts">
-        <span>Исполнитель</span><span>${esc(t.artist)}</span>
-        ${t.album ? `<span>Альбом</span><span>${esc(t.album)}</span>` : ''}
-        <span>Источник</span><span>${srcName(t.source)}</span>
-        <span>Откуда</span><span>${esc(player.label || '—')}</span>
-        <span id="facts-more" style="display:contents"></span>
-      </div></div>` : ''}
-    </aside>
+    ${t ? `<div class="np-card"><div class="h"><span>Об этом треке</span></div><div class="facts">
+      <span>Название</span><span>${esc(t.title)}</span>
+      <span>Исполнитель</span><span>${esc(t.artist)}</span>
+      ${t.album ? `<span>Альбом</span><span>${t.albumRef ? `<button class="link-plain" data-action="open-album" data-ref="${esc(t.albumRef)}">${esc(t.album)}</button>` : esc(t.album)}</span>` : ''}
+      <span>Источник</span><span>${srcName(t.source)}</span>
+      <span>Откуда</span><span>${esc(player.label || '—')}</span>
+      <span id="facts-more" style="display:contents"></span>
+    </div></div>` : ''}
   </div>`;
   if (t) loadTrackFacts(t);
-  if (state.tab === 'lyrics') renderLyrics();
-  else if (state.tab === 'queue') {
-    $$('#qlist .trow').forEach((r) => (r.draggable = true));
-    const cur = $('#qlist .trow.cur');
-    if (cur) cur.scrollIntoView({ block: 'center' });
-  } else ensureLyrics().then(() => syncLyrics(true));
 }
 
 // «Об этом треке»: год, жанр, лейбл — догружаются у сервиса
@@ -615,55 +630,6 @@ function ensureLyrics() {
     state.lyrics = { id, data: undefined, promise };
   }
   return state.lyrics.promise;
-}
-
-async function renderLyrics() {
-  const box = $('#lyrics');
-  const t = player.current;
-  if (!box) return;
-  if (!t) {
-    box.innerHTML = '<div class="empty">Ничего не играет</div>';
-    return;
-  }
-  if (state.lyrics.id !== t.id || state.lyrics.data === undefined) box.innerHTML = '<div class="empty">Ищу текст…</div>';
-  const d = await ensureLyrics();
-  const el = $('#lyrics');
-  if (!el || state.lyrics.id !== (player.current && player.current.id)) return;
-  if (!d || !d.lines.length) {
-    el.innerHTML = `<div class="empty">Текст не найден — искали в Яндекс Музыке, LRCLIB и YouTube Music${d && d.diag && d.diag.length ? `<div class="lyr-diag">${esc(d.diag.join(' · '))}</div>` : ''}</div>`;
-    return;
-  }
-  el.classList.toggle('plain', !d.synced);
-  el.innerHTML = d.lines.map((l, i) => `<p data-i="${i}" ${d.synced ? `data-action="lyric-seek" data-t="${l.time}"` : ''}>${esc(l.text) || '♪'}</p>`).join('') + `<div class="lyr-credit">Текст: ${esc(d.source || 'LRCLIB')}</div>`;
-  syncLyrics(true);
-}
-
-let lastLyric = -1;
-function syncLyrics(force) {
-  const d = state.lyrics.data;
-  if (!d || !d.synced) {
-    const pc = $('#peek-cur');
-    if (pc) pc.textContent = d === null || (d && !d.lines.length) ? 'Текст не найден' : d && !d.synced ? d.lines[0].text : '…';
-    return;
-  }
-  const time = player.audio.currentTime + 0.25;
-  let idx = -1;
-  for (let i = 0; i < d.lines.length; i++) if (d.lines[i].time <= time) idx = i;
-  if (idx === lastLyric && !force) return;
-  lastLyric = idx;
-  const pc = $('#peek-cur');
-  if (pc) {
-    pc.textContent = (d.lines[idx] && d.lines[idx].text) || '♪';
-    $('#peek-nx').textContent = (d.lines[idx + 1] && d.lines[idx + 1].text) || '';
-  }
-  const el = $('#lyrics');
-  if (!el) return;
-  $$('p', el).forEach((p, i) => {
-    p.classList.toggle('on', i === idx);
-    p.classList.toggle('past', i < idx);
-  });
-  const on = el.querySelector('p.on');
-  if (on) on.scrollIntoView({ block: 'center', behavior: force ? 'auto' : 'smooth' });
 }
 
 function libraryCounts() {
@@ -1287,7 +1253,7 @@ function pushRpc() {
   }, 400);
 }
 
-const RENDER = { home: renderHome, wave: renderWave, player: renderPlayer, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList };
+const RENDER = { home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList };
 
 // ---------- Загрузка данных ----------
 async function loadStatus() {
@@ -1411,7 +1377,7 @@ async function loadNpArtist() {
     const data = await fetchArtist(ref);
     if (state.npArtist.ref !== ref) return;
     state.npArtist.data = data;
-    if (state.route === 'player') renderPlayer();
+    if (state.drawer === 'info') renderDrawer();
   } catch {
     // карточка исполнителя просто останется без фото
   }
@@ -1419,7 +1385,7 @@ async function loadNpArtist() {
 
 async function setWave(patch) {
   state.settings = await api.settings.set(patch);
-  if (['home', 'wave', 'player', 'settings'].includes(state.route)) RENDER[state.route]();
+  if (['home', 'wave', 'settings'].includes(state.route)) RENDER[state.route]();
   if (player.mode === 'wave') {
     toast('Перенастраиваю волну…');
     player.refreshWave().catch((e) => toast(e.message, true));
@@ -1427,11 +1393,15 @@ async function setWave(patch) {
 }
 
 // ---------- Меню «⋯» ----------
-function openMenu(x, y, track, queueIndex = -1) {
+function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
   const menu = $('#menu');
   const mixes = (state.lib.lists || []).filter((p) => p.source === 'mix');
   const inQueue = queueIndex > -1 && queueIndex !== player.index;
-  menu.innerHTML = `
+  menu.innerHTML = addOnly ? `
+    <div class="lbl">Добавить «${esc(track.title)}»</div>
+    ${mixes.map((m) => `<button data-m="mix" data-id="${esc(m.id)}">${esc(m.title)}</button>`).join('') || '<div class="lbl" style="text-transform:none;letter-spacing:0">Миксов пока нет</div>'}
+    <button data-m="newmix">${ICONS.plus} Новый микс…</button>
+    <button data-m="next">Играть следующим</button>` : `
     <button data-m="next">Играть следующим</button>
     <button data-m="last">В конец очереди</button>
     ${inQueue ? '<button data-m="remove">Убрать из очереди</button>' : ''}
@@ -1444,8 +1414,9 @@ function openMenu(x, y, track, queueIndex = -1) {
     <button data-m="newmix">${ICONS.plus} Новый микс…</button>`;
   menu.hidden = false;
   const r = menu.getBoundingClientRect();
-  menu.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`;
-  menu.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
+  menu.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8))}px`;
+  // из плеера меню раскрывается вверх, над кнопкой
+  menu.style.top = `${Math.max(8, addOnly ? y - r.height : Math.min(y, innerHeight - r.height - 8))}px`;
   menu.onclick = async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -2069,7 +2040,6 @@ async function handleAction(el, e) {
       break;
     case 'like-cur':
       await player.toggleLike();
-      if (state.route === 'player') renderPlayer();
       break;
     case 'q-play':
       player.playAt(Number(el.dataset.i));
@@ -2321,8 +2291,14 @@ async function handleAction(el, e) {
       renderSearch();
       break;
     case 'tab':
-      state.tab = el.dataset.v;
-      renderPlayer();
+      if (el.dataset.v === 'lyrics') fullscreen.show();
+      else openDrawer(el.dataset.v === 'queue' ? 'queue' : 'info');
+      break;
+    case 'drawer-close':
+      closeDrawer();
+      break;
+    case 'drawer-queue':
+      openDrawer('queue');
       break;
     case 'lyric-seek':
       player.seek(Number(el.dataset.t));
@@ -2365,6 +2341,18 @@ view.addEventListener('click', async (e) => {
   if (!el || !view.contains(el)) return;
   try {
     await handleAction(el, e);
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
+$('#drawer').addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  try {
+    await handleAction(el, e);
+    // перешли к исполнителю или альбому — панель уступает место странице
+    if (['open-artist', 'open-album'].includes(el.dataset.action)) closeDrawer();
   } catch (err) {
     toast(err.message, true);
   }
@@ -2502,26 +2490,65 @@ $('#pb-repeat').onclick = () => {
   renderBar();
 };
 $('#pb-like').onclick = () => player.toggleLike();
-$('#pb-coverbtn').onclick = () => {
-  state.tab = 'cover';
-  go('player');
-};
+$('#pb-coverbtn').onclick = () => fullscreen.show();
 $('#pb-title').onclick = () => {
   const t = player.current;
   if (t && t.albumRef) go('album', { ref: t.albumRef });
-  else go('player');
+  else fullscreen.show();
 };
 $('#pb-sub').addEventListener('click', (e) => {
   const el = e.target.closest('[data-action="open-artist"]');
   if (el) go('artist', { ref: el.dataset.ref });
 });
-const npOpen = (tab) => () => {
-  state.tab = tab;
-  go('player');
+$('#pb-panel').onclick = () => toggleDrawer('info');
+$('#pb-queue').onclick = () => toggleDrawer('queue');
+$('#pb-radio').onclick = () => startTrackRadio();
+$('#pb-add').onclick = async (e) => {
+  const t = player.current;
+  if (!t) return toast('Сейчас ничего не играет');
+  const r = e.currentTarget.getBoundingClientRect();
+  if (!state.lib.lists) await loadLibrary().catch(() => {});
+  openMenu(r.left, r.top - 8, t, -1, { addOnly: true });
 };
-$('#pb-np').onclick = npOpen('cover');
-$('#pb-lyrics').onclick = npOpen('lyrics');
-$('#pb-queue').onclick = npOpen('queue');
+$('#pb-more').onclick = (e) => openBarMore(e.currentTarget.getBoundingClientRect());
+async function startTrackRadio() {
+  const t = player.current;
+  if (!t) return toast('Сейчас ничего не играет');
+  try {
+    await player.startRadio(t);
+    toast(`Волна по треку «${t.title}»`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+// Узкое окно: то, что не влезло в плеер, — в меню «⋯»
+function openBarMore(r) {
+  const menu = $('#menu');
+  const rep = player.repeat || 'off';
+  menu.innerHTML = `
+    <button data-m="radio">Волна по треку</button>
+    <button data-m="full">Полный экран</button>
+    <button data-m="shuffle">${player.shuffle ? 'Не перемешивать' : 'Перемешать'}</button>
+    <button data-m="repeat">Повтор: ${{ off: 'выключен', all: 'плейлист', one: 'трек' }[rep] || 'выключен'}</button>
+    <button data-m="queue">Очередь</button>
+    <button data-m="connect">Устройства и «Слушать вместе»</button>`;
+  menu.hidden = false;
+  const m = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(r.right - m.width, innerWidth - m.width - 8))}px`;
+  menu.style.top = `${Math.max(8, r.top - m.height - 8)}px`;
+  menu.onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    menu.hidden = true;
+    const k = b.dataset.m;
+    if (k === 'radio') startTrackRadio();
+    else if (k === 'full') fullscreen.show();
+    else if (k === 'shuffle') $('#pb-shuffle').click();
+    else if (k === 'repeat') $('#pb-repeat').click();
+    else if (k === 'queue') toggleDrawer('queue');
+    else if (k === 'connect') $('#pb-connect').click();
+  };
+}
 const seekEl = $('#pb-seek');
 seekEl.addEventListener('input', () => {
   seeking = true;
@@ -2543,23 +2570,22 @@ volEl.addEventListener('input', () => {
 
 player.addEventListener('track', () => {
   renderBar();
-  lastLyric = -1;
-  if (state.route === 'player') {
-    renderPlayer();
-    loadNpArtist();
-  } else if (state.route === 'home' || state.route === 'wave' || state.route === 'album' || state.route === 'artist') RENDER[state.route]();
+  if (state.drawer) {
+    renderDrawer(state.drawer === 'queue');
+    if (state.drawer === 'info') loadNpArtist();
+  }
+  if (state.route === 'home' || state.route === 'wave' || state.route === 'album' || state.route === 'artist') RENDER[state.route]();
   else $$('.trow.cur').forEach((r) => r.classList.remove('cur'));
 });
 player.addEventListener('queue', () => {
-  if (state.route === 'player' && state.tab === 'queue') {
-    const q = $('#qlist');
-    if (q) {
-      const top = q.parentElement.parentElement.scrollTop;
-      q.innerHTML = tracksHtml(player.queue, 'queue', { action: 'q-play' });
-      $$('.trow', q).forEach((r) => (r.draggable = true));
-      q.parentElement.parentElement.scrollTop = top;
-    }
-  }
+  if (state.drawer === 'queue') {
+    const sc = $('#drawer .dr-scroll');
+    const top = sc ? sc.scrollTop : 0;
+    renderDrawer();
+    const sc2 = $('#drawer .dr-scroll');
+    if (sc2) sc2.scrollTop = top;
+  } else if (state.drawer === 'info') renderDrawer();
+  if (fullscreen.open) fullscreen.renderQueue();
 });
 player.addEventListener('state', () => {
   renderBar();
@@ -2568,7 +2594,6 @@ player.addEventListener('state', () => {
 });
 player.addEventListener('time', () => {
   updateTime();
-  if (state.route === 'player' && state.tab !== 'queue') syncLyrics(false);
 });
 const fullscreen = new FullScreen({
   player,
@@ -2690,9 +2715,17 @@ document.addEventListener('keydown', (e) => {
     fullscreen.toggle();
     return;
   }
-  if (e.code === 'Escape' && fullscreen.open) {
-    fullscreen.close();
-    return;
+  if (e.code === 'Escape') {
+    if (!$('#menu').hidden) {
+      $('#menu').hidden = true;
+      return;
+    }
+    if (fullscreen.escape()) return;
+    if (!$('#connect').hidden) {
+      $('#connect').hidden = true;
+      return;
+    }
+    if (closeDrawer()) return;
   }
   if (e.code === 'Space') {
     e.preventDefault();
@@ -2995,28 +3028,28 @@ function openMixBuilder() {
 
 // Очередь: перетаскивание строк мышью
 let dragFrom = -1;
-view.addEventListener('dragstart', (e) => {
+document.addEventListener('dragstart', (e) => {
   const row = e.target.closest && e.target.closest('#qlist .trow');
   if (!row) return;
   dragFrom = Number(row.dataset.i);
   row.classList.add('dragging');
   if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
 });
-view.addEventListener('dragover', (e) => {
+document.addEventListener('dragover', (e) => {
   const row = e.target.closest && e.target.closest('#qlist .trow');
   if (!row || dragFrom < 0) return;
   e.preventDefault();
   $$('#qlist .trow.drop').forEach((r) => r.classList.remove('drop'));
   row.classList.add('drop');
 });
-view.addEventListener('drop', (e) => {
+document.addEventListener('drop', (e) => {
   const row = e.target.closest && e.target.closest('#qlist .trow');
   if (!row || dragFrom < 0) return;
   e.preventDefault();
   player.move(dragFrom, Number(row.dataset.i));
   dragFrom = -1;
 });
-view.addEventListener('dragend', () => {
+document.addEventListener('dragend', () => {
   dragFrom = -1;
   $$('#qlist .trow.dragging, #qlist .trow.drop').forEach((r) => r.classList.remove('dragging', 'drop'));
 });
