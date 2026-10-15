@@ -556,6 +556,7 @@ function renderPlayer() {
   </div>`;
   if (state.tab === 'lyrics') renderLyrics();
   else if (state.tab === 'queue') {
+    $$('#qlist .trow').forEach((r) => (r.draggable = true));
     const cur = $('#qlist .trow.cur');
     if (cur) cur.scrollIntoView({ block: 'center' });
   } else ensureLyrics().then(() => syncLyrics(true));
@@ -1268,11 +1269,15 @@ async function setWave(patch) {
 }
 
 // ---------- Меню «⋯» ----------
-function openMenu(x, y, track) {
+function openMenu(x, y, track, queueIndex = -1) {
   const menu = $('#menu');
   const mixes = (state.lib.lists || []).filter((p) => p.source === 'mix');
+  const inQueue = queueIndex > -1 && queueIndex !== player.index;
   menu.innerHTML = `
     <button data-m="next">Играть следующим</button>
+    <button data-m="last">В конец очереди</button>
+    ${inQueue ? '<button data-m="remove">Убрать из очереди</button>' : ''}
+    <button data-m="radio">Похожее · радио по треку</button>
     <button data-m="like">${player.liked.has(track.id) ? 'Убрать из «Мне нравится»' : 'В «Мне нравится»'}</button>
     ${track.artistRef ? '<button data-m="artist">Открыть исполнителя</button>' : ''}
     ${track.albumRef ? '<button data-m="album">Открыть альбом</button>' : ''}
@@ -1291,6 +1296,13 @@ function openMenu(x, y, track) {
       if (b.dataset.m === 'next') {
         player.enqueueNext(track);
         toast('Будет играть следующим');
+      } else if (b.dataset.m === 'last') {
+        player.enqueueLast(track);
+        toast('Добавлено в конец очереди');
+      } else if (b.dataset.m === 'remove') {
+        player.removeAt(queueIndex);
+      } else if (b.dataset.m === 'radio') {
+        await player.startRadio(track);
       } else if (b.dataset.m === 'like') {
         await player.toggleLike(track);
       } else if (b.dataset.m === 'artist') {
@@ -1379,7 +1391,7 @@ async function handleAction(el, e) {
     }
     case 'row-more': {
       e.stopPropagation();
-      openMenu(e.clientX, e.clientY, lists[el.dataset.list][Number(el.dataset.i)]);
+      openMenu(e.clientX, e.clientY, lists[el.dataset.list][Number(el.dataset.i)], el.dataset.list === 'queue' ? Number(el.dataset.i) : -1);
       break;
     }
     case 'cur-more':
@@ -1802,6 +1814,7 @@ player.addEventListener('queue', () => {
     if (q) {
       const top = q.parentElement.parentElement.scrollTop;
       q.innerHTML = tracksHtml(player.queue, 'queue', { action: 'q-play' });
+      $$('.trow', q).forEach((r) => (r.draggable = true));
       q.parentElement.parentElement.scrollTop = top;
     }
   }
@@ -2184,6 +2197,34 @@ function openMixBuilder() {
     else openOnboarding();
   }
 })();
+
+// Очередь: перетаскивание строк мышью
+let dragFrom = -1;
+view.addEventListener('dragstart', (e) => {
+  const row = e.target.closest && e.target.closest('#qlist .trow');
+  if (!row) return;
+  dragFrom = Number(row.dataset.i);
+  row.classList.add('dragging');
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+});
+view.addEventListener('dragover', (e) => {
+  const row = e.target.closest && e.target.closest('#qlist .trow');
+  if (!row || dragFrom < 0) return;
+  e.preventDefault();
+  $$('#qlist .trow.drop').forEach((r) => r.classList.remove('drop'));
+  row.classList.add('drop');
+});
+view.addEventListener('drop', (e) => {
+  const row = e.target.closest && e.target.closest('#qlist .trow');
+  if (!row || dragFrom < 0) return;
+  e.preventDefault();
+  player.move(dragFrom, Number(row.dataset.i));
+  dragFrom = -1;
+});
+view.addEventListener('dragend', () => {
+  dragFrom = -1;
+  $$('#qlist .trow.dragging, #qlist .trow.drop').forEach((r) => r.classList.remove('dragging', 'drop'));
+});
 
 view.addEventListener('dblclick', (e) => {
   if (e.target.closest('[data-dbl="fullscreen"]')) fullscreen.show();

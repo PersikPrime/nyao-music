@@ -165,6 +165,8 @@ fun TrackRow(
             IconButton(onClick = { menu = true }) { Icon(NyaoIcons.MoreVert, "Ещё", tint = NyaoColors.Muted) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text("Играть следующим") }, onClick = { menu = false; onPlayNext() })
+                DropdownMenuItem(text = { Text("В конец очереди") }, onClick = { menu = false; org.nyao.music.playback.PlayerConnection.addToQueue(track) })
+                DropdownMenuItem(text = { Text("Похожее · радио по треку") }, onClick = { menu = false; org.nyao.music.playback.PlayerConnection.startRadio(track) })
                 DropdownMenuItem(text = { Text(if (liked) "Убрать из «Мне нравится»" else "Мне нравится") }, onClick = { menu = false; onLike(!liked) })
             }
         }

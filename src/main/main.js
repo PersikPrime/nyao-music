@@ -16,6 +16,7 @@ import { Catalog } from './catalog.js';
 import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
 import { NyaoCloud, API_BASE } from './cloud.js';
 import { LastFm } from './lastfm.js';
+import { Radio } from './radio.js';
 import os from 'node:os';
 import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch } from './auth.js';
 
@@ -54,7 +55,7 @@ async function pollStatus() {
 }
 const up = (id) => !svcStatus.outages.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
-let ya, yt, sc, vk, wave, streams, catalog, win, cloud, lastfm;
+let ya, yt, sc, vk, wave, streams, catalog, win, cloud, lastfm, radio;
 
 /** Ключи Last.fm кладёт сборка (из секретов GitHub) в lastfm-keys.json рядом; без него Last.fm выключен */
 function lastfmKeys() {
@@ -162,6 +163,8 @@ function initProviders() {
     log: (m) => console.log(m)
   });
   setInterval(() => lastfm.flush().catch(() => {}), 10 * 60_000).unref?.();
+
+  radio = new Radio({ ya, yt, sc, vk, isDown: (id) => svcStatus.outages.includes(id) });
 
   wave = new WaveMixer({
     ya, yt, sc, vk,
@@ -377,6 +380,8 @@ function registerIpc() {
     if (info && info.playing && info.track) lastfm.nowPlaying(info.track).catch(() => {});
     return cloud.setNow(info).catch(() => {});
   });
+  handle('radio:start', (track) => radio.start(track));
+  handle('radio:more', (ids) => radio.more(ids));
   handle('lastfm:status', () => lastfm.status());
   handle('lastfm:connect', () => lastfm.connect());
   handle('lastfm:cancel', () => lastfm.cancel());

@@ -35,9 +35,11 @@ object Repo {
         private set
     lateinit var lastfm: LastFm
         private set
+    lateinit var radio: Radio
+        private set
     private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
-    enum class Mode { LIST, WAVE }
+    enum class Mode { LIST, WAVE, RADIO }
 
     /** Что сейчас играет: «Моя волна» (сама подгружает треки) или обычный список */
     val mode = MutableStateFlow(Mode.LIST)
@@ -77,6 +79,7 @@ object Repo {
         // изменения настроек волны, вида и миксов уезжают на другие устройства
         prefs.onSyncChange = { key -> bg.launch { runCatching { cloud.pushState(key, stateData(key)) } } }
         mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
+        radio = Radio(ya, yt, sc, vk) { !up(it) }
         wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) })
     }
 
@@ -236,6 +239,8 @@ object Repo {
         SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()))
     }
 
+    suspend fun radioStart(t: Track): List<Track> = remember(radio.start(t))
+    suspend fun radioMore(queueIds: List<String>): List<Track> = remember(radio.more(queueIds))
     suspend fun waveStart(): List<Track> = remember(wave.start())
     suspend fun waveMore(queueIds: List<String>): List<Track> = remember(wave.more(queueIds))
 

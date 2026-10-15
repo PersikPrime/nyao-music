@@ -620,3 +620,8 @@ body.fs-on .toast { z-index: 1000; }
 .outage-txt { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 13px; line-height: 1.4; }
 .outage-txt b { font-size: 14px; }
 .outage-txt span { opacity: .85; }
+
+/* Очередь: перетаскивание */
+#qlist .trow[draggable="true"] { cursor: grab; }
+#qlist .trow.dragging { opacity: .4; }
+#qlist .trow.drop { box-shadow: inset 0 2px 0 var(--accent); }

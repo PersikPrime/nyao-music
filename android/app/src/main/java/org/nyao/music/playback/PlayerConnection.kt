@@ -211,6 +211,47 @@ object PlayerConnection {
         }
     }
 
+    /** Радио по треку: сам трек и бесконечное «похожее» */
+    fun startRadio(t: Track) {
+        ioScope.launch {
+            try {
+                val tracks = Repo.radioStart(t)
+                withContext(Dispatchers.Main) {
+                    Repo.mode.value = Repo.Mode.RADIO
+                    Repo.queueLabel.value = "Радио: ${t.title}"
+                    withController { c ->
+                        c.shuffleModeEnabled = false
+                        if (c.repeatMode == Player.REPEAT_MODE_ALL) c.repeatMode = Player.REPEAT_MODE_OFF
+                        c.setMediaItems(tracks.map { Repo.mediaItem(it) }, 0, 0L)
+                        c.prepare()
+                        c.play()
+                    }
+                }
+            } catch (e: Exception) {
+                PlaybackEvents.emit(e.message ?: "Не удалось запустить радио")
+            }
+        }
+    }
+
+    /** В конец очереди */
+    fun addToQueue(t: Track) = withController { c ->
+        c.addMediaItem(Repo.mediaItem(t))
+        if (c.mediaItemCount == 1) {
+            c.prepare()
+            c.play()
+        }
+    }
+
+    /** Убрать из очереди (играющий не трогаем) */
+    fun removeAt(index: Int) = withController { c ->
+        if (index != c.currentMediaItemIndex && index in 0 until c.mediaItemCount) c.removeMediaItem(index)
+    }
+
+    /** Переставить трек в очереди */
+    fun move(from: Int, to: Int) = withController { c ->
+        if (from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount && from != to) c.moveMediaItem(from, to)
+    }
+
     suspend fun startWave() {
         val tracks = withContext(Dispatchers.IO) { Repo.waveStart() }
         Repo.mode.value = Repo.Mode.WAVE

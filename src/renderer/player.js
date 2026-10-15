@@ -113,7 +113,39 @@ export class Player extends EventTarget {
 
   enqueueNext(track) {
     if (!this.current) return this.playList([track], 0, '');
+    // если трек уже стоит дальше в очереди — переносим, а не дублируем
+    const at = this.queue.findIndex((t, i) => i > this.index && t.id === track.id);
+    if (at > -1) this.queue.splice(at, 1);
     this.queue.splice(this.index + 1, 0, track);
+    this.emit('queue');
+  }
+
+  /** В конец очереди (в волне — сразу после уже подгруженных треков) */
+  enqueueLast(track) {
+    if (!this.current) return this.playList([track], 0, '');
+    const at = this.queue.findIndex((t, i) => i > this.index && t.id === track.id);
+    if (at > -1) this.queue.splice(at, 1);
+    this.queue.push(track);
+    this.emit('queue');
+  }
+
+  /** Убрать трек из очереди (играющий не трогаем) */
+  removeAt(i) {
+    if (i === this.index || i < 0 || i >= this.queue.length) return false;
+    this.queue.splice(i, 1);
+    if (i < this.index) this.index--;
+    this.emit('queue');
+    return true;
+  }
+
+  /** Перетащить трек в очереди: from → to; играющий трек остаётся играть */
+  move(from, to) {
+    const n = this.queue.length;
+    if (from === to || from < 0 || to < 0 || from >= n || to >= n) return;
+    const cur = this.queue[this.index];
+    const [t] = this.queue.splice(from, 1);
+    this.queue.splice(to, 0, t);
+    this.index = this.queue.indexOf(cur);
     this.emit('queue');
   }
 
@@ -132,12 +164,31 @@ export class Player extends EventTarget {
     this.maybeMore();
   }
 
+  /** Радио по треку: сам трек и бесконечное «похожее» */
+  async startRadio(track) {
+    this.reportLeave(true);
+    this.emit('loading', true);
+    try {
+      const tracks = await api.radio.start(track);
+      this.mode = 'radio';
+      if (this.repeat === 'all') this.repeat = 'off';
+      this.label = `Радио: ${track.title}`;
+      this.queue = tracks;
+      this.index = 0;
+      this.load();
+      this.emit('queue');
+    } finally {
+      this.emit('loading', false);
+    }
+  }
+
   async maybeMore() {
-    if (this.mode !== 'wave' || this.loadingMore) return;
+    if ((this.mode !== 'wave' && this.mode !== 'radio') || this.loadingMore) return;
     if (this.queue.length - this.index > 3) return;
     this.loadingMore = true;
     try {
-      const more = await api.wave.more(this.queue.map((t) => t.id));
+      const ids = this.queue.map((t) => t.id);
+      const more = this.mode === 'radio' ? await api.radio.more(ids) : await api.wave.more(ids);
       const have = new Set(this.queue.map((t) => t.id));
       this.queue.push(...more.filter((t) => !have.has(t.id)));
       this.emit('queue');
@@ -177,7 +228,7 @@ export class Player extends EventTarget {
     if (!this.current) return;
     this.reportLeave(skipped);
     if (this.index + 1 >= this.queue.length) {
-      if (this.mode === 'wave') {
+      if (this.mode === 'wave' || this.mode === 'radio') {
         await this.maybeMore();
         if (this.index + 1 >= this.queue.length) return;
       } else if (this.repeat !== 'off') {

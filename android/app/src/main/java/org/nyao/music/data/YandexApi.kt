@@ -158,6 +158,23 @@ class YandexApi(private val prefs: Prefs) {
         return sequence(session)
     }
 
+    // ---------- Радио по треку: станция track:ID (своя сессия, волну не трогает) ----------
+    private var radioSession: String? = null
+
+    suspend fun radioStart(trackId: String): List<Track> {
+        val id = trackId.substringBefore(":")
+        val s = obj("POST", "/rotor/session/new", json = JSONObject().put("seeds", JSONArray().put("track:$id")).put("includeTracksInResponse", true).put("includeWaveModel", false).put("interactive", true))
+        radioSession = s.str("radioSessionId")
+        return sequence(s)
+    }
+
+    suspend fun radioMore(queueIds: List<String>): List<Track> {
+        val sid = radioSession ?: return emptyList()
+        val ids = JSONArray()
+        queueIds.filter { it.startsWith("ya:") }.takeLast(10).forEach { ids.put(it.removePrefix("ya:")) }
+        return sequence(obj("POST", "/rotor/session/$sid/tracks", json = JSONObject().put("queue", ids)))
+    }
+
     suspend fun waveMore(queueIds: List<String>, diversity: String?, mood: String?): List<Track> {
         val sid = waveSession ?: return waveStart(diversity, mood)
         val ids = JSONArray()

@@ -280,6 +280,18 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                         Text(q.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = pal.sub)
                     }
                     SourceTag(q.source)
+                    // очередь можно править: убрать трек или переставить
+                    Box {
+                        var qm by remember { mutableStateOf(false) }
+                        IconButton(onClick = { qm = true }, modifier = Modifier.size(36.dp)) { Icon(NyaoIcons.MoreVert, "Ещё", tint = pal.sub) }
+                        androidx.compose.material3.DropdownMenu(expanded = qm, onDismissRequest = { qm = false }) {
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("Играть следующим") }, onClick = { qm = false; PlayerConnection.move(queueIndex, index + 1) })
+                            if (queueIndex > index + 1) androidx.compose.material3.DropdownMenuItem(text = { Text("Выше") }, onClick = { qm = false; PlayerConnection.move(queueIndex, queueIndex - 1) })
+                            if (queueIndex < queue.size - 1) androidx.compose.material3.DropdownMenuItem(text = { Text("Ниже") }, onClick = { qm = false; PlayerConnection.move(queueIndex, queueIndex + 1) })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("Убрать из очереди") }, onClick = { qm = false; PlayerConnection.removeAt(queueIndex) })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("Похожее · радио по треку") }, onClick = { qm = false; PlayerConnection.startRadio(q) })
+                        }
+                    }
                 }
             }
         }

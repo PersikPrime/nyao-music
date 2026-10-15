@@ -177,15 +177,16 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun maybeMore() {
-        if (Repo.mode.value != Repo.Mode.WAVE || loadingMore) return
+        if ((Repo.mode.value != Repo.Mode.WAVE && Repo.mode.value != Repo.Mode.RADIO) || loadingMore) return
         val left = player.mediaItemCount - player.currentMediaItemIndex - 1
         if (left > 2) return
         loadingMore = true
         scope.launch {
             try {
                 val ids = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
-                val more = withContext(Dispatchers.IO) { Repo.waveMore(ids) }
-                if (Repo.mode.value == Repo.Mode.WAVE && more.isNotEmpty()) {
+                val radio = Repo.mode.value == Repo.Mode.RADIO
+                val more = withContext(Dispatchers.IO) { if (radio) Repo.radioMore(ids) else Repo.waveMore(ids) }
+                if ((Repo.mode.value == Repo.Mode.WAVE || Repo.mode.value == Repo.Mode.RADIO) && more.isNotEmpty()) {
                     val wasEnded = player.playbackState == Player.STATE_ENDED
                     player.addMediaItems(more.map { Repo.mediaItem(it) })
                     if (wasEnded) {

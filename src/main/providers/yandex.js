@@ -139,6 +139,22 @@ export class YandexProvider {
     return (session.sequence || []).map((s) => mapTrack(s.track)).filter(Boolean);
   }
 
+  /** Радио по треку: станция Яндекса track:ID (отдельная сессия, волну не трогает) */
+  async radioStart(trackId) {
+    const id = String(trackId).split(':')[0];
+    const session = await this.request('POST', '/rotor/session/new', { json: { seeds: [`track:${id}`], includeTracksInResponse: true, includeWaveModel: false, interactive: true } });
+    this.radio = { sessionId: session.radioSessionId, batchId: session.batchId };
+    return (session.sequence || []).map((s) => mapTrack(s.track)).filter(Boolean);
+  }
+
+  async radioMore(queueIds = []) {
+    if (!this.radio) return [];
+    const ids = queueIds.filter((id) => id.startsWith('ya:')).map((id) => id.slice(3)).slice(-10);
+    const res = await this.request('POST', `/rotor/session/${this.radio.sessionId}/tracks`, { json: { queue: ids } });
+    if (res.batchId) this.radio.batchId = res.batchId;
+    return (res.sequence || []).map((s) => mapTrack(s.track)).filter(Boolean);
+  }
+
   async waveMore(queueIds = []) {
     if (!this.wave) return this.waveStart();
     const ids = queueIds.filter((id) => id.startsWith('ya:')).map((id) => id.slice(3)).slice(-10);
