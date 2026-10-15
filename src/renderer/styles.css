@@ -629,6 +629,7 @@ body.fs-on .toast { z-index: 1000; }
 .fs.nolyrics .fs-right { opacity: 0; transform: translateX(-45%) scale(.96); pointer-events: none; transition: height .35s ease, opacity .3s ease, transform .6s cubic-bezier(.2, .8, .2, 1); }
 .fs.nolyrics .fs-credit, .fs.nolyrics .fs-now { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) { .fs-left, .fs-right { transition: none; } }
+.fs.noanim .fs-left, .fs.noanim .fs-right { transition: none; }
 
 /* Очередь в полном экране — панель справа */
 .fs-queue { position: absolute; top: 84px; right: 24px; bottom: 24px; width: min(400px, 40vw); z-index: 3; display: flex; flex-direction: column; padding: 18px 12px 12px; box-sizing: border-box; border-radius: 24px; background: rgba(12, 10, 14, .82); backdrop-filter: blur(28px) saturate(1.2); -webkit-backdrop-filter: blur(28px) saturate(1.2); border: 1px solid rgba(255,255,255,.1); box-shadow: -30px 0 80px rgba(0,0,0,.5); transform: translateX(calc(100% + 40px)); transition: transform .45s cubic-bezier(.2, .8, .2, 1); }

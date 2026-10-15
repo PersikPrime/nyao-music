@@ -232,6 +232,9 @@ export class FullScreen {
     this.build();
     this.open = true;
     this.el.hidden = false;
+    // при открытии обложка сразу на своём месте — анимация только при переключении текста
+    this.el.classList.add('noanim');
+    setTimeout(() => this.el && this.el.classList.remove('noanim'), 400);
     document.body.classList.add('fs-on');
     this.d.api.win.fullscreen(true).catch(() => {});
     this.trackId = null;
