@@ -64,6 +64,7 @@ fun SettingsScreen(model: AppModel) {
         OutlinedButton(onClick = { model.go(Route.Wave) }, modifier = Modifier.fillMaxWidth()) { Text("Характер, настроение и баланс источников") }
 
         EqCard()
+        LastFmCard(model)
         CacheCard()
         UpdateCard(model)
 
@@ -195,6 +196,52 @@ fun ServiceLogo(source: String, size: Int = 48) {
     val ya = source == SOURCE_YA
     Box(Modifier.size(size.dp).clip(RoundedCornerShape((size / 3.5f).dp)).background(sourceColor(source)), contentAlignment = Alignment.Center) {
         Text(org.nyao.music.ui.components.sourceShort(source), color = if (ya) Color.Black else Color.White, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Last.fm: подключение через подтверждение в браузере */
+@Composable
+private fun LastFmCard(model: AppModel) {
+    val st by Repo.lastfm.state.collectAsState()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFFD51007)), contentAlignment = Alignment.Center) {
+            Text("fm", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+        Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+            Text("Last.fm", style = MaterialTheme.typography.titleMedium)
+            Text(
+                when {
+                    !st.configured -> "В этой сборке Last.fm выключен"
+                    st.waiting -> "Подтверди доступ на странице Last.fm…"
+                    st.name != null -> "Подключено: ${st.name}" + (if (st.queued > 0) " · ждут отправки: ${st.queued}" else "")
+                    else -> "Записывает прослушанное из всех сервисов в твой профиль"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        when {
+            !st.configured -> Unit
+            st.waiting -> OutlinedButton(onClick = { Repo.lastfm.cancel() }) { Text("Отмена") }
+            st.name != null -> OutlinedButton(onClick = { Repo.lastfm.disconnect(); model.message("Last.fm отключён") }) { Text("Отключить") }
+            else -> Button(onClick = {
+                scope.launch {
+                    try {
+                        val name = Repo.lastfm.connect { url ->
+                            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        }
+                        model.message("Last.fm подключён: $name")
+                    } catch (e: Exception) {
+                        if (e !is kotlinx.coroutines.CancellationException) model.message(e.message ?: "Не получилось подключить Last.fm")
+                    }
+                }
+            }) { Text("Подключить") }
+        }
     }
 }
 

@@ -22,6 +22,9 @@ android {
         targetSdk = 36
         versionCode = nyaoBuild
         versionName = "$nyaoName ($nyaoBuild)" + (nyaoChannel?.let { " $it" } ?: "")
+        // ключи Last.fm — из секретов GitHub (без них Last.fm в настройках выключен)
+        buildConfigField("String", "LASTFM_KEY", "\"" + (System.getenv("NYAO_LASTFM_KEY") ?: "") + "\"")
+        buildConfigField("String", "LASTFM_SECRET", "\"" + (System.getenv("NYAO_LASTFM_SECRET") ?: "") + "\"")
     }
 
     // Постоянный ключ подписи: без него каждая сборка на GitHub подписывалась новым случайным debug-ключом,

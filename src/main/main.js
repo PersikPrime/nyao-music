@@ -15,6 +15,7 @@ import { findLyrics } from './lyrics.js';
 import { Catalog } from './catalog.js';
 import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
 import { NyaoCloud, API_BASE } from './cloud.js';
+import { LastFm } from './lastfm.js';
 import os from 'node:os';
 import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch } from './auth.js';
 
@@ -53,7 +54,16 @@ async function pollStatus() {
 }
 const up = (id) => !svcStatus.outages.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
-let ya, yt, sc, vk, wave, streams, catalog, win, cloud;
+let ya, yt, sc, vk, wave, streams, catalog, win, cloud, lastfm;
+
+/** Ключи Last.fm кладёт сборка (из секретов GitHub) в lastfm-keys.json рядом; без него Last.fm выключен */
+function lastfmKeys() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'lastfm-keys.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+}
 const rpc = new DiscordRPC({ log: (m) => console.log(m) });
 function configureRpc() {
   rpc.configure({ enabled: settings.get().discordRpc, clientId: DISCORD_APP_ID });
@@ -137,6 +147,22 @@ function initProviders() {
     log: (m) => console.log(m)
   });
   const waveMemFile = path.join(app.getPath('userData'), 'wave-memory.json');
+  const lk = lastfmKeys();
+  lastfm = new LastFm({
+    key: lk.key || '',
+    secret: lk.secret || '',
+    fetch: fetchFn,
+    getSession: () => {
+      const s = secrets.get('lastfmSession');
+      return s ? JSON.parse(s) : null;
+    },
+    setSession: (s) => secrets.set('lastfmSession', s ? JSON.stringify(s) : null),
+    queueFile: path.join(app.getPath('userData'), 'lastfm-queue.json'),
+    openUrl: (url) => shell.openExternal(url),
+    log: (m) => console.log(m)
+  });
+  setInterval(() => lastfm.flush().catch(() => {}), 10 * 60_000).unref?.();
+
   wave = new WaveMixer({
     ya, yt, sc, vk,
     isDown: (id) => svcStatus.outages.includes(id),
@@ -343,8 +369,18 @@ function registerIpc() {
   handle('cloud:logout', () => cloud.logout());
   handle('cloud:me', () => cloud.me());
   handle('cloud:removeDevice', (id) => cloud.removeDevice(id));
-  handle('cloud:play', (play) => cloud.recordPlay(play));
-  handle('cloud:now', (info) => cloud.setNow(info).catch(() => {}));
+  handle('cloud:play', (play) => {
+    lastfm.scrobble({ track: play && play.track, listened: (play && play.listened) || 0 });
+    return cloud.recordPlay(play);
+  });
+  handle('cloud:now', (info) => {
+    if (info && info.playing && info.track) lastfm.nowPlaying(info.track).catch(() => {});
+    return cloud.setNow(info).catch(() => {});
+  });
+  handle('lastfm:status', () => lastfm.status());
+  handle('lastfm:connect', () => lastfm.connect());
+  handle('lastfm:cancel', () => lastfm.cancel());
+  handle('lastfm:disconnect', () => lastfm.disconnect());
   handle('cloud:others', () => cloud.others());
   handle('cloud:history', () => cloud.history().slice(0, 200));
   handle('cloud:top', (opts) => cloud.top(opts || {}));

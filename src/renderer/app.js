@@ -996,6 +996,7 @@ function renderSettings() {
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Моя волна</h2>${waveControlsHtml()}</section>
     ${eqCardHtml()}
     ${discordCardHtml()}
+    <section class="card" id="lastfm-card">${lastfmCardInner()}</section>
     ${updateCardHtml()}
     <section class="card">
       <h2 class="sec">О приложении</h2>
@@ -1005,6 +1006,7 @@ function renderSettings() {
   </div>`;
   $$('input[data-input="share"]', view).forEach(setRangeFill);
   refreshRpcStatus();
+  refreshLastfm();
 }
 
 function eqCardHtml() {
@@ -1015,6 +1017,36 @@ function eqCardHtml() {
     <div class="eq-presets ${e.on ? '' : 'off'}">${EQ_PRESETS.map(([id, name]) => `<button class="chip ${e.preset === id ? 'on' : ''}" data-action="eq-preset" data-v="${id}">${name}</button>`).join('')}${e.preset === 'custom' ? '<button class="chip on" disabled>Свой</button>' : ''}</div>
     <div class="eq-bands ${e.on ? '' : 'off'}">${EQ_BANDS.map((hz, i) => `<label class="eq-band"><span class="eq-db" id="eq-db-${i}">${e.gains[i] > 0 ? '+' : ''}${e.gains[i]}</span><input type="range" min="-12" max="12" step="1" value="${e.gains[i]}" data-input="eq" data-i="${i}" aria-label="${bandLabel(hz)} Гц" ${e.on ? '' : 'disabled'}><span class="eq-hz">${bandLabel(hz)}</span></label>`).join('')}</div>
   </section>`;
+}
+
+// ---------- Last.fm ----------
+let lastfmState = { configured: true, connected: false, name: null, queued: 0, waiting: false };
+function lastfmCardInner() {
+  const s = lastfmState;
+  const st = !s.configured ? 'В этой сборке Last.fm выключен'
+    : s.waiting ? 'Подтверди доступ на странице Last.fm в браузере…'
+    : s.connected ? `Подключено: ${esc(s.name)}${s.queued ? ` · ждут отправки: ${s.queued}` : ''}`
+    : 'Записывает прослушанное из всех сервисов в твой профиль Last.fm';
+  const btn = !s.configured ? '' : s.waiting ? '<button class="btn" data-action="lastfm-cancel">Отмена</button>'
+    : s.connected ? '<button class="btn" data-action="lastfm-disconnect">Отключить</button>'
+    : '<button class="btn primary" data-action="lastfm-connect">Подключить</button>';
+  return `<div class="svc">
+    <div class="logo" style="background:#D51007;color:#fff;font-weight:800;font-size:13px">fm</div>
+    <div class="info"><div class="name">Last.fm</div><div class="st">${st}</div></div>
+    ${btn}
+  </div>`;
+}
+function renderLastfm() {
+  const el = $('#lastfm-card');
+  if (el) el.innerHTML = lastfmCardInner();
+}
+async function refreshLastfm() {
+  try {
+    lastfmState = { ...lastfmState, ...(await api.lastfm.status()) };
+  } catch {
+    // нет связи с главным процессом — оставим как есть
+  }
+  renderLastfm();
 }
 
 let eqSaveTimer;
@@ -1397,6 +1429,28 @@ async function handleAction(el, e) {
     case 'artist-kind':
       state.artist.kind = el.dataset.v;
       renderArtist();
+      break;
+    case 'lastfm-connect':
+      lastfmState.waiting = true;
+      renderLastfm();
+      try {
+        const r = await api.lastfm.connect();
+        toast(`Last.fm подключён: ${r.name}`);
+      } catch (err) {
+        if (lastfmState.waiting) toast(err.message, true);
+      }
+      lastfmState.waiting = false;
+      refreshLastfm();
+      break;
+    case 'lastfm-cancel':
+      lastfmState.waiting = false;
+      await api.lastfm.cancel().catch(() => {});
+      renderLastfm();
+      break;
+    case 'lastfm-disconnect':
+      await api.lastfm.disconnect();
+      toast('Last.fm отключён');
+      refreshLastfm();
       break;
     case 'eq-toggle': {
       const e = normalizeEq(state.settings.eq);

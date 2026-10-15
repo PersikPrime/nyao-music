@@ -124,6 +124,7 @@ object PlayerConnection {
         val skipped = listened < minOf(30, dur / 2)
         if (listened < 5 && !skipped) return
         ioScope.launch { runCatching { Repo.cloud.recordPlay(t, listened, skipped) } }
+        ioScope.launch { runCatching { Repo.lastfm.scrobble(if (t.duration > 0) t else t.copy(duration = dur), listened) } }
     }
 
     private fun pushNow() {
@@ -132,6 +133,7 @@ object PlayerConnection {
         val pos = c.currentPosition / 1000.0
         val playing = c.isPlaying
         ioScope.launch { runCatching { Repo.cloud.setNow(t, pos, playing) } }
+        if (playing && t != null) ioScope.launch { runCatching { Repo.lastfm.nowPlaying(t) } }
     }
 
     /** Раз в 2 секунды запоминаем позицию (для истории), раз в 30 секунд — «сейчас играет» на сервер */

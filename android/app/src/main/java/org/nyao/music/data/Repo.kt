@@ -33,6 +33,8 @@ object Repo {
         private set
     lateinit var mixStore: MixStore
         private set
+    lateinit var lastfm: LastFm
+        private set
     private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     enum class Mode { LIST, WAVE }
@@ -70,6 +72,7 @@ object Repo {
         vk = VkApi(prefs)
         cloud = NyaoCloud(prefs, context.applicationContext.filesDir)
         mixStore = MixStore(context.applicationContext.filesDir)
+        lastfm = LastFm(prefs, context.applicationContext.filesDir)
         org.nyao.music.playback.Offline.init(context)
         // изменения настроек волны, вида и миксов уезжают на другие устройства
         prefs.onSyncChange = { key -> bg.launch { runCatching { cloud.pushState(key, stateData(key)) } } }

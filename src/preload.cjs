@@ -18,6 +18,12 @@ contextBridge.exposeInMainWorld('nyao', {
     onFullscreen: (cb) => ipcRenderer.on('win:fullscreen', (_e, on) => cb(on))
   },
   coverColor: (url) => call('cover:color', url),
+  lastfm: {
+    status: () => call('lastfm:status'),
+    connect: () => call('lastfm:connect'),
+    cancel: () => call('lastfm:cancel'),
+    disconnect: () => call('lastfm:disconnect')
+  },
   status: {
     get: (force) => call('status:get', force),
     onChange: (cb) => ipcRenderer.on('status', (_e, s) => cb(s))

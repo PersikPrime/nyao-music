@@ -95,6 +95,15 @@ class Prefs(context: Context) {
         get() = sp.getString("vkOrigin", null)
         set(v) = sp.edit().apply { if (v == null) remove("vkOrigin") else putString("vkOrigin", v) }.apply()
 
+    /** Last.fm: имя и ключ сессии (выдаёт Last.fm после подтверждения; хранится только тут) */
+    var lastfmName: String?
+        get() = sp.getString("lastfmName", null)
+        set(v) = sp.edit().apply { if (v == null) remove("lastfmName") else putString("lastfmName", v) }.apply()
+
+    var lastfmKey: String?
+        get() = sp.getString("lastfmKey", null)
+        set(v) = sp.edit().apply { if (v == null) remove("lastfmKey") else putString("lastfmKey", v) }.apply()
+
     /** Аккаунт Nyao (свой сервер). Токены музыкальных сервисов на сервер не уходят */
     var nyaoToken: String?
         get() = sp.getString("nyaoToken", null)
