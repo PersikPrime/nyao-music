@@ -625,3 +625,5 @@ body.fs-on .toast { z-index: 1000; }
 #qlist .trow[draggable="true"] { cursor: grab; }
 #qlist .trow.dragging { opacity: .4; }
 #qlist .trow.drop { box-shadow: inset 0 2px 0 var(--accent); }
+
+.releases-row .rel-when { color: var(--accent); font-weight: 500; }

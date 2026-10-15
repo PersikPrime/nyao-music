@@ -27,6 +27,8 @@ data class Playlist(
     val count: Int = 0,
     val cover: String? = null,
     val subtitle: String = "",
+    /** Доп. подпись, например «Сингл · 3 дня назад» у новых релизов */
+    val note: String = "",
 )
 
 data class HomeSection(

@@ -317,6 +317,55 @@ export class YandexProvider {
     };
   }
 
+  /**
+   * Новые релизы любимых исполнителей: лайкнутые исполнители (а если их мало — самые частые в лайках),
+   * у каждого — свежие альбомы и синглы за последние ~4 месяца.
+   */
+  async newReleases({ days = 120, limit = 18 } = {}) {
+    const { uid } = await this.getAccount();
+    const ids = [];
+    const add = (id) => {
+      if (id != null && !ids.includes(String(id))) ids.push(String(id));
+    };
+    try {
+      const liked = await this.request('GET', `/users/${uid}/likes/artists`);
+      for (const x of Array.isArray(liked) ? liked : []) add((x.artist || x).id);
+    } catch {
+      // нет лайкнутых исполнителей — возьмём из треков
+    }
+    if (ids.length < 12) {
+      try {
+        const tracks = await this.likedTracks(300);
+        const freq = new Map();
+        for (const t of tracks) if (t.artistRef) freq.set(t.artistRef.slice(3), (freq.get(t.artistRef.slice(3)) || 0) + 1);
+        [...freq.entries()].sort((a, b) => b[1] - a[1]).forEach(([id]) => add(id));
+      } catch {
+        // без лайков — без релизов
+      }
+    }
+    const since = Date.now() - days * 86400000;
+    const found = new Map();
+    const pick = ids.slice(0, 40);
+    let i = 0;
+    const worker = async () => {
+      while (i < pick.length) {
+        const id = pick[i++];
+        try {
+          const r = await this.request('GET', `/artists/${id}/direct-albums`, { query: { page: '0', 'page-size': '6', 'sort-by': 'year' } });
+          for (const a of r.albums || []) {
+            const ts = a.releaseDate ? Date.parse(a.releaseDate) : NaN;
+            if (!Number.isFinite(ts) || ts < since || ts > Date.now() + 86400000 || found.has(a.id)) continue;
+            found.set(a.id, { ...this.mapAlbumCard(a), releaseDate: new Date(ts).toISOString() });
+          }
+        } catch {
+          // у исполнителя не получилось — пропускаем
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, worker));
+    return [...found.values()].sort((a, b) => b.releaseDate.localeCompare(a.releaseDate)).slice(0, limit);
+  }
+
   async searchArtist(name) {
     const r = await this.request('GET', '/search', { query: { text: name, type: 'artist', page: '0' } });
     return ((r.artists && r.artists.results) || []).map((x) => this.mapArtistCard(x));

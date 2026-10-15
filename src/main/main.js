@@ -485,6 +485,16 @@ function registerIpc() {
     return { yaPlaylists: yaLists.slice(0, 8), ytHome: ytHome.slice(0, 4), mixes: readMixes().map(mixSummary) };
   });
 
+  // Новые релизы любимых исполнителей — отдельно от главной: собираются дольше. Кэш на 6 часов
+  let releasesCache = null;
+  handle('home:releases', async (force) => {
+    if (!ya.loggedIn) return [];
+    if (!force && releasesCache && Date.now() - releasesCache.at < 6 * 3600 * 1000) return releasesCache.list;
+    const list = await safe(ya.newReleases(), null);
+    if (list) releasesCache = { at: Date.now(), list };
+    return list || (releasesCache && releasesCache.list) || [];
+  });
+
   handle('library:playlists', async () => {
     const [yaLists, ytLists, scLists, vkLists] = await Promise.all([
       ya.loggedIn ? safe(ya.playlists(), []) : [],

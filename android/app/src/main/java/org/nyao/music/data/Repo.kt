@@ -200,6 +200,17 @@ object Repo {
         HomeData(a.await().take(10), sections.take(6))
     }
 
+    private var releasesCache: Pair<Long, List<Playlist>>? = null
+
+    /** Новые релизы любимых исполнителей (только Яндекс). Кэш на 6 часов */
+    suspend fun newReleases(force: Boolean = false): List<Playlist> {
+        if (!ya.loggedIn || up(SOURCE_YA).not()) return releasesCache?.second ?: emptyList()
+        releasesCache?.let { (at, list) -> if (!force && System.currentTimeMillis() - at < 6 * 3600_000L) return list }
+        val list = runCatching { ya.newReleases() }.getOrNull() ?: return releasesCache?.second ?: emptyList()
+        releasesCache = System.currentTimeMillis() to list
+        return list
+    }
+
     suspend fun likedTracks(): List<Track> = coroutineScope {
         val a = async { if (ya.loggedIn) runCatching { ya.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
         val b = async { if (yt.loggedIn) runCatching { yt.likedTracks() }.getOrDefault(emptyList()) else emptyList() }

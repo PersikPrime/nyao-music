@@ -92,9 +92,14 @@ class AppModel(private val scope: CoroutineScope) {
 
     fun message(text: String) = PlaybackEvents.emit(text)
 
+    var releases by mutableStateOf<List<org.nyao.music.data.Playlist>?>(null)
+
     fun loadHome(force: Boolean = false) {
         if (homeLoading || (home != null && !force)) return
         homeLoading = true
+        scope.launch {
+            releases = runCatching { Repo.newReleases(force) }.getOrNull() ?: releases
+        }
         scope.launch {
             try {
                 home = Repo.home()
@@ -164,6 +169,7 @@ class AppModel(private val scope: CoroutineScope) {
     /** После входа/выхода всё перезагружаем */
     fun accountsChanged() {
         home = null
+        releases = null
         liked = null
         playlists = null
         playlistTracks = emptyMap()

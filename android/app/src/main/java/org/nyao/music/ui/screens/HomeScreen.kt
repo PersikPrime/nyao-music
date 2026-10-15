@@ -163,6 +163,14 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                     }
                 }
             }
+            model.releases?.takeIf { it.isNotEmpty() }?.let { rel ->
+                item { Text("Новые релизы любимых исполнителей", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 12.dp), maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                item {
+                    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        itemsIndexed(rel) { i, p -> Box(Modifier.appear(i)) { ReleaseTile(p) { model.go(Route.PlaylistPage(p)) } } }
+                    }
+                }
+            }
             // Быстрые миксы: «Мне нравится» + первые плейлисты Яндекса
             item {
                 val quick = listOf<Pair<String, () -> Unit>>("Мне нравится" to { model.go(Route.Library) }) +
@@ -242,6 +250,18 @@ private fun CarouselCard(p: Playlist, width: Int, onClick: () -> Unit) {
             val sub = p.subtitle.ifEmpty { if (p.count > 0) "${org.nyao.music.data.sourceName(p.source)} · ${p.count}" else "" }
             if (sub.isNotEmpty() && width > 150) Text(sub, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+    }
+}
+
+/** Новый релиз: обложка, название, исполнитель и «Сингл · 3 дня назад» */
+@Composable
+private fun ReleaseTile(p: Playlist, onClick: () -> Unit) {
+    Column(Modifier.width(140.dp).bouncy().clip(RoundedCornerShape(24.dp)).clickable(onClick = onClick).padding(bottom = 6.dp)) {
+        Cover(p.cover, Modifier.size(140.dp), RoundedCornerShape(28.dp))
+        Spacer(Modifier.height(8.dp))
+        Text(p.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 6.dp))
+        Text(p.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = Modifier.padding(horizontal = 6.dp))
+        if (p.note.isNotEmpty()) Text(p.note, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
     }
 }
 

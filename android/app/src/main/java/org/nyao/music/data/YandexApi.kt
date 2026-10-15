@@ -1,5 +1,7 @@
 package org.nyao.music.data
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -29,6 +31,23 @@ class YandexApi(private val prefs: Prefs) {
 
         fun cover(uri: String?, size: Int = 400): String? =
             uri?.takeIf { it.isNotBlank() }?.let { "https://" + it.replace("%%", "${size}x$size") }
+
+        /** «Вышло недавно»: Сегодня, Вчера, 3 дня назад, 2 недели назад… */
+        fun releaseAgo(ts: Long, now: Long = System.currentTimeMillis()): String {
+            val d = ((now - ts) / 86_400_000L).toInt()
+            fun pl(n: Int, one: String, few: String, many: String): String {
+                val a = n % 10
+                val b = n % 100
+                return if (a == 1 && b != 11) one else if (a in 2..4 && (b < 10 || b >= 20)) few else many
+            }
+            return when {
+                d <= 0 -> "Сегодня"
+                d == 1 -> "Вчера"
+                d < 7 -> "$d ${pl(d, "день", "дня", "дней")} назад"
+                d < 30 -> (d / 7).let { "$it ${pl(it, "неделю", "недели", "недель")} назад" }
+                else -> (d / 30).let { "$it ${pl(it, "месяц", "месяца", "месяцев")} назад" }
+            }
+        }
 
         fun mapTrack(t: JSONObject?): Track? {
             if (t == null || !t.has("id")) return null
@@ -239,6 +258,49 @@ class YandexApi(private val prefs: Prefs) {
             popular = r.arr("popularTracks").objects().mapNotNull { mapTrack(it) },
             albums = albums,
         )
+    }
+
+    /**
+     * Новые релизы любимых исполнителей (как на ПК): лайкнутые исполнители, а если их мало — самые частые в лайках;
+     * у каждого — альбомы и синглы за последние ~4 месяца, новые сверху.
+     */
+    suspend fun newReleases(days: Int = 120, limit: Int = 18): List<Playlist> = kotlinx.coroutines.coroutineScope {
+        val uid = uid()
+        val ids = LinkedHashSet<String>()
+        runCatching { arr("GET", "/users/$uid/likes/artists").objects().forEach { x -> (x.optJSONObject("artist") ?: x).opt("id")?.toString()?.let { ids += it } } }
+        if (ids.size < 12) runCatching {
+            likedTracks(300).mapNotNull { it.artistId }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.forEach { ids += it.key }
+        }
+        val now = System.currentTimeMillis()
+        val since = now - days * 86_400_000L
+        val sem = kotlinx.coroutines.sync.Semaphore(6)
+        val found = ids.take(40).map { id ->
+            async {
+                sem.acquire()
+                try {
+                    runCatching {
+                        obj("GET", "/artists/$id/direct-albums", query = mapOf("page" to "0", "page-size" to "6", "sort-by" to "year")).arr("albums").objects().mapNotNull { al ->
+                            val ts = al.str("releaseDate")?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() } ?: return@mapNotNull null
+                            if (ts < since || ts > now + 86_400_000L) return@mapNotNull null
+                            ts to al
+                        }
+                    }.getOrDefault(emptyList())
+                } finally {
+                    sem.release()
+                }
+            }
+        }.awaitAll().flatten()
+        found.distinctBy { it.second.opt("id")?.toString() }.sortedByDescending { it.first }.take(limit).map { (ts, al) ->
+            Playlist(
+                id = "yaalbum:${al.opt("id")}",
+                source = SOURCE_YA,
+                title = al.optString("title") + (al.str("version")?.let { " ($it)" } ?: ""),
+                count = al.optInt("trackCount"),
+                cover = cover(al.str("coverUri"), 300),
+                subtitle = al.arr("artists").objects().mapNotNull { it.str("name") }.joinToString(", "),
+                note = (if (al.str("type") == "single") "Сингл" else "Альбом") + " · " + releaseAgo(ts, now),
+            )
+        }
     }
 
     suspend fun albumTracks(id: String): List<Track> {

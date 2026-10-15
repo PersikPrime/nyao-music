@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('nyao', {
     logout: (service) => call('auth:logout', service)
   },
   home: () => call('home'),
+  releases: (force) => call('home:releases', !!force),
   library: {
     playlists: () => call('library:playlists'),
     liked: () => call('library:liked'),

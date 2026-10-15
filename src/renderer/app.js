@@ -4,6 +4,7 @@ import { Onboarding } from './onboarding.js';
 import { layoutChoiceHtml } from './layouts.js';
 import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain } from './eq.js';
 import { FullScreen } from './fullscreen.js';
+import { releaseAgo } from './releases.js';
 
 const api = window.nyao;
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -383,6 +384,7 @@ function renderHome() {
       </button>` : ''}
     </div>
     ${!h && loggedAny ? '<div class="skeleton" style="height:220px"></div>' : ''}
+    ${releasesHtml()}
     ${tiles.length ? `<section><div class="sec-head"><h2 class="sec">Плейлисты и миксы</h2><button class="link" data-action="go" data-route="library">Вся медиатека</button></div>
       <div class="tiles">${tiles.map((p) => `<button class="tile" data-action="open-pl" data-id="${esc(p.id)}">${coverHtml(p, '', true)}<div class="t">${esc(p.title)}</div><div class="s">${esc(p.sub || (p.count ? p.count + ' треков' : ''))}</div></button>`).join('')}</div></section>` : ''}
     ${ytSection ? `<section><h2 class="sec" style="margin-bottom:12px">${esc(ytSection.title)}</h2>${tracksHtml(ytSection.tracks.slice(0, 8), 'home-yt')}</section>` : ''}
@@ -442,6 +444,7 @@ function renderHomePlayer() {
     ${loggedAny ? `<section class="qgrid">${tiles.map(quickTile).join('')}</section>` : ''}
     ${recent.length ? `<section><div class="sec-head"><h2 class="sec">Недавно слушал</h2></div>
       <div class="recent-row">${recent.slice(0, 12).map((t, i) => `<button class="rcard" data-action="play-row" data-list="home-recent" data-i="${i}">${coverHtml(t, '', true)}<b>${esc(t.title)}</b><span>${esc(t.artist)}</span></button>`).join('')}</div></section>` : ''}
+    ${releasesHtml()}
     <div class="home-split">
       ${top.length ? `<section class="top-col"><div class="sec-head"><h2 class="sec">Чаще всего за месяц</h2><button class="link" data-action="mix-builder">Собрать микс из них</button></div>
         ${tracksHtml(top.map((x) => x.track), 'home-top')}</section>` : ''}
@@ -1229,8 +1232,25 @@ async function loadStatus() {
   state.status = await api.auth.status().catch(() => ({ ya: null, yt: null, sc: null, vk: null }));
   renderAccounts();
 }
+function releasesHtml() {
+  const r = state.releases;
+  if (!r || !r.length) return '';
+  return `<section><div class="sec-head"><h2 class="sec">Новые релизы любимых исполнителей</h2></div>
+    <div class="recent-row releases-row">${r.map((al) => `<button class="rcard" data-action="open-album" data-ref="${esc(al.ref)}">${coverHtml(al, '', true)}<b>${esc(al.title)}</b><span>${esc(al.artist)}</span><span class="rel-when">${al.kind === 'single' ? 'Сингл' : 'Альбом'} · ${esc(releaseAgo(al.releaseDate))}</span></button>`).join('')}</div></section>`;
+}
+async function loadReleases() {
+  if (!api.releases || !state.status.ya) return;
+  try {
+    state.releases = await api.releases();
+  } catch {
+    state.releases = [];
+  }
+  if (state.route === 'home') renderHome();
+}
+
 async function loadHome() {
   loadRecent();
+  if (!state.releases) loadReleases();
   if (layout() === 'player' && !state.lib.lists) loadLibrary();
   if (!state.status.ya && !state.status.yt) return;
   try {
