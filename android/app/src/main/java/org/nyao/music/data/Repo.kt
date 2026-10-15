@@ -225,6 +225,7 @@ object Repo {
             id == "liked" -> likedTracks()
             id.startsWith("liked:") -> likedTracks().filter { it.source == id.removePrefix("liked:") }
             id.startsWith("mix:") -> mixStore.get(id)?.tracks ?: emptyList()
+            id.startsWith("yaalbum:") -> ya.albumTracks(id)
             id.startsWith("ya:") -> ya.playlistTracks(id)
             id.startsWith("sc:") -> sc.playlistTracks(id)
             id.startsWith("vk:") -> vk.playlistTracks(id)
@@ -239,6 +240,31 @@ object Repo {
         val c = async { if (up(SOURCE_SC)) runCatching { sc.search(q) }.getOrDefault(emptyList()) else emptyList() }
         val d = async { if (vk.loggedIn && up(SOURCE_VK)) runCatching { vk.search(q) }.getOrDefault(emptyList()) else emptyList() }
         SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()))
+    }
+
+    /** Страница исполнителя: у Яндекса и YouTube — настоящая, у SoundCloud и VK — его треки из поиска */
+    suspend fun artistPage(source: String, id: String?, name: String): ArtistPage {
+        val page = runCatching {
+            when {
+                source == SOURCE_YA && id != null && ya.loggedIn -> ya.artist(id)
+                source == SOURCE_YT && id != null -> yt.artist(id)
+                else -> null
+            }
+        }.getOrNull()
+        if (page != null) {
+            remember(page.popular)
+            return page
+        }
+        val main = name.substringBefore(",").trim()
+        val found = when (source) {
+            SOURCE_SC -> runCatching { sc.search(main) }.getOrDefault(emptyList())
+            SOURCE_VK -> if (vk.loggedIn) runCatching { vk.search(main) }.getOrDefault(emptyList()) else emptyList()
+            SOURCE_YA -> if (ya.loggedIn) runCatching { ya.search(main) }.getOrDefault(emptyList()) else emptyList()
+            else -> runCatching { yt.search(main) }.getOrDefault(emptyList())
+        }
+        val mine = found.filter { it.artist.contains(main, ignoreCase = true) }.ifEmpty { found }
+        remember(mine)
+        return ArtistPage(source, id, main, mine.firstOrNull()?.cover, null, mine, emptyList())
     }
 
     suspend fun trackDetails(t: Track): TrackDetails = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

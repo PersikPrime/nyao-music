@@ -108,6 +108,7 @@ private fun routeOrder(r: Route): Int = when (r) {
     Route.Search -> 3
     Route.Settings -> 4
     is Route.PlaylistPage -> 5
+    is Route.ArtistPage -> 6
 }
 
 /** icon — обычная (контурная), iconOn — залитая для выбранной вкладки, как в Material 3 Expressive */
@@ -248,6 +249,7 @@ private fun Content(model: AppModel, wide: Boolean) {
             Route.Library -> LibraryScreen(model, wide)
             Route.Settings -> SettingsScreen(model)
             is Route.PlaylistPage -> PlaylistScreen(model, r.playlist)
+            is Route.ArtistPage -> org.nyao.music.ui.screens.ArtistScreen(model, r)
         }
     }
 }
@@ -375,7 +377,7 @@ private fun BottomBlur(shot: androidx.compose.ui.graphics.layer.GraphicsLayer, b
 /** Плавающая панель из макета: выбранная вкладка раскрывается в «таблетку» с подписью */
 @Composable
 private fun FloatingToolbar(model: AppModel) {
-    val selectedRoute = if (model.route is Route.PlaylistPage || (model.route == Route.Search && Repo.prefs.settings.value.isWaveLayout)) Route.Library else model.route
+    val selectedRoute = if (model.route is Route.PlaylistPage || model.route is Route.ArtistPage || (model.route == Route.Search && Repo.prefs.settings.value.isWaveLayout)) Route.Library else model.route
     Surface(shape = RoundedCornerShape(30.dp), color = NyaoColors.S3, shadowElevation = 12.dp) {
         Row(Modifier.height(60.dp).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             tabsFor(Repo.prefs.settings.collectAsState().value).forEach { tab ->

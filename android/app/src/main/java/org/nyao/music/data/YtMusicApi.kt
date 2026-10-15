@@ -150,6 +150,7 @@ class YtMusicApi(private val prefs: Prefs) {
         val title = runsText(cols[0])
         val runs = cols.drop(1).flatMap { it?.arr("runs").objects() }
         val artists = runs.filter { browseId(it)?.startsWith("UC") == true }.map { it.optString("text") }
+        val artistId = runs.firstNotNullOfOrNull { r2 -> browseId(r2)?.takeIf { it.startsWith("UC") } }
         val albumRun = runs.firstOrNull { browseId(it)?.startsWith("MPRE") == true }
         val plain = runs.map { it.optString("text").trim() }
             .filter { it.isNotEmpty() && it != "•" && it !in TYPE_WORDS && !TIME.matches(it) && !it.contains("просмотр") && !it.contains("views") }
@@ -162,8 +163,10 @@ class YtMusicApi(private val prefs: Prefs) {
             title = title.ifEmpty { "Без названия" },
             artist = artists.joinToString(", ").ifEmpty { plain.firstOrNull() ?: "YouTube Music" },
             album = albumRun?.optString("text") ?: "",
+            albumId = albumRun?.let { browseId(it) },
             duration = parseDuration(durText),
             cover = thumb(r.obj("thumbnail")),
+            artistId = artistId,
         )
     }
 
@@ -171,7 +174,9 @@ class YtMusicApi(private val prefs: Prefs) {
         val videoId = p.str("videoId") ?: return null
         val runs = p.obj("longBylineText")?.arr("runs").objects()
         val artists = runs.filter { browseId(it)?.startsWith("UC") == true }.map { it.optString("text") }
-        val album = runs.firstOrNull { browseId(it)?.startsWith("MPRE") == true }?.optString("text")
+        val artistId = runs.firstNotNullOfOrNull { r2 -> browseId(r2)?.takeIf { it.startsWith("UC") } }
+        val albumRun = runs.firstOrNull { browseId(it)?.startsWith("MPRE") == true }
+        val album = albumRun?.optString("text")
         return Track(
             id = "yt:$videoId",
             source = SOURCE_YT,
@@ -179,8 +184,10 @@ class YtMusicApi(private val prefs: Prefs) {
             title = runsText(p.obj("title")),
             artist = artists.joinToString(", ").ifEmpty { runs.firstOrNull()?.optString("text") ?: "" },
             album = album ?: "",
+            albumId = albumRun?.let { browseId(it) },
             duration = parseDuration(runsText(p.obj("lengthText"))),
             cover = thumb(p.obj("thumbnail")),
+            artistId = artistId,
         )
     }
 
@@ -272,6 +279,19 @@ class YtMusicApi(private val prefs: Prefs) {
         return findAll(r, "musicTwoRowItemRenderer").mapNotNull { mapTwoRow(it) as? Playlist }
             .filter { it.id != "yt:VLLM" }
             .let { listOf(Playlist("yt:VLLM", SOURCE_YT, "Понравившиеся", subtitle = "YouTube Music")) + it }
+    }
+
+    /** Страница исполнителя YouTube Music: песни и альбомы */
+    suspend fun artist(channelId: String): ArtistPage {
+        val r = post("browse", JSONObject().put("browseId", channelId))
+        val header = findAll(r, "musicImmersiveHeaderRenderer").firstOrNull() ?: findAll(r, "musicVisualHeaderRenderer").firstOrNull()
+        val name = header?.let { runsText(it.obj("title")) }?.ifBlank { null } ?: "Исполнитель"
+        val cover = header?.let { thumb(it.obj("thumbnail")) }
+        val songs = tracksIn(findAll(r, "musicShelfRenderer").firstOrNull()).map { if (it.cover == null) it.copy(cover = cover) else it }
+        val albums = findAll(r, "musicTwoRowItemRenderer").mapNotNull { mapTwoRow(it) as? Playlist }
+            .filter { it.id.startsWith("yt:MPRE") }
+            .distinctBy { it.id }
+        return ArtistPage(SOURCE_YT, channelId, name, cover, null, songs, albums)
     }
 
     /** «Радио» по треку — основа подмешивания YT в волну */

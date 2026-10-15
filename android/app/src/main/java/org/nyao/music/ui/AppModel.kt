@@ -23,6 +23,7 @@ sealed interface Route {
     data object Library : Route
     data object Settings : Route
     data class PlaylistPage(val playlist: Playlist) : Route
+    data class ArtistPage(val source: String, val id: String?, val name: String) : Route
 }
 
 /** Состояние экранов: живёт, пока живёт окно, чтобы вкладки не грузились заново при каждом переходе. */
@@ -34,8 +35,20 @@ class AppModel(private val scope: CoroutineScope) {
     var nowPlayingOpen by mutableStateOf(false)
     var loginFor by mutableStateOf<String?>(null)
 
+    fun openArtist(t: Track) {
+        nowPlayingOpen = false
+        go(Route.ArtistPage(t.source, t.artistId, t.artist.substringBefore(",").trim()))
+    }
+
+    /** Альбом трека как плейлист (Яндекс и YouTube Music знают альбом) */
+    fun albumOf(t: Track): Playlist? = when {
+        t.source == org.nyao.music.data.SOURCE_YA && t.albumId != null -> Playlist("yaalbum:${t.albumId}", t.source, t.album.ifBlank { "Альбом" }, cover = t.cover, subtitle = t.artist)
+        t.source == org.nyao.music.data.SOURCE_YT && t.albumId?.startsWith("MPRE") == true -> Playlist("yt:${t.albumId}", t.source, t.album.ifBlank { "Альбом" }, cover = t.cover, subtitle = t.artist)
+        else -> null
+    }
+
     fun go(r: Route) {
-        if (r is Route.PlaylistPage) stack.add(r)
+        if (r is Route.PlaylistPage || r is Route.ArtistPage) stack.add(r)
         else {
             // вкладки верхнего уровня не копятся в истории
             stack.clear()

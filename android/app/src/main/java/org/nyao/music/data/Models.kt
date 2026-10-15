@@ -14,6 +14,8 @@ data class Track(
     val available: Boolean = true,
     /** Громкость трека в LUFS (Яндекс, r128) — для выравнивания громкости */
     val loud: Double? = null,
+    /** id основного исполнителя в сервисе (Яндекс — число, YouTube — UC…), для страницы исполнителя */
+    val artistId: String? = null,
 ) {
     val isYa: Boolean get() = source == SOURCE_YA
 }
@@ -98,4 +100,15 @@ data class TrackDetails(
     val position: String? = null,
     val plays: Long? = null,
     val explicit: Boolean = false,
+)
+
+/** Страница исполнителя */
+data class ArtistPage(
+    val source: String,
+    val id: String?,
+    val name: String,
+    val cover: String? = null,
+    val listeners: Long? = null,
+    val popular: List<Track> = emptyList(),
+    val albums: List<Playlist> = emptyList(),
 )

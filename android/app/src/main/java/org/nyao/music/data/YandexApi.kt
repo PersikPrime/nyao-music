@@ -47,6 +47,7 @@ class YandexApi(private val prefs: Prefs) {
                 duration = (t.optLong("durationMs", 0) / 1000).toInt(),
                 cover = cover(t.str("coverUri") ?: album?.str("coverUri") ?: t.str("ogImage")),
                 available = t.optBoolean("available", true),
+                artistId = t.arr("artists").objects().firstOrNull()?.opt("id")?.toString(),
                 loud = t.optJSONObject("r128")?.let { r -> if (r.has("i")) r.optDouble("i").takeIf { !it.isNaN() } else null },
             )
         }
@@ -213,6 +214,37 @@ class YandexApi(private val prefs: Prefs) {
         } catch (_: Exception) {
             // фидбек не критичен
         }
+    }
+
+    /** Страница исполнителя: популярное и альбомы */
+    suspend fun artist(id: String): ArtistPage {
+        val r = obj("GET", "/artists/$id/brief-info")
+        val a = r.obj("artist")
+        val albums = (r.arr("albums").objects() + r.arr("alsoAlbums").objects()).map { al ->
+            Playlist(
+                id = "yaalbum:${al.opt("id")}",
+                source = SOURCE_YA,
+                title = al.optString("title"),
+                count = al.optInt("trackCount"),
+                cover = cover(al.str("coverUri"), 300),
+                subtitle = listOfNotNull(al.optInt("year").takeIf { it > 0 }?.toString(), if (al.str("type") == "single") "сингл" else "альбом").joinToString(" · "),
+            )
+        }
+        return ArtistPage(
+            source = SOURCE_YA,
+            id = id,
+            name = a?.optString("name") ?: "Исполнитель",
+            cover = cover(a?.obj("cover")?.str("uri") ?: a?.str("ogImage"), 600),
+            listeners = r.obj("stats")?.optLong("lastMonthListeners")?.takeIf { it > 0 },
+            popular = r.arr("popularTracks").objects().mapNotNull { mapTrack(it) },
+            albums = albums,
+        )
+    }
+
+    suspend fun albumTracks(id: String): List<Track> {
+        val r = obj("GET", "/albums/${id.removePrefix("yaalbum:")}/with-tracks")
+        val vols = r.arr("volumes")
+        return (0 until (vols?.length() ?: 0)).flatMap { i -> vols!!.optJSONArray(i).objects().mapNotNull { mapTrack(it) } }
     }
 
     /** Подробности трека: год, жанр, лейбл, номер в альбоме, «18+» */

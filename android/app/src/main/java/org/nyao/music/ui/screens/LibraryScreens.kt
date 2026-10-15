@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -97,6 +98,8 @@ private fun LazyListScope.trackGroup(model: AppModel, tracks: List<Track>, label
             onClick = { PlayerConnection.playList(tracks, i, label) },
             onPlayNext = { PlayerConnection.playNext(t) },
             onLike = { on -> model.like(t, on) },
+            onArtist = { model.openArtist(t) },
+            onAlbum = model.albumOf(t)?.let { al -> { model.go(Route.PlaylistPage(al)) } },
             shape = groupShape(i, tracks.size),
             modifier = Modifier.appear(if (i < 12) i else 0).padding(bottom = 3.dp),
         )
@@ -412,6 +415,71 @@ fun SearchScreen(model: AppModel) {
                 }
                 if (shown.isEmpty()) item { Hint("Ничего не нашлось.") }
                 else trackGroup(model, shown, "Поиск: ${model.searchQuery}", current?.id, likedIds)
+            }
+        }
+    }
+}
+
+// ---------- Исполнитель ----------
+
+/** Страница исполнителя: обложка, популярное, альбомы. У SoundCloud и VK — его треки из поиска */
+@Composable
+fun ArtistScreen(model: AppModel, r: Route.ArtistPage) {
+    var page by remember(r) { mutableStateOf<org.nyao.music.data.ArtistPage?>(null) }
+    var failed by remember(r) { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(r) {
+        page = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.artistPage(r.source, r.id, r.name) } }.getOrNull()
+        failed = page == null
+    }
+    val current by PlayerConnection.current.collectAsState()
+    val likedIds by Repo.liked.collectAsState()
+    val p = page
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
+        item {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { model.back() }) { Icon(NyaoIcons.ArrowBack, "Назад", tint = NyaoColors.Text) }
+            }
+        }
+        item {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Cover(p?.cover, Modifier.size(200.dp), androidx.compose.foundation.shape.CircleShape)
+                Text(p?.name ?: r.name, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 16.dp), maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text(
+                    org.nyao.music.data.sourceName(r.source) + (p?.listeners?.let { " · ${java.text.NumberFormat.getInstance(java.util.Locale("ru")).format(it)} слушателей за месяц" } ?: ""),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = NyaoColors.Muted,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                if (p != null && p.popular.isNotEmpty()) PlayButtons(p.popular, p.name, Modifier.padding(top = 18.dp, bottom = 8.dp))
+            }
+        }
+        when {
+            p == null && !failed -> item { Loading() }
+            p == null -> item { Hint("Не получилось загрузить исполнителя.") }
+            else -> {
+                if (p.popular.isNotEmpty()) {
+                    item { Text("Популярное", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp)) }
+                    trackGroup(model, p.popular.take(20), p.name, current?.id, likedIds)
+                }
+                if (p.albums.isNotEmpty()) {
+                    item { Text("Альбомы и синглы", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 20.dp, top = 22.dp, bottom = 10.dp)) }
+                    item {
+                        androidx.compose.foundation.lazy.LazyRow(
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(p.albums.size) { i ->
+                                val al = p.albums[i]
+                                Column(Modifier.size(width = 150.dp, height = 200.dp).clip(RoundedCornerShape(20.dp)).clickable { model.go(Route.PlaylistPage(al)) }) {
+                                    Cover(al.cover, Modifier.size(150.dp), RoundedCornerShape(20.dp))
+                                    Text(al.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp, start = 4.dp, end = 4.dp))
+                                    if (al.subtitle.isNotBlank()) Text(al.subtitle, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+                if (p.popular.isEmpty() && p.albums.isEmpty()) item { Hint("У этого исполнителя ничего не нашлось.") }
             }
         }
     }

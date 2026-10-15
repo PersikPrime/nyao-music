@@ -357,12 +357,15 @@ private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClos
                 }) { Text("Скопировать") }
                 androidx.compose.material3.OutlinedButton(onClick = {
                     onClose()
-                    model.nowPlayingOpen = false
-                    val q = t.artist.substringBefore(",").trim()
-                    model.searchQuery = q
-                    model.runSearch(q)
-                    model.go(org.nyao.music.ui.Route.Search)
-                }) { Text("Ещё от исполнителя") }
+                    model.openArtist(t)
+                }) { Text("Исполнитель") }
+                model.albumOf(t)?.let { al ->
+                    androidx.compose.material3.OutlinedButton(onClick = {
+                        onClose()
+                        model.nowPlayingOpen = false
+                        model.go(org.nyao.music.ui.Route.PlaylistPage(al))
+                    }) { Text("Альбом") }
+                }
                 androidx.compose.material3.OutlinedButton(onClick = {
                     runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(trackLink(t))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }) { Text("Открыть в ${if (t.source == org.nyao.music.data.SOURCE_YA) "Яндексе" else org.nyao.music.data.sourceName(t.source)}") }
