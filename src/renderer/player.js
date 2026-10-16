@@ -1,6 +1,16 @@
 // Плеер: очередь, режимы «волна» и «список», перемотка, Media Session (медиаклавиши Windows).
 const api = window.nyao;
 
+// Честное перемешивание (Фишер — Йетс): sort(() => Math.random() - 0.5) даёт перекос
+function shuffled(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export class Player extends EventTarget {
   constructor(audio) {
     super();
@@ -95,16 +105,38 @@ export class Player extends EventTarget {
     const start = Math.max(0, playable.indexOf(tracks[startIndex]));
     this.mode = 'list';
     this.label = label;
+    this.original = playable;
     if (this.shuffle) {
       const first = playable[start];
-      const rest = playable.filter((t) => t !== first).sort(() => Math.random() - 0.5);
-      this.queue = [first, ...rest];
+      this.queue = [first, ...shuffled(playable.filter((t) => t !== first))];
       this.index = 0;
     } else {
       this.queue = playable;
       this.index = start;
     }
     this.load();
+  }
+
+  /** Перемешивание включили или выключили посреди списка — очередь перестраивается сразу */
+  setShuffle(on) {
+    this.shuffle = !!on;
+    if (this.mode === 'wave' || !this.queue.length) return;
+    const cur = this.current;
+    if (this.shuffle) {
+      this.original = this.queue.slice();
+      const rest = this.queue.filter((t, i) => i !== this.index);
+      this.queue = cur ? [cur, ...shuffled(rest)] : shuffled(rest);
+      this.index = 0;
+    } else {
+      const base = (this.original || []).slice();
+      // что добавили в очередь уже вперемешку, остаётся — в конце
+      const ids = new Set(base.map((t) => t.id));
+      const extra = this.queue.filter((t) => !ids.has(t.id));
+      this.queue = [...base, ...extra];
+      const at = cur ? this.queue.findIndex((t) => t.id === cur.id) : -1;
+      this.index = at > -1 ? at : 0;
+    }
+    this.emit('queue');
   }
 
   playAt(i) {

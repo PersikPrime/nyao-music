@@ -2609,7 +2609,8 @@ $('#pb-next').onclick = () => player.next(true);
 $('#pb-prev').onclick = () => player.prev();
 $('#pb-shuffle').onclick = () => {
   if (player.mode === 'wave') return player.dislike();
-  player.shuffle = !player.shuffle;
+  player.setShuffle(!player.shuffle);
+  toast(player.shuffle ? 'Очередь перемешана' : 'Очередь снова по порядку');
   renderBar();
 };
 $('#pb-repeat').onclick = () => {
@@ -2714,7 +2715,7 @@ player.addEventListener('queue', () => {
     const sc2 = $('#drawer .dr-scroll');
     if (sc2) sc2.scrollTop = top;
   } else if (state.drawer === 'info') renderDrawer();
-  if (fullscreen.open) fullscreen.renderQueue();
+  if (fullscreen.open) fullscreen.renderQueue(false, true);
 });
 player.addEventListener('state', () => {
   renderBar();
