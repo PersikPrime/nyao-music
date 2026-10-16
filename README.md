@@ -7,7 +7,7 @@
 </p>
 
 
-
+## Скриншоты:
 
 <img width="1796" height="1122" alt="image" src="https://github.com/user-attachments/assets/091de441-8291-40b6-adf3-999c4de75a0f" />
 
