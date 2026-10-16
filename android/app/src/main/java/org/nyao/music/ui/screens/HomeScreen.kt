@@ -201,7 +201,7 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
     }
 }
 
-/** Устройства (Nyao Connect), «Слушать вместе» и «Итоги» */
+/** Устройства (Nyao Connect), «Слушать вместе» и «Статистика» */
 @Composable
 private fun SocialRow(model: AppModel, modifier: Modifier = Modifier) {
     val room by org.nyao.music.playback.Together.room.collectAsState()
@@ -209,7 +209,7 @@ private fun SocialRow(model: AppModel, modifier: Modifier = Modifier) {
         listOf(
             Triple(NyaoIcons.Devices, "Устройства") { model.connectOpen = true },
             Triple(NyaoIcons.Group, if (room != null) "В комнате" else "Вместе") { model.go(Route.Together) },
-            Triple(NyaoIcons.BarChart, "Итоги") { model.go(Route.Stats) },
+            Triple(NyaoIcons.BarChart, "Статистика") { model.go(Route.Stats) },
         ).forEach { (icon, label, open) ->
             Column(
                 Modifier.weight(1f).bouncy().clip(RoundedCornerShape(24.dp)).background(if (label == "В комнате") NyaoColors.Tonal else NyaoColors.S2).clickable(onClick = open).padding(vertical = 14.dp),

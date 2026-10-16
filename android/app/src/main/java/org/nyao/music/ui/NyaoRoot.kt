@@ -30,6 +30,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.ui.unit.IntOffset
@@ -97,7 +98,6 @@ import org.nyao.music.ui.screens.NowPlayingScreen
 import org.nyao.music.ui.screens.OnboardingScreen
 import org.nyao.music.ui.screens.PlaylistScreen
 import org.nyao.music.ui.screens.SearchScreen
-import org.nyao.music.ui.screens.SettingsScreen
 import org.nyao.music.ui.screens.WaveScreen
 
 /** Порядок экранов для направления анимации: вкладки слева направо, страницы плейлистов — «глубже» */
@@ -107,35 +107,29 @@ private fun routeOrder(r: Route): Int = when (r) {
     Route.Library -> 2
     Route.Search -> 3
     Route.Settings -> 4
-    is Route.PlaylistPage -> 5
-    is Route.ArtistPage -> 6
-    Route.Together -> 7
+    Route.Together -> 5
+    is Route.PlaylistPage -> 6
+    is Route.ArtistPage -> 7
     Route.Stats -> 8
+    is Route.SettingsPage -> 9
 }
 
 /** icon — обычная (контурная), iconOn — залитая для выбранной вкладки, как в Material 3 Expressive */
 private data class Tab(val route: Route, val label: String, val icon: ImageVector, val iconOn: ImageVector = icon)
 
-private val TABS = listOf(
-    Tab(Route.Home, "Главная", NyaoIcons.Home, NyaoIcons.HomeFilled),
-    Tab(Route.Wave, "Волна", NyaoIcons.Waves, NyaoIcons.WavesFilled),
-    Tab(Route.Library, "Медиатека", NyaoIcons.LibraryMusic, NyaoIcons.LibraryMusicFilled),
-    Tab(Route.Settings, "Настройки", NyaoIcons.Settings, NyaoIcons.SettingsFilled),
-)
+private val HOME_TAB = Tab(Route.Home, "Главная", NyaoIcons.Home, NyaoIcons.HomeFilled)
+private val WAVE_TAB = Tab(Route.Wave, "Волна", NyaoIcons.Waves, NyaoIcons.WavesFilled)
+private val LIBRARY_TAB = Tab(Route.Library, "Медиатека", NyaoIcons.LibraryMusic, NyaoIcons.LibraryMusicFilled)
+private val SEARCH_TAB = Tab(Route.Search, "Поиск", NyaoIcons.Search)
+private val PROFILE_TAB = Tab(Route.Settings, "Профиль", NyaoIcons.Person, NyaoIcons.PersonFilled)
+private val TOGETHER_TAB = Tab(Route.Together, "Вместе", NyaoIcons.Groups, NyaoIcons.GroupsFilled)
 
-/** Режим «Плеер»: вместо вкладки волны — поиск (волну можно вернуть в настройках) */
-private val PLAYER_TABS = listOf(
-    Tab(Route.Home, "Главная", NyaoIcons.Home, NyaoIcons.HomeFilled),
-    Tab(Route.Search, "Поиск", NyaoIcons.Search),
-    Tab(Route.Library, "Медиатека", NyaoIcons.LibraryMusic, NyaoIcons.LibraryMusicFilled),
-    Tab(Route.Settings, "Настройки", NyaoIcons.Settings, NyaoIcons.SettingsFilled),
-)
+/** Основная панель: Главная · (Волна) · Медиатека · Поиск · аватар профиля */
+private fun tabsFor(s: org.nyao.music.data.Settings): List<Tab> =
+    listOf(HOME_TAB) + (if (s.isWaveLayout || s.waveTab) listOf(WAVE_TAB) else emptyList()) + listOf(LIBRARY_TAB, SEARCH_TAB, PROFILE_TAB)
 
-private fun tabsFor(s: org.nyao.music.data.Settings): List<Tab> = when {
-    s.isWaveLayout -> TABS
-    s.waveTab -> listOf(PLAYER_TABS[0], TABS[1]) + PLAYER_TABS.drop(1)
-    else -> PLAYER_TABS
-}
+/** Раздел профиля: панель превращается в «домой» отдельной кнопкой + профиль и «Вместе» */
+private fun isProfileArea(r: Route): Boolean = r == Route.Settings || r == Route.Together || r == Route.Stats || r is Route.SettingsPage
 
 @Composable
 fun NyaoRoot() {
@@ -264,7 +258,8 @@ private fun Content(model: AppModel, wide: Boolean) {
             Route.Wave -> WaveScreen(model)
             Route.Search -> SearchScreen(model)
             Route.Library -> LibraryScreen(model, wide)
-            Route.Settings -> SettingsScreen(model)
+            Route.Settings -> org.nyao.music.ui.screens.ProfileScreen(model)
+            is Route.SettingsPage -> org.nyao.music.ui.screens.SettingsPageScreen(model, r.section)
             is Route.PlaylistPage -> PlaylistScreen(model, r.playlist)
             is Route.ArtistPage -> org.nyao.music.ui.screens.ArtistScreen(model, r)
             Route.Together -> org.nyao.music.ui.screens.TogetherScreen(model)
@@ -405,30 +400,71 @@ private fun BottomBlur(shot: androidx.compose.ui.graphics.layer.GraphicsLayer, b
     )
 }
 
-/** Плавающая панель из макета: выбранная вкладка раскрывается в «таблетку» с подписью */
+/**
+ * Плавающая панель: выбранная вкладка раскрывается в «таблетку» с подписью.
+ * Нажал на свой аватар — панель перестраивается: «Главная» уходит в отдельный кружок слева,
+ * а в капсуле остаются профиль и «Вместе» (комнаты).
+ */
 @Composable
 private fun FloatingToolbar(model: AppModel) {
-    val selectedRoute = if (model.route == Route.Together || model.route == Route.Stats) Route.Home else if (model.route is Route.PlaylistPage || model.route is Route.ArtistPage || (model.route == Route.Search && Repo.prefs.settings.value.isWaveLayout)) Route.Library else model.route
-    Surface(shape = RoundedCornerShape(30.dp), color = NyaoColors.S3, shadowElevation = 12.dp) {
-        Row(Modifier.height(60.dp).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            tabsFor(Repo.prefs.settings.collectAsState().value).forEach { tab ->
-                val selected = selectedRoute == tab.route
-                Row(
-                    Modifier
-                        .height(44.dp)
-                        .bouncy().clip(RoundedCornerShape(22.dp))
-                        .background(if (selected) NyaoColors.Primary else NyaoColors.S3)
-                        .clickable { model.go(tab.route) }
-                        .padding(horizontal = if (selected) 16.dp else 13.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(if (selected) tab.iconOn else tab.icon, tab.label, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
-                    AnimatedVisibility(selected, enter = expandHorizontally(spring(dampingRatio = 0.7f)) + fadeIn(), exit = shrinkHorizontally(spring(dampingRatio = 0.9f)) + fadeOut()) {
-                        Text(tab.label, style = MaterialTheme.typography.labelLarge, color = NyaoColors.OnPrimary, maxLines = 1)
+    val settings by Repo.prefs.settings.collectAsState()
+    val profileArea = isProfileArea(model.route)
+    AnimatedContent(
+        profileArea,
+        transitionSpec = {
+            val spec = spring<IntOffset>(dampingRatio = 0.8f, stiffness = 420f)
+            (fadeIn(tween(200)) + slideInHorizontally(spec) { if (targetState) it / 4 else -it / 4 } + scaleIn(tween(240), initialScale = 0.92f)) togetherWith
+                (fadeOut(tween(140)) + scaleOut(tween(180), targetScale = 0.94f))
+        },
+        label = "toolbar",
+    ) { profile ->
+        if (!profile) {
+            val selectedRoute = if (model.route is Route.PlaylistPage || model.route is Route.ArtistPage) Route.Library else model.route
+            ToolbarCapsule {
+                tabsFor(settings).forEach { tab -> ToolbarItem(tab, selectedRoute == tab.route) { model.go(tab.route) } }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                // «Главная» — отдельным кружком: вернуться из профиля одним нажатием
+                Surface(shape = CircleShape, color = NyaoColors.S3, shadowElevation = 12.dp) {
+                    Box(Modifier.size(60.dp).bouncy().clip(CircleShape).clickable { model.go(Route.Home) }, contentAlignment = Alignment.Center) {
+                        Icon(NyaoIcons.Home, "Главная", tint = NyaoColors.Muted, modifier = Modifier.size(24.dp))
                     }
                 }
+                ToolbarCapsule {
+                    val inRooms = model.route == Route.Together
+                    ToolbarItem(PROFILE_TAB, !inRooms) { model.go(Route.Settings) }
+                    ToolbarItem(TOGETHER_TAB, inRooms) { model.go(Route.Together) }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun ToolbarCapsule(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Surface(shape = RoundedCornerShape(30.dp), color = NyaoColors.S3, shadowElevation = 12.dp) {
+        Row(Modifier.height(60.dp).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+    }
+}
+
+@Composable
+private fun ToolbarItem(tab: Tab, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .height(44.dp)
+            .bouncy().clip(RoundedCornerShape(22.dp))
+            .background(if (selected) NyaoColors.Primary else NyaoColors.S3)
+            .clickable(onClick = onClick)
+            .padding(start = if (selected) 12.dp else 10.dp, end = if (selected) 16.dp else 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // профиль — твой аватар из аккаунта Nyao (или буква), остальные — иконки
+        if (tab.route == Route.Settings) org.nyao.music.ui.screens.NyaoAvatar(size = 28)
+        else Icon(if (selected) tab.iconOn else tab.icon, tab.label, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
+        AnimatedVisibility(selected, enter = expandHorizontally(spring(dampingRatio = 0.7f)) + fadeIn(), exit = shrinkHorizontally(spring(dampingRatio = 0.9f)) + fadeOut()) {
+            Text(tab.label, style = MaterialTheme.typography.labelLarge, color = NyaoColors.OnPrimary, maxLines = 1)
         }
     }
 }
@@ -486,11 +522,14 @@ private fun WideLayout(model: AppModel, showPane: Boolean) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            tabsFor(Repo.prefs.settings.collectAsState().value).forEach { tab ->
-                val selected = model.route == tab.route
+            val railTabs = tabsFor(Repo.prefs.settings.collectAsState().value).let { it.dropLast(1) + TOGETHER_TAB + it.last() }
+            railTabs.forEach { tab ->
+                val selected = model.route == tab.route || (tab.route == Route.Settings && (model.route == Route.Stats || model.route is Route.SettingsPage)) ||
+                    (tab.route == Route.Library && (model.route is Route.PlaylistPage || model.route is Route.ArtistPage))
                 Column(Modifier.bouncy().clip(RoundedCornerShape(16.dp)).clickable { model.go(tab.route) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box(Modifier.width(56.dp).height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (selected) NyaoColors.Primary else Color.Transparent), contentAlignment = Alignment.Center) {
-                        Icon(if (selected) tab.iconOn else tab.icon, null, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
+                        if (tab.route == Route.Settings) org.nyao.music.ui.screens.NyaoAvatar(size = 26)
+                        else Icon(if (selected) tab.iconOn else tab.icon, null, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
                     }
                     Text(tab.label, style = MaterialTheme.typography.labelMedium, color = if (selected) NyaoColors.Text else NyaoColors.Muted, maxLines = 1)
                 }

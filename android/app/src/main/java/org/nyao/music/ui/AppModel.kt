@@ -21,7 +21,10 @@ sealed interface Route {
     data object Wave : Route
     data object Search : Route
     data object Library : Route
+    /** Профиль: аккаунт и все настройки (раньше — вкладка «Настройки») */
     data object Settings : Route
+    /** Раздел настроек, открытый из профиля: "sound", "svc:ya", "lastfm"… */
+    data class SettingsPage(val section: String) : Route
     data class PlaylistPage(val playlist: Playlist) : Route
     data class ArtistPage(val source: String, val id: String?, val name: String) : Route
     data object Together : Route
@@ -57,7 +60,7 @@ class AppModel(private val scope: CoroutineScope) {
     }
 
     fun go(r: Route) {
-        if (r is Route.PlaylistPage || r is Route.ArtistPage || r == Route.Together || r == Route.Stats) {
+        if (r is Route.PlaylistPage || r is Route.ArtistPage || r is Route.SettingsPage || r == Route.Stats) {
             nowPlayingOpen = false
             stack.add(r)
         }

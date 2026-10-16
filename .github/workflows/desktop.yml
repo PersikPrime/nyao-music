@@ -4,6 +4,8 @@ name: Desktop (Windows + macOS)
 
 on:
   push:
+    # nightly — экспериментальные сборки только для Android
+    branches-ignore: [nightly]
     paths: ['src/**', 'build/**', 'package.json', 'package-lock.json', 'version.json', '.github/workflows/desktop.yml', '.github/scripts/**']
   workflow_dispatch:
 

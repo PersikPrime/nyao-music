@@ -282,10 +282,8 @@ fun TogetherScreen(model: AppModel) {
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
             item {
-                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { model.back() }) { Icon(NyaoIcons.ArrowBack, "Назад", tint = NyaoColors.Text) }
-                    Text("Слушать вместе", style = MaterialTheme.typography.titleLarge)
-                }
+                // «Вместе» теперь вкладка раздела профиля — без стрелки «назад», домой ведёт кнопка в панели
+                Text("Вместе", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.statusBarsPadding().padding(start = 20.dp, top = 16.dp, bottom = 4.dp))
             }
             val r = room
             if (!Repo.cloud.loggedIn) {
@@ -434,7 +432,7 @@ fun TogetherScreen(model: AppModel) {
     }
 }
 
-// ======================= Итоги =======================
+// ======================= Статистика =======================
 
 private val PERIODS = listOf("week" to "Неделя", "month" to "Месяц", "year" to "Год", "all" to "Всё")
 
@@ -476,7 +474,7 @@ fun StatsScreen(model: AppModel) {
         item {
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { model.back() }) { Icon(NyaoIcons.ArrowBack, "Назад", tint = NyaoColors.Text) }
-                Text("Итоги", style = MaterialTheme.typography.titleLarge)
+                Text("Статистика", style = MaterialTheme.typography.titleLarge)
             }
         }
         item {
@@ -490,7 +488,7 @@ fun StatsScreen(model: AppModel) {
         when {
             !Repo.cloud.loggedIn -> item {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Hint("Итоги собираются из истории прослушиваний со всех твоих устройств — она хранится в аккаунте Nyao.")
+                    Hint("Статистика собирается из истории прослушиваний со всех твоих устройств — она хранится в аккаунте Nyao.")
                     Button(onClick = { model.go(Route.Settings) }) { Text("Войти в аккаунт Nyao") }
                 }
             }
@@ -564,13 +562,13 @@ fun StatsScreen(model: AppModel) {
                 item {
                     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 24.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Треки", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { PlayerConnection.playList(topTracks.map { it.first }, 0, "Итоги: любимое") }) { Text("Слушать все") }
+                        TextButton(onClick = { PlayerConnection.playList(topTracks.map { it.first }, 0, "Статистика: любимое") }) { Text("Слушать все") }
                     }
                 }
                 itemsIndexed(topTracks) { i, (t, n) ->
                     Row(
                         Modifier.padding(horizontal = 12.dp, vertical = 2.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(NyaoColors.S2)
-                            .clickable { PlayerConnection.playList(topTracks.map { it.first }, i, "Итоги: любимое") }.padding(8.dp),
+                            .clickable { PlayerConnection.playList(topTracks.map { it.first }, i, "Статистика: любимое") }.padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Cover(t.cover, Modifier.size(48.dp), RoundedCornerShape(10.dp))

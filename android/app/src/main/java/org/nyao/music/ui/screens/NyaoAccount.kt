@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import org.nyao.music.data.CloudDevice
@@ -59,15 +60,15 @@ private val TelegramBlue = Color(0xFF2AABEE)
 
 /** Аватар аккаунта Nyao: фото из Telegram или первая буква */
 @Composable
-fun NyaoAvatar(size: Int = 52) {
+fun NyaoAvatar(size: Int = 52, shape: androidx.compose.ui.graphics.Shape = CircleShape) {
     val user by Repo.cloud.user.collectAsState()
     Box(
-        Modifier.size(size.dp).clip(CircleShape).background(Brush.linearGradient(listOf(NyaoColors.Lavender, Color(0xFF7F6BFF)))),
+        Modifier.size(size.dp).clip(shape).background(Brush.linearGradient(listOf(NyaoColors.Lavender, Color(0xFF7F6BFF)))),
         contentAlignment = Alignment.Center,
     ) {
         val pic = user?.picture
         if (pic != null) AsyncImage(model = pic, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        else Text((user?.name?.firstOrNull() ?: 'N').uppercase(), color = NyaoColors.OnLavender, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+        else Text((user?.name?.firstOrNull() ?: 'N').uppercase(), color = NyaoColors.OnLavender, fontWeight = FontWeight.Bold, fontSize = (size * 0.42f).sp)
     }
 }
 
