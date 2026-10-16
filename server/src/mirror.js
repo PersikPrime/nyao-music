@@ -1,4 +1,5 @@
-// Зеркало обновлений: раз в 15 минут смотрит последний релиз на GitHub и докачивает его файлы к себе.
+// Зеркало обновлений: раз в 3 минуты смотрит последний релиз на GitHub и докачивает его файлы к себе.
+// Новый релиз виден клиентам сразу (со ссылками на GitHub), а файлы подменяются на наши по мере докачки.
 // Клиенты сначала спрашивают сервер (быстро из РФ), а если он недоступен — GitHub напрямую.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -45,24 +46,36 @@ export class ReleaseMirror {
     return path.join(this.dir, tag, name);
   }
 
+  /** Узнать последний релиз (лёгкий запрос) — работает даже во время докачки прошлого */
+  async refresh() {
+    const res = await this.fetch(`https://api.github.com/repos/${this.repo}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'NyaoMusic-Server' }
+    });
+    if (!res.ok) throw new Error(`GitHub ${res.status}`);
+    const rel = await res.json();
+    if (!SAFE.test(rel.tag_name || '')) throw new Error('странный тег релиза');
+    rel.assets = (rel.assets || []).filter((a) => SAFE.test(a.name));
+    // в релиз могли попасть файлы чужой сборки (например, 0.5.30 в v0.6.31) — отдаём только свои
+    const ver = /^v?(\d+\.\d+)\.(\d+)$/.exec(rel.tag_name);
+    if (ver) {
+      const own = rel.assets.filter((a) => a.name.includes(`${ver[1]}.${ver[2]}`) || a.name.includes(`${ver[1]}-${ver[2]}`));
+      if (own.length) rel.assets = own;
+    }
+    this.release = rel;
+    return rel;
+  }
+
   async sync() {
-    if (this.busy) return;
+    let rel;
+    try {
+      rel = await this.refresh();
+    } catch (e) {
+      this.log(`[mirror] ${e.message}`);
+      return;
+    }
+    if (this.busy) return; // файлы прошлого раза ещё качаются — новый релиз уже виден, докачаем следом
     this.busy = true;
     try {
-      const res = await this.fetch(`https://api.github.com/repos/${this.repo}/releases/latest`, {
-        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'NyaoMusic-Server' }
-      });
-      if (!res.ok) throw new Error(`GitHub ${res.status}`);
-      const rel = await res.json();
-      if (!SAFE.test(rel.tag_name || '')) throw new Error('странный тег релиза');
-      rel.assets = (rel.assets || []).filter((a) => SAFE.test(a.name));
-      // в релиз могли попасть файлы чужой сборки (например, 0.5.30 в v0.6.31) — отдаём только свои
-      const ver = /^v?(\d+\.\d+)\.(\d+)$/.exec(rel.tag_name);
-      if (ver) {
-        const own = rel.assets.filter((a) => a.name.includes(`${ver[1]}.${ver[2]}`) || a.name.includes(`${ver[1]}-${ver[2]}`));
-        if (own.length) rel.assets = own;
-      }
-      this.release = rel;
       const tagDir = path.join(this.dir, rel.tag_name);
       fs.mkdirSync(tagDir, { recursive: true });
       for (const a of rel.assets) {

@@ -1,12 +1,23 @@
 // HTTP API сервера Nyao Music. Без фреймворков: маршрутов мало, зависимостей меньше — меньше дыр.
 import crypto from 'node:crypto';
+import { normalizeStatus } from './status.js';
 import fs from 'node:fs';
 import { pkce } from './telegram.js';
+import { Hub } from './hub.js';
+import { summarize, periodRange } from './stats.js';
 
 const LOGIN_TTL = 10 * 60_000;
 const MAX_BODY = 512 * 1024;
 const KEY_RE = /^[a-z0-9_-]{1,32}$/;
 const NOW_FRESH_DAYS = 7;
+const CONNECT_CMDS = new Set(['toggle', 'play', 'pause', 'next', 'prev', 'seek', 'volume', 'playTracks', 'like']);
+const CODE_RE = /^[A-Z0-9]{6}$/;
+
+/** Трек от клиента → только нужные поля, обрезанные по длине */
+function cleanTrack(t) {
+  if (!t || !t.id) return null;
+  return { id: clip(t.id, 128), source: clip(t.source, 8), srcId: clip(t.srcId, 128), title: clip(t.title, 256), artist: clip(t.artist, 256), album: clip(t.album, 256), albumId: t.albumId ? clip(t.albumId, 64) : null, duration: Math.round(Number(t.duration) || 0), cover: t.cover ? clip(t.cover, 512) : null };
+}
 
 export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const newToken = () => crypto.randomBytes(32).toString('base64url');
@@ -83,7 +94,7 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0 }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub() }) {
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
   setInterval(() => {
     const now = Date.now();
@@ -129,6 +140,8 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
 
   const routes = [
     ['GET', /^\/health$/, async () => ({ ok: true, minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
+    // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)
+    ['GET', /^\/status$/, async () => (status ? status.get() : normalizeStatus(null))],
 
     // ---------- Вход ----------
     ['POST', /^\/auth\/start$/, async ({ req, ip }) => {
@@ -255,16 +268,31 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         return { ok: true };
       }
       const data = {
-        track: { id: clip(t.id, 128), source: clip(t.source, 8), srcId: clip(t.srcId, 128), title: clip(t.title, 256), artist: clip(t.artist, 256), album: clip(t.album, 256), albumId: t.albumId ? clip(t.albumId, 64) : null, duration: Math.round(Number(t.duration) || 0), cover: t.cover ? clip(t.cover, 512) : null },
+        track: cleanTrack(t),
         position: Math.max(0, Number(body.position) || 0),
         playing: !!body.playing,
-        context: clip(body.context, 32)
+        context: clip(body.context, 32),
+        ...(body.volume != null ? { volume: Math.max(0, Math.min(1, Number(body.volume) || 0)) } : {})
       };
+      // очередь (откуда играет и что дальше) присылают только при смене трека — иначе оставляем прежнюю
+      let queue;
+      if (body.queue && Array.isArray(body.queue.tracks)) {
+        const tracks = body.queue.tracks.slice(0, 100).map(cleanTrack).filter(Boolean);
+        queue = { tracks, index: Math.max(0, Math.min(tracks.length - 1, Number(body.queue.index) || 0)), label: clip(body.queue.label, 128), mode: ['wave', 'radio', 'list'].includes(body.queue.mode) ? body.queue.mode : 'list' };
+      } else {
+        const cur = await q('SELECT data FROM now_playing WHERE session_id = $1', [s.sid]);
+        const old = cur.rows[0] && (typeof cur.rows[0].data === 'string' ? JSON.parse(cur.rows[0].data) : cur.rows[0].data);
+        if (old && old.queue && old.track && data.track && old.track.id === data.track.id) queue = old.queue;
+      }
+      if (queue) data.queue = queue;
       await q(
         `INSERT INTO now_playing (session_id, user_id, data, updated_at) VALUES ($1, $2, $3, now())
          ON CONFLICT (session_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
         [s.sid, s.uid, JSON.stringify(data)]
       );
+      // пульт на других устройствах видит изменения сразу
+      const { queue: _q, ...light } = data; // очередь в живые события не кладём — её берут из /connect/devices
+      hub.pushUser(s.uid, { type: 'now', deviceId: String(s.sid), device: s.device, platform: s.platform, updatedAt: Date.now(), ...light }, s.sid);
       return { ok: true };
     }, true],
     ['GET', /^\/now$/, async ({ s }) => {
@@ -275,6 +303,99 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         [s.uid, s.sid, since]
       );
       return { devices: rows.map((r) => ({ deviceId: String(r.session_id), device: r.device, platform: r.platform, updatedAt: new Date(r.updated_at).getTime(), ...r.data })) };
+    }, true],
+
+    // ---------- Живые события (длинный опрос) ----------
+    ['GET', /^\/events$/, async ({ s, url }) => {
+      const cursor = Math.max(0, Number(url.searchParams.get('cursor')) || 0);
+      const wait = url.searchParams.get('wait') === '0' ? 0 : undefined;
+      return hub.wait(s.sid, s.uid, cursor, wait);
+    }, true],
+
+    // ---------- Nyao Connect: пульт для своих устройств ----------
+    ['GET', /^\/connect\/devices$/, async ({ s }) => {
+      const { rows } = await q(
+        `SELECT ss.id, ss.device, ss.platform, ss.last_seen, n.data, n.updated_at FROM sessions ss LEFT JOIN now_playing n ON n.session_id = ss.id
+          WHERE ss.user_id = $1 ORDER BY ss.last_seen DESC`,
+        [s.uid]
+      );
+      return {
+        devices: rows.map((r) => ({
+          deviceId: String(r.id), device: r.device, platform: r.platform, current: Number(r.id) === s.sid,
+          online: Number(r.id) === s.sid || hub.isOnline(Number(r.id)),
+          ...(r.data ? { ...r.data, updatedAt: new Date(r.updated_at).getTime() } : {})
+        }))
+      };
+    }, true],
+    ['POST', /^\/connect\/(\d+)\/cmd$/, async ({ s, m, req }) => {
+      const target = Number(m[1]);
+      const body = await readJson(req);
+      if (!CONNECT_CMDS.has(body.cmd)) throw new HttpError(400, 'Неизвестная команда');
+      const { rows } = await q('SELECT id FROM sessions WHERE id = $1 AND user_id = $2', [target, s.uid]);
+      if (!rows.length) throw new HttpError(404, 'Нет такого устройства');
+      if (target === s.sid) throw new HttpError(400, 'Это и есть это устройство');
+      if (!hub.isOnline(target)) throw new HttpError(409, 'Устройство не в сети — открой на нём Nyao Music');
+      let args = {};
+      if (body.cmd === 'seek') args = { position: Math.max(0, Number(body.args && body.args.position) || 0) };
+      if (body.cmd === 'volume') args = { volume: Math.max(0, Math.min(1, Number(body.args && body.args.volume) || 0)) };
+      if (body.cmd === 'playTracks') {
+        const a = body.args || {};
+        const tracks = (Array.isArray(a.tracks) ? a.tracks : []).slice(0, 300).map(cleanTrack).filter(Boolean);
+        if (!tracks.length) throw new HttpError(400, 'Нет треков');
+        args = { tracks, index: Math.max(0, Math.min(tracks.length - 1, Number(a.index) || 0)), position: Math.max(0, Number(a.position) || 0), title: clip(a.title, 128), play: a.play !== false };
+      }
+      hub.push(target, { type: 'cmd', cmd: body.cmd, args, from: { deviceId: String(s.sid), device: s.device } });
+      return { ok: true };
+    }, true],
+
+    // ---------- «Слушать вместе» ----------
+    ['GET', /^\/rooms\/current$/, async ({ s }) => {
+      const r = hub.roomOf(s.sid);
+      return { room: r ? { ...hub.snapshot(r), isHost: r.hostSid === s.sid } : null };
+    }, true],
+    ['POST', /^\/rooms$/, async ({ s }) => {
+      const room = hub.createRoom(s.sid, s.uid, { name: s.user.name || 'Хост', picture: s.user.picture, device: s.device });
+      return { room: { ...room, isHost: true } };
+    }, true],
+    ['POST', /^\/rooms\/([A-Za-z0-9]{6})\/join$/, async ({ s, m }) => {
+      let room;
+      try {
+        room = hub.joinRoom(m[1].toUpperCase(), s.sid, s.uid, { name: s.user.name || 'Гость', picture: s.user.picture });
+      } catch (e) {
+        throw new HttpError(e.status || 400, e.message);
+      }
+      if (!room) throw new HttpError(404, 'Комнаты с таким кодом нет — проверь код');
+      return { room: { ...room, isHost: hub.roomOf(s.sid).hostSid === s.sid } };
+    }, true],
+    ['POST', /^\/rooms\/([A-Za-z0-9]{6})\/leave$/, async ({ s, m }) => ({ ok: hub.leaveRoom(m[1].toUpperCase(), s.sid) }), true],
+    ['PUT', /^\/rooms\/([A-Za-z0-9]{6})\/state$/, async ({ s, m, req }) => {
+      const body = await readJson(req);
+      const room = hub.setRoomState(m[1].toUpperCase(), s.sid, { track: cleanTrack(body.track), position: body.position, playing: body.playing });
+      if (!room) throw new HttpError(403, 'Управлять может только тот, кто создал комнату');
+      return { room: { ...room, isHost: true } };
+    }, true],
+    ['POST', /^\/rooms\/([A-Za-z0-9]{6})\/react$/, async ({ s, m, req }) => {
+      const body = await readJson(req);
+      if (!hub.react(m[1].toUpperCase(), s.sid, body.emoji)) throw new HttpError(400, 'Не получилось отправить реакцию');
+      return { ok: true };
+    }, true],
+    ['GET', /^\/join\/([A-Za-z0-9]{6})$/, async ({ m }) => {
+      const code = m[1].toUpperCase();
+      return page(`Код комнаты: ${code}`, 'Открой Nyao Music → «Слушать вместе» → «Войти по коду» и введи этот код. Музыка будет играть у тебя в том сервисе, где ты вошёл.');
+    }],
+
+    // ---------- Итоги ----------
+    ['GET', /^\/stats$/, async ({ s, url }) => {
+      const period = ['week', 'month', 'year', 'all'].includes(url.searchParams.get('period')) ? url.searchParams.get('period') : 'month';
+      const tz = Math.max(-840, Math.min(840, Number(url.searchParams.get('tz')) || 0));
+      const year = Number(url.searchParams.get('year')) || null;
+      const { from, to } = periodRange(period, { tz, year: year && year > 2000 && year < 3000 ? year : null });
+      const { rows } = await q(
+        `SELECT track_id, source, title, artist, cover, duration, listened, skipped, played_at FROM plays
+          WHERE user_id = $1 AND played_at >= $2 AND played_at < $3 ORDER BY played_at LIMIT 300000`,
+        [s.uid, new Date(from), new Date(to)]
+      );
+      return { period, from: new Date(from).toISOString(), to: new Date(to).toISOString(), ...summarize(rows, { tz }) };
     }, true],
 
     // ---------- Обновления ----------

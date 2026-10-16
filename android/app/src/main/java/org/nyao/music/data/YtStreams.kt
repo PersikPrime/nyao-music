@@ -25,7 +25,7 @@ class YtStreams(private val yt: YtMusicApi) {
         val extra: Map<String, Any>,
     )
 
-    data class Stream(val url: String, val userAgent: String, val client: String, val expiresAt: Long, val contentLength: Long)
+    data class Stream(val url: String, val userAgent: String, val client: String, val expiresAt: Long, val contentLength: Long, val loudnessDb: Double? = null)
 
     companion object {
         private const val TAG = "NyaoYt"
@@ -76,6 +76,9 @@ class YtStreams(private val yt: YtMusicApi) {
     }
 
     /** Блокирующий вызов: зовётся из потока загрузки ExoPlayer. */
+    /** Громкость YouTube-трека, если ссылка уже получена */
+    fun loudness(videoId: String): Double? = cache[videoId]?.loudnessDb
+
     fun resolve(videoId: String): Stream {
         cache[videoId]?.let { if (it.expiresAt > System.currentTimeMillis() + 60_000) return it }
         kotlinx.coroutines.runBlocking { yt.ensureVisitor() }
@@ -140,7 +143,9 @@ class YtStreams(private val yt: YtMusicApi) {
         val uri = Uri.parse(url)
         val expire = uri.getQueryParameter("expire")?.toLongOrNull()?.times(1000) ?: (System.currentTimeMillis() + 3 * 3600_000L)
         val clen = best.optString("contentLength").toLongOrNull() ?: uri.getQueryParameter("clen")?.toLongOrNull() ?: -1L
-        return Stream(url, c.userAgent, c.key, expire, clen)
+        // насколько трек громче эталона YouTube (дБ) — для выравнивания громкости
+        val loud = r.path("playerConfig")?.obj("audioConfig")?.let { a -> if (a.has("loudnessDb")) a.optDouble("loudnessDb").takeIf { !it.isNaN() } else null }
+        return Stream(url, c.userAgent, c.key, expire, clen, loud)
     }
 
     /** Короткий запрос первых байт: googlevideo сразу отвечает 403, если ссылка «не наша» */

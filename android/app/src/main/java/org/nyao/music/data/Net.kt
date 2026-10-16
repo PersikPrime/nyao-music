@@ -17,6 +17,13 @@ object Net {
         .followRedirects(true)
         .build()
 
+    /** Для «длинного» опроса живых событий: сервер держит запрос до 25 секунд */
+    val longClient: OkHttpClient by lazy { client.newBuilder().readTimeout(45, TimeUnit.SECONDS).build() }
+
+    suspend fun callLong(req: Request): Pair<Int, String> = withContext(Dispatchers.IO) {
+        longClient.newCall(req).execute().use { res -> res.code to (res.body?.string() ?: "") }
+    }
+
     /** Блокирующий запрос — только из фоновых потоков. */
     fun execute(req: Request): Pair<Int, String> =
         client.newCall(req).execute().use { res -> res.code to (res.body?.string() ?: "") }

@@ -44,6 +44,10 @@ class ScApi(private val prefs: Prefs) {
 
     val loggedIn: Boolean get() = !prefs.scToken.isNullOrBlank()
 
+    /** Ссылка на проверку DataDome, если SoundCloud её попросил (окно показывает NyaoRoot) */
+    val captcha = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    @Volatile private var captchaShownAt = 0L
+
     @Volatile private var clientId: String? = null
     private var account: Account? = null
     private val raw = ConcurrentHashMap<String, JSONObject>()
@@ -94,7 +98,17 @@ class ScApi(private val prefs: Prefs) {
             clientId(force = true)
             return request(method, path, query, retry = false)
         }
-        if (code == 403 && text.contains("captcha-delivery.com")) throw ApiException("SoundCloud просит пройти проверку (капчу)", 403)
+        if (code == 403 && text.contains("captcha-delivery.com")) {
+            // ссылка на проверку DataDome — окно с ней откроется в приложении
+            Regex("https://[a-z.]*captcha-delivery\\.com/[^\"\\s]+").find(text)?.value?.replace("\\u0026", "&")?.let {
+                // не чаще раза в полчаса, чтобы фоновые попытки не выдёргивали окно снова и снова
+                if (System.currentTimeMillis() - captchaShownAt > 30 * 60_000L) {
+                    captchaShownAt = System.currentTimeMillis()
+                    captcha.value = it
+                }
+            }
+            throw ApiException("SoundCloud просит пройти проверку (капчу)", 403)
+        }
         if (code !in 200..299) throw ApiException("SoundCloud $method ${url.encodedPath}: $code", code)
         val t = text.trim()
         if (t.isEmpty()) return null
@@ -178,6 +192,19 @@ class ScApi(private val prefs: Prefs) {
         }
         if (diversity == "favorite") liked.filter { it.id !in exclude }.shuffled().take((size + 2) / 3).forEach { pool.putIfAbsent(it.id, it) }
         return pool.values.shuffled().take(size)
+    }
+
+    /** Подробности трека: жанр, год, лейбл, прослушивания */
+    suspend fun trackDetails(srcId: String): TrackDetails {
+        val t = raw[srcId]?.takeIf { it.has("created_at") } ?: freshTrack(srcId)
+        val pm = t.obj("publisher_metadata")
+        return TrackDetails(
+            year = (t.str("release_date") ?: t.str("created_at"))?.take(4)?.toIntOrNull(),
+            genre = t.str("genre"),
+            label = t.str("label_name") ?: pm?.str("publisher"),
+            plays = if (t.has("playback_count")) t.optLong("playback_count") else null,
+            explicit = pm?.optBoolean("explicit") == true,
+        )
     }
 
     /** Забыть сохранённый трек: при следующем запросе возьмём свежий (с новым track_authorization) */

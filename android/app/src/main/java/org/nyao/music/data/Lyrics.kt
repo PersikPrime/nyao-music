@@ -8,9 +8,9 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** Строка текста: time — секунды (null, если текст без синхронизации) */
 data class LyricLine(val time: Double?, val text: String)
-data class Lyrics(val synced: Boolean, val lines: List<LyricLine>)
+data class Lyrics(val synced: Boolean, val lines: List<LyricLine>, val source: String = "LRCLIB")
 
-/** Тексты из открытой базы LRCLIB — как lyrics.js на ПК */
+/** Тексты песен — как lyrics.js на ПК: Яндекс Музыка (лицензированные) → LRCLIB → YouTube Music; с таймингами лучше */
 object LyricsApi {
     private val cache = ConcurrentHashMap<String, Lyrics>()
     private val missing = ConcurrentHashMap.newKeySet<String>()
@@ -44,9 +44,34 @@ object LyricsApi {
         return null
     }
 
+    private fun plain(text: String, source: String) = Lyrics(false, text.lines().map { LyricLine(null, it.trim()) }, source)
+
     suspend fun find(track: Track): Lyrics? {
         cache[track.id]?.let { return it }
         if (track.id in missing) return null
+        var fallback: Lyrics? = null
+        // 1) Яндекс: сам трек или такой же, найденный в Яндексе
+        if (Repo.ya.loggedIn && Repo.up(SOURCE_YA)) {
+            val yaId = if (track.source == SOURCE_YA) track.srcId else runCatching { Match.find(track, 0.75) { q -> Repo.ya.search(q) }?.srcId }.getOrNull()
+            if (yaId != null) {
+                val lrc = runCatching { Repo.ya.lyrics(yaId, "LRC") }.getOrNull()
+                val name = { p: String? -> if (p != null) "Яндекс Музыка · $p" else "Яндекс Музыка" }
+                val lines = lrc?.let { parseLrc(it.first) }.orEmpty()
+                if (lines.isNotEmpty()) return Lyrics(true, lines, name(lrc?.second)).also { cache[track.id] = it }
+                runCatching { Repo.ya.lyrics(yaId, "TEXT") }.getOrNull()?.let { fallback = plain(it.first, name(it.second)) }
+            }
+        }
+        val lr = lrclib(track)
+        if (lr != null && lr.synced) return lr.also { cache[track.id] = it }
+        if (fallback == null) fallback = lr
+        // 3) YouTube Music — без таймингов
+        if (fallback == null && track.source == SOURCE_YT) runCatching { Repo.yt.lyrics(track.srcId) }.getOrNull()?.let { fallback = plain(it, "YouTube Music") }
+        val res = fallback
+        if (res != null) cache[track.id] = res else missing += track.id
+        return res
+    }
+
+    private suspend fun lrclib(track: Track): Lyrics? {
         val artist = track.artist.split(",").first().trim()
         val title = cleanTitle(track.title)
         val result = try {
@@ -63,7 +88,6 @@ object LyricsApi {
         } catch (_: Exception) {
             null
         }
-        if (result != null) cache[track.id] = result else missing += track.id
         return result
     }
 }

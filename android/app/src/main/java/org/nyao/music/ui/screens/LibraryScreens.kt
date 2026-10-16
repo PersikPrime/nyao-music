@@ -1,5 +1,8 @@
 package org.nyao.music.ui.screens
 
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.width
 import org.nyao.music.ui.components.NyaoIcons
 
 import androidx.compose.foundation.rememberScrollState
@@ -44,12 +47,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import org.nyao.music.ui.components.bouncy
 import org.nyao.music.ui.components.appear
 import androidx.compose.ui.draw.clip
@@ -88,15 +94,17 @@ private val TILE_SHAPES: List<Shape> = listOf(
 )
 
 /** Сгруппированный список треков внутри LazyColumn */
-private fun LazyListScope.trackGroup(model: AppModel, tracks: List<Track>, label: String, currentId: String?, liked: Set<String>) {
+private fun LazyListScope.trackGroup(model: AppModel, tracks: List<Track>, label: String, currentId: String?, liked: Set<String>, onPlay: ((Int) -> Unit)? = null) {
     itemsIndexed(tracks) { i, t ->
         TrackRow(
             track = t,
             current = currentId == t.id,
             liked = t.id in liked,
-            onClick = { PlayerConnection.playList(tracks, i, label) },
+            onClick = { onPlay?.invoke(i) ?: PlayerConnection.playList(tracks, i, label) },
             onPlayNext = { PlayerConnection.playNext(t) },
             onLike = { on -> model.like(t, on) },
+            onArtist = { model.openArtist(t) },
+            onAlbum = model.albumOf(t)?.let { al -> { model.go(Route.PlaylistPage(al)) } },
             shape = groupShape(i, tracks.size),
             modifier = Modifier.appear(if (i < 12) i else 0).padding(bottom = 3.dp),
         )
@@ -197,7 +205,8 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
                         }
                     }
                     item {
-                        Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            LikesDownloadChip(model, liked)
                             PillChip("Все · ${liked.size}", filter == "all", { filter = "all" })
                             if (ya > 0) PillChip("Яндекс · $ya", filter == SOURCE_YA, { filter = SOURCE_YA })
                             if (yt > 0) PillChip("YouTube · $yt", filter == SOURCE_YT, { filter = SOURCE_YT })
@@ -275,6 +284,8 @@ fun PlaylistScreen(model: AppModel, playlist: Playlist) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { model.back() }) { Icon(NyaoIcons.ArrowBack, "Назад", tint = NyaoColors.Text) }
                 Spacer(Modifier.weight(1f))
+                // перенести в другой сервис
+                if (!tracks.isNullOrEmpty()) IconButton(onClick = { model.transferFor = playlist to tracks }) { Icon(NyaoIcons.SwapHoriz, "Перенести в другой сервис", tint = NyaoColors.Text) }
                 // свой микс можно удалить
                 if (playlist.id.startsWith("mix:")) TextButton(onClick = {
                     Repo.mixStore.delete(playlist.id)
@@ -353,7 +364,82 @@ private fun OfflineButton(model: AppModel, playlist: Playlist, tracks: List<Trac
     }
 }
 
+/** «Скачать все лайки» — рядом с фильтрами в «Мне нравится» */
+@Composable
+private fun LikesDownloadChip(model: AppModel, liked: List<Track>) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val st by org.nyao.music.playback.Offline.state.collectAsState()
+    val id = "liked"
+    val prog = st.progress[id]
+    val can = liked.count { org.nyao.music.playback.Offline.canDownload(it) }
+    val have = liked.count { it.id in st.ids && org.nyao.music.playback.Offline.canDownload(it) }
+    if (can == 0) return
+    val done = prog == null && have >= can
+    Row(
+        Modifier.height(36.dp).bouncy().clip(RoundedCornerShape(18.dp))
+            .background(if (done) NyaoColors.S2 else NyaoColors.Tonal)
+            .clickable {
+                when {
+                    prog != null -> {
+                        org.nyao.music.playback.Offline.cancel(id)
+                        model.message("Загрузка лайков остановлена")
+                    }
+                    done -> model.message("Все лайки уже скачаны — удалить можно в «Скачанном»")
+                    else -> {
+                        org.nyao.music.playback.Offline.download(ctx, id, "Мне нравится", liked)
+                        model.message("Скачиваю лайки (${can - have}) — можно слушать дальше")
+                    }
+                }
+            }
+            .semantics { contentDescription = if (prog != null) "Скачиваю лайки, ${prog.first} из ${prog.second}. Нажми, чтобы отменить" else if (done) "Все лайки скачаны" else "Скачать все лайки" }
+            .padding(start = 12.dp, end = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (prog != null) {
+            androidx.compose.material3.CircularProgressIndicator(
+                progress = { if (prog.second == 0) 0f else prog.first / prog.second.toFloat() },
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.5.dp,
+                color = NyaoColors.Lavender,
+            )
+            Text("${prog.first} / ${prog.second}", style = MaterialTheme.typography.labelLarge, color = NyaoColors.Text, maxLines = 1)
+            Icon(NyaoIcons.Close, null, tint = NyaoColors.Muted, modifier = Modifier.size(16.dp))
+        } else {
+            Icon(if (done) NyaoIcons.DownloadDone else NyaoIcons.Download, null, tint = if (done) NyaoColors.Muted else NyaoColors.Lavender, modifier = Modifier.size(18.dp))
+            Text(
+                when {
+                    done -> "Лайки скачаны"
+                    have > 0 -> "Докачать лайки (${can - have})"
+                    else -> "Скачать все лайки"
+                },
+                style = MaterialTheme.typography.labelLarge,
+                color = if (done) NyaoColors.Muted else NyaoColors.Text,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
 // ---------- Поиск ----------
+
+/** Большая карточка, когда запрос — имя исполнителя */
+@Composable
+private fun BestArtistCard(a: org.nyao.music.data.SearchArtist, onOpen: () -> Unit) {
+    Row(
+        Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().bouncy().clip(RoundedCornerShape(28.dp))
+            .background(NyaoColors.Tonal).clickable(onClick = onOpen).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Cover(a.cover, Modifier.size(84.dp), CircleShape)
+        Column(Modifier.weight(1f)) {
+            Text("ИСПОЛНИТЕЛЬ · ${org.nyao.music.data.sourceName(a.source).uppercase()}", style = MaterialTheme.typography.labelSmall, color = NyaoColors.Lavender)
+            Text(a.name, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Популярное, альбомы и все треки", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+        }
+        Icon(NyaoIcons.PlayArrow, null, tint = NyaoColors.Lavender)
+    }
+}
 
 @Composable
 fun SearchScreen(model: AppModel) {
@@ -403,15 +489,119 @@ fun SearchScreen(model: AppModel) {
                         if (res.vk.isNotEmpty() || Repo.vk.loggedIn) PillChip("VK · ${res.vk.size}", filter == org.nyao.music.data.SOURCE_VK, { filter = org.nyao.music.data.SOURCE_VK })
                     }
                 }
-                val shown = when (filter) {
-                    SOURCE_YA -> res.ya
-                    SOURCE_YT -> res.yt
-                    org.nyao.music.data.SOURCE_SC -> res.sc
-                    org.nyao.music.data.SOURCE_VK -> res.vk
-                    else -> org.nyao.music.data.alternateAll(res.ya, res.yt, res.sc, res.vk)
+                val arr = org.nyao.music.data.Search.arrange(res, filter, model.searchQuery)
+                val shown = arr.tracks
+                arr.best?.let { b -> item { BestArtistCard(b) { model.go(Route.ArtistPage(b.source, b.id, b.name)) } } }
+                if (arr.artists.isNotEmpty()) {
+                    item { Text("Исполнители", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 10.dp)) }
+                    item {
+                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(arr.artists, key = { it.source + it.id }) { a ->
+                                Column(Modifier.width(104.dp).bouncy().clip(RoundedCornerShape(20.dp)).clickable { model.go(Route.ArtistPage(a.source, a.id, a.name)) }.padding(bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box {
+                                        Cover(a.cover, Modifier.size(96.dp), CircleShape)
+                                        SourceTag(a.source, Modifier.align(Alignment.BottomEnd))
+                                    }
+                                    Text(a.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                                }
+                            }
+                        }
+                    }
                 }
-                if (shown.isEmpty()) item { Hint("Ничего не нашлось.") }
-                else trackGroup(model, shown, "Поиск: ${model.searchQuery}", current?.id, likedIds)
+                if (arr.albums.isNotEmpty()) {
+                    item { Text("Альбомы", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 10.dp)) }
+                    item {
+                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(arr.albums, key = { it.id }) { p -> PlaylistTile(p, size = 136) { model.go(Route.PlaylistPage(p)) } }
+                        }
+                    }
+                }
+                if (shown.isNotEmpty()) item {
+                    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 18.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Треки", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { PlayerConnection.enqueueAll(shown, next = true, label = "Поиск: ${model.searchQuery}"); model.message("${shown.size} треков — играют следующими") }) { Text("Следующими") }
+                        TextButton(onClick = { PlayerConnection.enqueueAll(shown, next = false, label = "Поиск: ${model.searchQuery}"); model.message("${shown.size} треков — в конце очереди") }) { Text("В конец") }
+                    }
+                }
+                if (shown.isEmpty() && arr.best == null && arr.artists.isEmpty() && arr.albums.isEmpty()) item { Hint("Ничего не нашлось.") }
+                else if (shown.isNotEmpty()) trackGroup(model, shown, "Поиск: ${model.searchQuery}", current?.id, likedIds) { i ->
+                    if (Repo.prefs.settings.value.searchPlay == "similar") {
+                        // трек из поиска: только он, а дальше — похожее на него
+                        PlayerConnection.playList(listOf(shown[i]), 0, "Поиск: ${model.searchQuery}")
+                        Repo.forceContinue = true
+                    } else PlayerConnection.playList(shown, i, "Поиск: ${model.searchQuery}")
+                }
+            }
+        }
+    }
+}
+
+// ---------- Исполнитель ----------
+
+/** Страница исполнителя: обложка, популярное, альбомы. У SoundCloud и VK — его треки из поиска */
+@Composable
+fun ArtistScreen(model: AppModel, r: Route.ArtistPage) {
+    var page by remember(r) { mutableStateOf<org.nyao.music.data.ArtistPage?>(null) }
+    var failed by remember(r) { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(r) {
+        page = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.artistPage(r.source, r.id, r.name) } }.getOrNull()
+        failed = page == null
+    }
+    val current by PlayerConnection.current.collectAsState()
+    val likedIds by Repo.liked.collectAsState()
+    val p = page
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
+        item {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { model.back() }) { Icon(NyaoIcons.ArrowBack, "Назад", tint = NyaoColors.Text) }
+            }
+        }
+        item {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Cover(p?.cover, Modifier.size(200.dp), androidx.compose.foundation.shape.CircleShape)
+                Text(p?.name ?: r.name, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 16.dp), maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text(
+                    org.nyao.music.data.sourceName(r.source) + (p?.listeners?.let { " · ${java.text.NumberFormat.getInstance(java.util.Locale("ru")).format(it)} слушателей за месяц" } ?: ""),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = NyaoColors.Muted,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                if (p != null && p.popular.isNotEmpty()) PlayButtons(p.popular, p.name, Modifier.padding(top = 18.dp, bottom = 8.dp))
+            }
+        }
+        when {
+            p == null && !failed -> item { Loading() }
+            p == null -> item { Hint("Не получилось загрузить исполнителя.") }
+            else -> {
+                if (p.popular.isNotEmpty()) {
+                    item { Text("Популярное", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp)) }
+                    trackGroup(model, p.popular.take(20), p.name, current?.id, likedIds)
+                    item {
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = { model.go(Route.PlaylistPage(Playlist("artist:${p.source}:${p.id ?: ""}:${p.name}", p.source, p.name, subtitle = "Все треки", cover = p.cover))) },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        ) { Text("Все треки") }
+                    }
+                }
+                if (p.albums.isNotEmpty()) {
+                    item { Text("Альбомы и синглы", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 20.dp, top = 22.dp, bottom = 10.dp)) }
+                    item {
+                        androidx.compose.foundation.lazy.LazyRow(
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(p.albums.size) { i ->
+                                val al = p.albums[i]
+                                Column(Modifier.size(width = 150.dp, height = 200.dp).clip(RoundedCornerShape(20.dp)).clickable { model.go(Route.PlaylistPage(al)) }) {
+                                    Cover(al.cover, Modifier.size(150.dp), RoundedCornerShape(20.dp))
+                                    Text(al.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp, start = 4.dp, end = 4.dp))
+                                    if (al.subtitle.isNotBlank()) Text(al.subtitle, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+                if (p.popular.isEmpty() && p.albums.isEmpty()) item { Hint("У этого исполнителя ничего не нашлось.") }
             }
         }
     }

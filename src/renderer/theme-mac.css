@@ -197,4 +197,35 @@ body.mac {
 .mac .modal { background: rgba(28, 26, 38, .82); backdrop-filter: blur(40px) saturate(170%); border-color: rgba(255, 255, 255, .14); }
 .mac .mb-right { background: rgba(0, 0, 0, .2); }
 .mac .layout-card { background: rgba(255, 255, 255, .04); border-color: rgba(255, 255, 255, .1); }
-.mac .layout-card.on { border-color: #d8ceff; background: rgba(216, 206, 255, .1); }
+.mac .layout-card.on { border-color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- 0.7 (43): плеер без вкладки «Сейчас играет», выезжающая панель ---------- */
+.mac .playerbar { width: min(980px, calc(100vw - 300px)); }
+.mac .playerbar .now { flex: 0 1 230px; }
+.mac .playerbar .controls { gap: 4px; }
+.mac .playerbar .controls .gap { width: 4px; }
+.mac .playerbar #pb-like { display: grid; }
+.mac .drawer {
+  top: 10px; right: 10px; bottom: 104px; border-radius: 22px;
+  background: rgba(36, 32, 48, .55); border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(40px) saturate(180%); backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--glass-hi), -30px 0 80px rgba(0, 0, 0, .45);
+}
+.mac .drawer .np-card { background: rgba(255, 255, 255, .06); }
+.mac .dr-close { background: rgba(255, 255, 255, .1); }
+.mac .drawer .trow.cur { background: rgba(255, 255, 255, .12); }
+@media (max-width: 1180px) {
+  .mac .playerbar { display: flex; }
+  .mac .playerbar .now { flex: 0 1 200px; }
+}
+/* Узкое окно: сайдбар сворачивается до иконок */
+@media (max-width: 1000px) {
+  .mac .rail { width: 60px; padding: 52px 8px 12px; }
+  .mac .rail .nav-btn { justify-content: center; padding: 0; height: 40px; }
+  .mac .rail .nav-btn .lbl, .mac .rail .side-extra { display: none; }
+  .mac .playerbar { left: calc(50% + 35px); width: calc(100vw - 110px); }
+}
+.mac .glass-cap { background: rgba(20, 18, 28, .5); border-color: rgba(255, 255, 255, .16); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2); }
+.mac .wave-tune { top: 10px; right: 10px; bottom: 104px; background: rgba(36, 32, 48, .6); border: 1px solid var(--glass-border); -webkit-backdrop-filter: blur(40px) saturate(180%); backdrop-filter: blur(40px) saturate(180%); box-shadow: var(--glass-hi), -30px 0 80px rgba(0, 0, 0, .45); }
+.mac .wave-scrim { background: rgba(0, 0, 0, .3); }
+.mac .wave-fade { display: none; } /* фон под стеклом живой — размытие дало бы шов, хватает маски */

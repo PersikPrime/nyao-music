@@ -4,6 +4,7 @@
 // часть клиентов YouTube требует PO-токен и отдаёт 403, поэтому каждую ссылку проверяем.
 import vm from 'node:vm';
 import { Innertube, Platform, UniversalCache, Constants } from 'youtubei.js';
+import * as raw from './ytraw.js';
 
 // youtubei.js с версии 15+ не исполняет JS плеера сам — даём ему изолированный вычислитель.
 Platform.shim.eval = (data) => {
@@ -32,7 +33,9 @@ export function streamHeaders(client) {
 export function bestThumb(list, size = 400) {
   const arr = Array.isArray(list) ? list : (list && list.contents) || [];
   if (!arr.length) return null;
-  const sorted = [...arr].sort((a, b) => (b.width || 0) - (a.width || 0));
+  // У части новых элементов YouTube в списке картинок бывают пустые записи — пропускаем их
+  const sorted = arr.filter((x) => x && typeof x.url === 'string' && x.url).sort((a, b) => (b.width || 0) - (a.width || 0));
+  if (!sorted.length) return null;
   let url = sorted[0].url;
   // Обложки YTM масштабируются параметром в URL
   url = url.replace(/=w\d+-h\d+/, `=w${size}-h${size}`);
@@ -49,7 +52,8 @@ export function mapItem(item) {
   if (!item) return null;
   const videoId = item.video_id || item.id || (item.endpoint && item.endpoint.payload && item.endpoint.payload.videoId);
   if (!videoId) return null;
-  const artists = item.artists && item.artists.length ? item.artists.map((a) => a.name).join(', ') : text(item.author) || (item.authors || []).map((a) => a.name).join(', ');
+  const names = (list) => (list || []).filter((a) => a && a.name).map((a) => a.name).join(', ');
+  const artists = names(item.artists) || text(item.author) || names(item.authors);
   const thumbs = item.thumbnails || item.thumbnail;
   const firstArtist = (item.artists || item.authors || []).find((a) => a && a.channel_id);
   return {
@@ -84,8 +88,10 @@ function shuffle(arr) {
 }
 
 export class YTMusicProvider {
-  constructor({ cookie = null, cacheDir = null, fetch = globalThis.fetch, factory = null } = {}) {
+  constructor({ cookie = null, cacheDir = null, fetch = globalThis.fetch, factory = null, log = null } = {}) {
     this.cookie = cookie;
+    // Отчёт о сбоях разбора: (op, error, response?) — без cookies, только стек и форма ответа
+    this.log = log || (() => {});
     this.cacheDir = cacheDir;
     this.fetch = fetch;
     this.factory = factory || ((opts) => Innertube.create(opts));
@@ -152,21 +158,104 @@ export class YTMusicProvider {
   }
 
   async playlistTracks(playlistId, limit = 500) {
-    const yt = await this.client();
-    let page = await yt.music.getPlaylist(playlistId.replace(/^yt:/, ''));
+    const id = playlistId.replace(/^yt:/, '');
+    let out = [];
+    try {
+      out = await this.playlistViaLib(await this.client(), id, limit);
+    } catch (e) {
+      this.log('playlist:lib', e, { id });
+    }
+    if (out.length) return out;
+    // youtubei.js не справился с разметкой (или вернул пусто) — разбираем сырой ответ сами
+    try {
+      out = await this.browseRaw(await this.client(), id, limit);
+    } catch (e) {
+      this.log('playlist:raw', e, { id });
+    }
+    if (out.length || !this.cookie || id === 'LM') return out;
+    // Публичный плейлист открываем без аккаунта: анонимная разметка у YouTube стабильнее
+    try {
+      const anon = await this.metaAnon();
+      out = await this.playlistViaLib(anon, id, limit).catch(() => []);
+      if (!out.length) out = await this.browseRaw(anon, id, limit);
+      if (out.length) this.log('playlist:anon-ok', null, { id, count: out.length });
+    } catch (e) {
+      this.log('playlist:anon', e, { id });
+    }
+    return out;
+  }
+
+  async playlistViaLib(yt, id, limit) {
+    let page = await yt.music.getPlaylist(id);
     const out = [];
-    for (;;) {
+    for (let pages = 0; pages < 60; pages++) {
       for (const item of page.items || []) {
         const t = isSong(item) ? mapItem(item) : null;
         if (t) out.push(t);
       }
       if (out.length >= limit || !page.has_continuation) break;
-      page = await page.getContinuation();
+      try {
+        page = await page.getContinuation();
+      } catch (e) {
+        this.log('playlist:lib-cont', e, { id, got: out.length });
+        break;
+      }
     }
     return out.slice(0, limit);
   }
 
+  browseIdFor(id) {
+    return /^(PL|RD|OLAK|LM|FL|UU)/.test(id) ? `VL${id}` : id;
+  }
+
+  async browseRaw(yt, id, limit = 5000) {
+    const map = new Map();
+    let res = await yt.actions.execute('/browse', { browseId: this.browseIdFor(id), client: 'YTMUSIC', skip_auth_check: true });
+    for (let pages = 0; pages < 60; pages++) {
+      const data = res && res.data;
+      const got = raw.tracksIn(data);
+      if (!got.length && pages === 0) this.log('playlist:raw-empty', new Error(`пустой разбор, HTTP ${res && res.status_code}`), { id, response: data });
+      for (const t of got) if (!map.has(t.id)) map.set(t.id, t);
+      if (map.size >= limit) break;
+      const next = raw.continuationOf(data);
+      if (!next) break;
+      res = next.token
+        ? await yt.actions.execute('/browse', { continuation: next.token, client: 'YTMUSIC' })
+        : await yt.actions.execute(`/browse?ctoken=${next.legacy}&continuation=${next.legacy}&type=next`, { client: 'YTMUSIC' });
+    }
+    return [...map.values()].slice(0, limit);
+  }
+
+  // Анонимная сессия для метаданных (без cookies): запасной путь для публичных плейлистов
+  async metaAnon() {
+    if (!this.metaAnonYt) {
+      this.metaAnonYt = await this.factory({ cache: this.cache(), fetch: this.fetch, lang: 'ru', location: 'RU', retrieve_player: false, generate_session_locally: true });
+    }
+    return this.metaAnonYt;
+  }
+
   async playlists() {
+    let lists;
+    try {
+      lists = await this.playlistsViaLib();
+    } catch (e) {
+      this.log('library:lib', e);
+      lists = [];
+    }
+    if (!lists.length) lists = await this.playlistsRaw().catch((e) => (this.log('library:raw', e), []));
+    if (!lists.some((l) => l.id === 'yt:LM')) lists.unshift({ id: 'yt:LM', source: 'yt', title: 'Понравившиеся', count: 0, cover: null });
+    return lists;
+  }
+
+  async playlistsRaw() {
+    const yt = await this.client();
+    const res = await yt.actions.execute('/browse', { browseId: 'FEmusic_liked_playlists', client: 'YTMUSIC', skip_auth_check: true });
+    const lists = raw.findAll(res.data, 'musicTwoRowItemRenderer').map(raw.mapTwoRow).filter((l) => l && l.kind === 'playlist');
+    if (!lists.length) this.log('library:raw-empty', new Error('пустой разбор библиотеки'), { response: res.data });
+    return lists.map((l) => ({ id: l.id, source: 'yt', title: l.title, count: parseInt(String(l.sub).replace(/\D/g, ''), 10) || 0, cover: l.cover }));
+  }
+
+  async playlistsViaLib() {
     const yt = await this.client();
     const lib = await yt.music.getLibrary();
     const items = [];
@@ -182,12 +271,32 @@ export class YTMusicProvider {
         count: parseInt(String(text(i.item_count) || text(i.subtitle)).replace(/\D/g, ''), 10) || 0,
         cover: bestThumb(i.thumbnail || i.thumbnails, 300)
       }));
-    const hasLiked = lists.some((l) => l.id === 'yt:LM');
-    if (!hasLiked) lists.unshift({ id: 'yt:LM', source: 'yt', title: 'Понравившиеся', count: 0, cover: null });
     return lists;
   }
 
   async home() {
+    try {
+      const got = await this.homeViaLib();
+      if (got.length) return got;
+    } catch (e) {
+      this.log('home:lib', e);
+    }
+    const yt = await this.client();
+    const res = await yt.actions.execute('/browse', { browseId: 'FEmusic_home', client: 'YTMUSIC', skip_auth_check: true });
+    const out = raw.findAll(res.data, 'musicCarouselShelfRenderer').map((shelf) => {
+      const h = shelf.header && shelf.header.musicCarouselShelfBasicHeaderRenderer;
+      const items = shelf.contents || [];
+      return {
+        title: raw.runsText(h && h.title),
+        tracks: items.map((i) => i.musicResponsiveListItemRenderer && raw.mapResponsive(i.musicResponsiveListItemRenderer)).filter(Boolean),
+        playlists: items.map((i) => i.musicTwoRowItemRenderer && raw.mapTwoRow(i.musicTwoRowItemRenderer)).filter(Boolean)
+      };
+    }).filter((s) => s.title && (s.tracks.length || s.playlists.length));
+    if (!out.length) this.log('home:raw-empty', new Error('пустой разбор главной'), { response: res.data });
+    return out;
+  }
+
+  async homeViaLib() {
     const yt = await this.client();
     const feed = await yt.music.getHomeFeed();
     return (feed.sections || [])
@@ -341,6 +450,24 @@ export class YTMusicProvider {
     };
   }
 
+  /** Текст из YouTube Music (обычно без таймингов, от LyricFind) → строка или null */
+  async lyrics(videoId) {
+    const yt = await this.client();
+    const shelf = await yt.music.getLyrics(videoId).catch(() => null);
+    const text = shelf && shelf.description && shelf.description.toString();
+    return text && text.trim() ? text : null;
+  }
+
+  /** Все треки исполнителя: раздел «Песни» → его полный плейлист */
+  async artistTracks(channelId) {
+    const yt = await this.client();
+    const a = await yt.music.getArtist(channelId);
+    const shelf = (a.sections || []).find((s) => s.type === 'MusicShelf' && s.endpoint);
+    const bid = shelf && shelf.endpoint && shelf.endpoint.payload && shelf.endpoint.payload.browseId;
+    if (!bid) return (shelf && shelf.contents ? shelf.contents.filter(isSong).map(mapItem).filter(Boolean) : []);
+    return this.playlistTracks(`yt:${String(bid).replace(/^VL/, '')}`);
+  }
+
   async searchArtist(name) {
     const yt = await this.client();
     const r = await yt.music.search(name, { type: 'artist' });
@@ -353,6 +480,20 @@ export class YTMusicProvider {
     const r = await yt.music.search(query, { type: 'album' });
     const shelf = r.albums || (r.contents || [])[0];
     return ((shelf && shelf.contents) || []).filter((i) => /^MPRE/.test(i.id || '')).map((i) => YTMusicProvider.albumCard(i));
+  }
+
+  /** Новый приватный плейлист (для переноса). Как веб-версия YouTube Music. → id вида yt:PL… */
+  async createPlaylist(title, videoIds) {
+    if (!this.cookie) throw new Error('Войди в YouTube Music, чтобы создавать плейлисты');
+    const yt = await this.client();
+    const first = videoIds.slice(0, 100);
+    const res = await yt.actions.execute('/playlist/create', { client: 'YTMUSIC', title: String(title).slice(0, 150), privacyStatus: 'PRIVATE', videoIds: first });
+    const id = res && res.data && res.data.playlistId;
+    if (!id) throw new Error(`YouTube Music не создал плейлист${res && res.status_code ? ` (HTTP ${res.status_code})` : ''}`);
+    for (let i = 100; i < videoIds.length; i += 100) {
+      await yt.actions.execute('/browse/edit_playlist', { client: 'YTMUSIC', playlistId: id, actions: videoIds.slice(i, i + 100).map((v) => ({ action: 'ACTION_ADD_VIDEO', addedVideoId: v, dedupeOption: 'DEDUPE_OPTION_SKIP' })) });
+    }
+    return `yt:${id}`;
   }
 
   async like(track, on = true) {
@@ -410,7 +551,10 @@ export class YTMusicProvider {
           const expire = Number(new URL(url).searchParams.get('expire')) * 1000;
           const ttl = expire ? Math.max(60_000, expire - Date.now() - 5 * 60_000) : 30 * 60_000;
           log(`${videoId} ${client}: OK (${format.mime_type})`);
-          return { url, headers, ttl, mime: format.mime_type, client };
+          // насколько трек громче эталона YouTube (дБ) — для выравнивания громкости
+          const ac = (info.player_config && info.player_config.audio_config) || {};
+          const loudnessDb = Number.isFinite(ac.loudness_db) ? ac.loudness_db : null;
+          return { url, headers, ttl, mime: format.mime_type, client, loudnessDb };
         } catch (e) {
           log(`${videoId} ${client}: ${e.message}`);
           errors.push(`${client}: ${e.message}`);

@@ -20,6 +20,16 @@ data class Settings(
     val eqOn: Boolean = false,
     val eqPreset: String = "flat",
     val eqGains: List<Int> = List(10) { 0 },
+    /** Выравнивать громкость (по данным Яндекса и YouTube) */
+    val normalize: Boolean = false,
+    /** Плавные переходы между треками, секунд (0 — выкл) */
+    val fade: Int = 0,
+    /** Список доиграл — продолжать похожим (радио по последнему треку) */
+    val continueSimilar: Boolean = true,
+    /** Трек из поиска: "similar" — дальше похожее, "list" — остальные результаты */
+    val searchPlay: String = "similar",
+    /** Акцентный цвет: lavender | coral | mint | sun | cover */
+    val accent: String = "lavender",
 ) {
     val isWaveLayout: Boolean get() = layout == "wave"
 }
@@ -45,6 +55,11 @@ class Prefs(context: Context) {
         eqPreset = sp.getString("eqPreset", "flat") ?: "flat",
         eqGains = (sp.getString("eqGains", null) ?: "").split(",").mapNotNull { it.trim().toIntOrNull() }
             .takeIf { it.size == 10 }?.map { it.coerceIn(-12, 12) } ?: List(10) { 0 },
+        normalize = sp.getBoolean("normalize", false),
+        fade = sp.getInt("fade", 0).coerceIn(0, 10),
+        continueSimilar = sp.getBoolean("continueSimilar", true),
+        searchPlay = sp.getString("searchPlay", "similar") ?: "similar",
+        accent = sp.getString("accent", "lavender") ?: "lavender",
     )
 
     /** Вызывается, когда меняется то, что синхронизируется через аккаунт Nyao: "wave" или "prefs" */
@@ -67,6 +82,11 @@ class Prefs(context: Context) {
         putString("eqPreset", preset)
         putString("eqGains", gains.joinToString(",") { it.coerceIn(-12, 12).toString() })
     }
+    fun setNormalize(v: Boolean) = update { putBoolean("normalize", v) }
+    fun setFade(v: Int) = update { putInt("fade", v.coerceIn(0, 10)) }
+    fun setContinueSimilar(v: Boolean) = update { putBoolean("continueSimilar", v) }
+    fun setSearchPlay(v: String) = update { putString("searchPlay", v) }
+    fun setAccent(v: String) = update { putString("accent", v) }
     fun setWaveTab(v: Boolean) = update { putBoolean("waveTab", v) }.also { onSyncChange?.invoke("prefs") }
 
     /** Когда ключ синхронизации («wave», «prefs», «mixes») последний раз менялся на этом устройстве */
@@ -94,6 +114,15 @@ class Prefs(context: Context) {
     var vkOrigin: String?
         get() = sp.getString("vkOrigin", null)
         set(v) = sp.edit().apply { if (v == null) remove("vkOrigin") else putString("vkOrigin", v) }.apply()
+
+    /** Last.fm: имя и ключ сессии (выдаёт Last.fm после подтверждения; хранится только тут) */
+    var lastfmName: String?
+        get() = sp.getString("lastfmName", null)
+        set(v) = sp.edit().apply { if (v == null) remove("lastfmName") else putString("lastfmName", v) }.apply()
+
+    var lastfmKey: String?
+        get() = sp.getString("lastfmKey", null)
+        set(v) = sp.edit().apply { if (v == null) remove("lastfmKey") else putString("lastfmKey", v) }.apply()
 
     /** Аккаунт Nyao (свой сервер). Токены музыкальных сервисов на сервер не уходят */
     var nyaoToken: String?

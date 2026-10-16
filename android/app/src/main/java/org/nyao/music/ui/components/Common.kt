@@ -118,6 +118,8 @@ fun TrackRow(
     onPlayNext: () -> Unit,
     onLike: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    onArtist: (() -> Unit)? = null,
+    onAlbum: (() -> Unit)? = null,
     shape: Shape = RoundedCornerShape(6.dp),
     coverSize: Dp = 48.dp,
 ) {
@@ -165,6 +167,10 @@ fun TrackRow(
             IconButton(onClick = { menu = true }) { Icon(NyaoIcons.MoreVert, "Ещё", tint = NyaoColors.Muted) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text("Играть следующим") }, onClick = { menu = false; onPlayNext() })
+                DropdownMenuItem(text = { Text("В конец очереди") }, onClick = { menu = false; org.nyao.music.playback.PlayerConnection.addToQueue(track) })
+                DropdownMenuItem(text = { Text("Похожее · радио по треку") }, onClick = { menu = false; org.nyao.music.playback.PlayerConnection.startRadio(track) })
+                if (onArtist != null) DropdownMenuItem(text = { Text("Исполнитель") }, onClick = { menu = false; onArtist() })
+                if (onAlbum != null) DropdownMenuItem(text = { Text("Альбом") }, onClick = { menu = false; onAlbum() })
                 DropdownMenuItem(text = { Text(if (liked) "Убрать из «Мне нравится»" else "Мне нравится") }, onClick = { menu = false; onLike(!liked) })
             }
         }

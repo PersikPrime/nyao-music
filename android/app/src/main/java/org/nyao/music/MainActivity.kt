@@ -30,7 +30,19 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
         setContent {
+            org.nyao.music.ui.theme.AccentSync()
             NyaoTheme { NyaoRoot() }
         }
+    }
+
+    // пока приложение на экране, оно на связи для Nyao Connect и «Слушать вместе»
+    override fun onStart() {
+        super.onStart()
+        org.nyao.music.playback.Live.hold(this, "ui")
+    }
+
+    override fun onStop() {
+        org.nyao.music.playback.Live.release("ui")
+        super.onStop()
     }
 }

@@ -41,6 +41,8 @@ jobs:
         env:
           NYAO_KEYSTORE_PASSWORD: ${{ secrets.NYAO_KEYSTORE_PASSWORD }}
           NYAO_KEY_ALIAS: nyao
+          NYAO_LASTFM_KEY: ${{ secrets.NYAO_LASTFM_KEY }}
+          NYAO_LASTFM_SECRET: ${{ secrets.NYAO_LASTFM_SECRET }}
         run: |
           chmod +x gradlew
           set -o pipefail

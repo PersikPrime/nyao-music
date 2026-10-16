@@ -2,6 +2,8 @@ package org.nyao.music.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import coil3.request.allowHardware
+import coil3.toBitmap
 import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
@@ -59,6 +61,11 @@ class PlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val equalizer = NyaoEqualizer()
+    // выравнивание громкости и плавные переходы: итоговая громкость плеера = norm × fade
+    private var normVol = 1f
+    private var fadeVol = 1f
+    private var enhancer: android.media.audiofx.LoudnessEnhancer? = null
+    private var enhancerSession = 0
     private var loadingMore = false
     private var lastId: String? = null
     private var lastPos = 0L
@@ -68,6 +75,8 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         Repo.init(this)
+        // пока играет музыка, телефоном можно управлять с компьютера (Nyao Connect)
+        Live.hold(this, "service")
 
         val http = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
@@ -100,6 +109,27 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         player.addListener(listener)
+        // плавные переходы: каждые 200 мс считаем, насколько приглушить начало и конец трека
+        scope.launch {
+            while (isActive) {
+                val fade = Repo.prefs.settings.value.fade
+                val f = if (fade <= 0 || !player.isPlaying) 1f else {
+                    val pos = player.currentPosition
+                    val dur = player.duration
+                    val inMs = minOf(2000L, fade * 1000L)
+                    val fin = (pos.toFloat() / inMs).coerceIn(0f, 1f)
+                    val fout = if (dur > 0 && player.repeatMode != Player.REPEAT_MODE_ONE) ((dur - pos).toFloat() / (fade * 1000L)).coerceIn(0f, 1f) else 1f
+                    minOf(fin, fout)
+                }
+                if (f != fadeVol) {
+                    fadeVol = f
+                    applyVolume()
+                }
+                delay(200)
+            }
+        }
+        // выравнивание громкости — при смене настройки
+        scope.launch { Repo.prefs.settings.collect { applyNorm() } }
         // эквалайзер из настроек: следим за изменениями и за сменой звуковой сессии
         scope.launch {
             Repo.prefs.settings.collect { s -> equalizer.attach(player.audioSessionId, s.eqOn, s.eqGains) }
@@ -147,7 +177,11 @@ class PlaybackService : MediaSessionService() {
     }
 
     private val listener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) = updateWidget()
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            applyNorm()
+            updateWidget()
             val prev = lastId?.let { Repo.track(it) }
             val wave = Repo.mode.value == Repo.Mode.WAVE
             if (wave && prev != null && prev.id != mediaItem?.mediaId) {
@@ -164,8 +198,14 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_READY) errorsInRow = 0
-            if (playbackState == Player.STATE_ENDED) maybeMore()
+            if (playbackState == Player.STATE_READY) {
+                errorsInRow = 0
+                applyNorm() // громкость YouTube известна только после получения ссылки
+            }
+            if (playbackState == Player.STATE_ENDED) {
+                maybeMore()
+                maybeContinueSimilar()
+            }
         }
 
         override fun onPlayerError(error: PlaybackException) = handleError(error)
@@ -176,16 +216,85 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    // ---------- Виджет ----------
+    private var widgetCoverUrl: String? = null
+    private var widgetCover: android.graphics.Bitmap? = null
+
+    private fun updateWidget() {
+        val item = player.currentMediaItem
+        val t = item?.mediaId?.let { Repo.track(it) }
+        val title = t?.title ?: item?.mediaMetadata?.title?.toString() ?: "Nyao Music"
+        val artist = t?.artist ?: item?.mediaMetadata?.artist?.toString() ?: ""
+        val cover = t?.cover
+        NyaoWidget.push(this, NyaoWidget.Companion.State(title, artist, player.isPlaying, widgetCover.takeIf { cover == widgetCoverUrl }, live = true))
+        if (cover != null && cover != widgetCoverUrl) {
+            widgetCoverUrl = cover
+            scope.launch {
+                val bmp = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val req = coil3.request.ImageRequest.Builder(this@PlaybackService).data(cover).size(256).allowHardware(false).build()
+                        (coil3.SingletonImageLoader.get(this@PlaybackService).execute(req) as? coil3.request.SuccessResult)?.image?.toBitmap()
+                    }.getOrNull()
+                }
+                if (widgetCoverUrl == cover) {
+                    widgetCover = bmp
+                    NyaoWidget.push(this@PlaybackService, NyaoWidget.Companion.State(title, artist, player.isPlaying, bmp, live = true))
+                }
+            }
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            NyaoWidget.ACTION_TOGGLE -> if (player.isPlaying) player.pause() else {
+                if (player.playbackState == Player.STATE_IDLE) player.prepare()
+                player.play()
+            }
+            NyaoWidget.ACTION_NEXT -> if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+            NyaoWidget.ACTION_PREV -> player.seekToPrevious()
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
+    private fun applyVolume() {
+        player.volume = (normVol * fadeVol).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Выравнивание громкости: Яндекс даёт громкость трека в LUFS, YouTube — насколько трек громче своего эталона.
+     * Цель -14 LUFS. Тише — громкостью плеера, громче (до +6 дБ) — системным LoudnessEnhancer.
+     */
+    private fun applyNorm() {
+        val t = player.currentMediaItem?.mediaId?.let { Repo.track(it) }
+        val db = if (!Repo.prefs.settings.value.normalize || t == null) 0.0 else {
+            val raw = t.loud?.let { -14 - it } ?: if (t.source == org.nyao.music.data.SOURCE_YT) Repo.ytStreams.loudness(t.srcId)?.let { -it } else null
+            (raw ?: 0.0).coerceIn(-12.0, 6.0)
+        }
+        normVol = if (db < 0) Math.pow(10.0, db / 20).toFloat() else 1f
+        runCatching {
+            val session = player.audioSessionId
+            if (session != 0 && session != enhancerSession) {
+                enhancer?.release()
+                enhancer = android.media.audiofx.LoudnessEnhancer(session)
+                enhancerSession = session
+            }
+            enhancer?.setTargetGain(if (db > 0) (db * 100).toInt() else 0)
+            enhancer?.enabled = db > 0
+        }
+        applyVolume()
+    }
+
     private fun maybeMore() {
-        if (Repo.mode.value != Repo.Mode.WAVE || loadingMore) return
+        if ((Repo.mode.value != Repo.Mode.WAVE && Repo.mode.value != Repo.Mode.RADIO) || loadingMore) return
         val left = player.mediaItemCount - player.currentMediaItemIndex - 1
         if (left > 2) return
         loadingMore = true
         scope.launch {
             try {
                 val ids = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
-                val more = withContext(Dispatchers.IO) { Repo.waveMore(ids) }
-                if (Repo.mode.value == Repo.Mode.WAVE && more.isNotEmpty()) {
+                val radio = Repo.mode.value == Repo.Mode.RADIO
+                val more = withContext(Dispatchers.IO) { if (radio) Repo.radioMore(ids) else Repo.waveMore(ids) }
+                if ((Repo.mode.value == Repo.Mode.WAVE || Repo.mode.value == Repo.Mode.RADIO) && more.isNotEmpty()) {
                     val wasEnded = player.playbackState == Player.STATE_ENDED
                     player.addMediaItems(more.map { Repo.mediaItem(it) })
                     if (wasEnded) {
@@ -197,6 +306,33 @@ class PlaybackService : MediaSessionService() {
             } catch (e: Exception) {
                 Log.w("Nyao", "волна: ${e.message}")
                 PlaybackEvents.emit(e.message ?: "Не удалось догрузить волну")
+            } finally {
+                loadingMore = false
+            }
+        }
+    }
+
+    /** Список доиграл (повтор выключен) — дальше «похожее» на последний трек, прошлые треки остаются в очереди */
+    private fun maybeContinueSimilar() {
+        if (Repo.mode.value != Repo.Mode.LIST || player.repeatMode != Player.REPEAT_MODE_OFF || loadingMore) return
+        if (!Repo.prefs.settings.value.continueSimilar && !Repo.forceContinue) return
+        val last = player.currentMediaItem?.mediaId?.let { Repo.track(it) } ?: return
+        loadingMore = true
+        scope.launch {
+            try {
+                val have = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toSet()
+                val more = withContext(Dispatchers.IO) { Repo.radioStart(last) }.filter { it.id !in have }
+                if (more.isNotEmpty() && player.playbackState == Player.STATE_ENDED && player.currentMediaItem?.mediaId == last.id) {
+                    Repo.forceContinue = false
+                    Repo.mode.value = Repo.Mode.RADIO
+                    Repo.queueLabel.value = "Похожее на «${last.title}»"
+                    player.addMediaItems(more.map { Repo.mediaItem(it) })
+                    player.seekToNextMediaItem()
+                    player.prepare()
+                    player.play()
+                }
+            } catch (e: Exception) {
+                Log.w("Nyao", "продолжение похожим: ${e.message}")
             } finally {
                 loadingMore = false
             }
@@ -247,8 +383,11 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        Live.release("service")
+        NyaoWidget.push(this, NyaoWidget.Companion.State())
         scope.cancel()
         equalizer.release()
+        runCatching { enhancer?.release() }
         session?.run {
             player.release()
             release()

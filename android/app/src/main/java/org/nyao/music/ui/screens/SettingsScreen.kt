@@ -64,6 +64,7 @@ fun SettingsScreen(model: AppModel) {
         OutlinedButton(onClick = { model.go(Route.Wave) }, modifier = Modifier.fillMaxWidth()) { Text("Характер, настроение и баланс источников") }
 
         EqCard()
+        LastFmCard(model)
         CacheCard()
         UpdateCard(model)
 
@@ -136,16 +137,23 @@ private fun ServiceCard(model: AppModel, source: String) {
                 Button(onClick = { model.loginFor = source }) { Text("Войти") }
             }
         }
-        if (isVk) {
-            TextButton(onClick = { vkLog = Repo.vk.debugText().ifBlank { "Сбоев пока не было." } }) { Text("Что-то не работает?") }
+        val isYt = !ya && !isSc && !isVk
+        if (isYt && acc != null) {
+            // Отчёт о сбоях плейлистов: стек и структура ответа, без cookies
+            TextButton(onClick = {
+                vkLog = Repo.yt.diagFile?.takeIf { it.exists() }?.readText()?.takeLast(120_000)?.ifBlank { null } ?: "Сбоев YouTube пока не было."
+            }) { Text("Плейлисты не открываются? Отчёт") }
+        }
+        if (isVk || isYt) {
+            if (isVk) TextButton(onClick = { vkLog = Repo.vk.debugText().ifBlank { "Сбоев пока не было." } }) { Text("Что-то не работает?") }
             vkLog?.let { log ->
                 val clip = androidx.compose.ui.platform.LocalClipboardManager.current
                 androidx.compose.material3.AlertDialog(
                     onDismissRequest = { vkLog = null },
-                    title = { Text("Журнал VK") },
+                    title = { Text(if (isVk) "Журнал VK" else "Отчёт YouTube") },
                     text = {
                         Text(
-                            log,
+                            if (log.length > 20_000) "…" + log.takeLast(20_000) else log,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
                         )
@@ -154,7 +162,7 @@ private fun ServiceCard(model: AppModel, source: String) {
                     dismissButton = { TextButton(onClick = { vkLog = null }) { Text("Закрыть") } },
                 )
             }
-            return@Column
+            if (isVk) return@Column
         }
         TextButton(onClick = { manual = !manual }) {
             Text(if (ya) "Вставить OAuth-токен вручную" else if (isSc) "Вставить токен вручную (cookie oauth_token)" else "Вставить cookies вручную (если Google не пускает)")
@@ -198,6 +206,52 @@ fun ServiceLogo(source: String, size: Int = 48) {
     }
 }
 
+/** Last.fm: подключение через подтверждение в браузере */
+@Composable
+private fun LastFmCard(model: AppModel) {
+    val st by Repo.lastfm.state.collectAsState()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFFD51007)), contentAlignment = Alignment.Center) {
+            Text("fm", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+        Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+            Text("Last.fm", style = MaterialTheme.typography.titleMedium)
+            Text(
+                when {
+                    !st.configured -> "В этой сборке Last.fm выключен"
+                    st.waiting -> "Подтверди доступ на странице Last.fm…"
+                    st.name != null -> "Подключено: ${st.name}" + (if (st.queued > 0) " · ждут отправки: ${st.queued}" else "")
+                    else -> "Записывает прослушанное из всех сервисов в твой профиль"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        when {
+            !st.configured -> Unit
+            st.waiting -> OutlinedButton(onClick = { Repo.lastfm.cancel() }) { Text("Отмена") }
+            st.name != null -> OutlinedButton(onClick = { Repo.lastfm.disconnect(); model.message("Last.fm отключён") }) { Text("Отключить") }
+            else -> Button(onClick = {
+                scope.launch {
+                    try {
+                        val name = Repo.lastfm.connect { url ->
+                            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        }
+                        model.message("Last.fm подключён: $name")
+                    } catch (e: Exception) {
+                        if (e !is kotlinx.coroutines.CancellationException) model.message(e.message ?: "Не получилось подключить Last.fm")
+                    }
+                }
+            }) { Text("Подключить") }
+        }
+    }
+}
+
 /** Эквалайзер: пресеты и 10 полос, как на ПК. Работает через системный эквалайзер телефона */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -208,6 +262,49 @@ private fun EqCard() {
         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Выравнивать громкость", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Треки из разных сервисов звучат одинаково громко — по данным Яндекса и YouTube. SoundCloud и VK такие данные не дают.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.Switch(checked = s.normalize, onCheckedChange = { Repo.prefs.setNormalize(it) })
+        }
+        Column {
+            Text("Плавные переходы", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (s.fade > 0) "Трек затихает за ${s.fade} с до конца, следующий плавно нарастает" else "Выключены — треки сменяются сразу",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            androidx.compose.material3.Slider(
+                value = s.fade.toFloat(),
+                onValueChange = { v -> Math.round(v).let { if (it != s.fade) Repo.prefs.setFade(it) } },
+                valueRange = 0f..10f,
+                steps = 9,
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Продолжать похожим", style = MaterialTheme.typography.titleSmall)
+                Text("Плейлист или альбом доиграл — дальше без паузы идёт радио по последнему треку", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            androidx.compose.material3.Switch(checked = s.continueSimilar, onCheckedChange = { Repo.prefs.setContinueSimilar(it) })
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Трек из поиска", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (s.searchPlay == "similar") "Играет он, а дальше — похожее на него, как в Яндексе" else "После него играют остальные найденные треки",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                org.nyao.music.ui.components.PillChip("Дальше похожее", s.searchPlay == "similar", { Repo.prefs.setSearchPlay("similar") })
+                org.nyao.music.ui.components.PillChip("Весь поиск", s.searchPlay == "list", { Repo.prefs.setSearchPlay("list") })
+            }
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Эквалайзер", style = MaterialTheme.typography.titleSmall)

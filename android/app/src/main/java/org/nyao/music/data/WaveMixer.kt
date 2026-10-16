@@ -21,6 +21,8 @@ class WaveMixer(
     private val prefs: Prefs,
     /** id треков, звучавших недавно на всех устройствах — волна их пропускает */
     private val recentProvider: suspend () -> Set<String> = { emptySet() },
+    /** Сервис временно лежит (статус с сервера Nyao) — пропускаем его */
+    private val isDown: (String) -> Boolean = { false },
 ) {
 
     companion object {
@@ -53,15 +55,19 @@ class WaveMixer(
     private var refill: Job? = null
 
     /** Есть ли что подмешивать: YouTube Music и/или SoundCloud */
-    private val hasExtras: Boolean get() = yt.loggedIn || sc.loggedIn || vk.loggedIn
+    private val ytOn get() = yt.loggedIn && !isDown(SOURCE_YT)
+    private val scOn get() = sc.loggedIn && !isDown(SOURCE_SC)
+    private val vkOn get() = vk.loggedIn && !isDown(SOURCE_VK)
+    private val yaOn get() = ya.loggedIn && !isDown(SOURCE_YA)
+    private val hasExtras: Boolean get() = ytOn || scOn || vkOn
 
     private suspend fun refillPool() {
         if (!hasExtras) return
         val s = prefs.settings.value
         val exclude = lock.withLock { HashSet(seen).apply { addAll(recent) } }
-        val a = if (yt.loggedIn) runCatching { yt.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
-        val b = if (sc.loggedIn) runCatching { sc.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
-        val c = if (vk.loggedIn) runCatching { vk.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
+        val a = if (ytOn) runCatching { yt.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
+        val b = if (scOn) runCatching { sc.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
+        val c = if (vkOn) runCatching { vk.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
         // сервис дал только недавно звучавшее — лучше пара повторов, чем пропасть из волны
         val lists = listOf(a, b, c).map { l -> l.filter { it.id !in exclude }.ifEmpty { l.filter { it.id !in seen }.take(2) } }
         val tracks = alternateAll(*lists.toTypedArray())
@@ -97,7 +103,7 @@ class WaveMixer(
         var fresh: List<Track> = emptyList()
         var gotAny = false
         var lastList: List<Track> = emptyList()
-        if (ya.loggedIn && s.ytmShare < 100) {
+        if (yaOn && s.ytmShare < 100) {
             // Яндекс прислал только уже звучавшее — просим следующую пачку, а не сдаёмся
             for (attempt in 0 until 4) {
                 val base = try {
@@ -127,7 +133,7 @@ class WaveMixer(
         }
         if (useYt) refillInBackground()
         if (result.isEmpty()) throw ApiException(
-            if (ya.loggedIn || hasExtras) (if (gotAny) "Сервисы прислали только уже сыгранное — нажми ещё раз, попробую снова" else "Сервисы не прислали треков — проверь интернет и попробуй ещё раз")
+            if (yaOn || hasExtras) (if (gotAny) "Сервисы прислали только уже сыгранное — нажми ещё раз, попробую снова" else "Сервисы не прислали треков — проверь интернет и попробуй ещё раз")
             else "Волна пустая: войди хотя бы в один сервис в настройках",
         )
         return result

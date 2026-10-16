@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -41,11 +42,14 @@ import androidx.compose.ui.Modifier
 import org.nyao.music.ui.components.bouncy
 import org.nyao.music.ui.components.appear
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.nyao.music.data.Repo
 import org.nyao.music.data.SOURCE_YA
 import org.nyao.music.data.SOURCE_YT
@@ -55,7 +59,6 @@ import org.nyao.music.ui.Route
 import org.nyao.music.ui.components.BalanceBar
 import org.nyao.music.ui.components.ConnectedGroup
 import org.nyao.music.ui.components.DropShape
-import org.nyao.music.ui.components.FlowLines
 import org.nyao.music.ui.components.PolarShape
 import org.nyao.music.ui.components.SourceTag
 import org.nyao.music.ui.components.rememberPlayShape
@@ -77,7 +80,76 @@ private val MOODS = listOf(
     Mood("sad", "Грустное", Color(0xFF8FB4FF), DropShape),
 )
 
-val WaveBg = Color(0xFF1A1726)
+/** Фон волны — почти чёрный с оттенком акцента */
+val WaveBg: Color get() = androidx.compose.ui.graphics.lerp(NyaoColors.Bg, NyaoColors.Hero, 0.2f)
+
+/**
+ * Фигуры Material 3 Expressive по краям — как на ПК: плотные, в цветах акцента,
+ * выезжают с краёв по очереди. edge — отступ от своего края (минус — фигура заходит за край).
+ */
+private data class EdgeShape(
+    val left: Boolean,
+    val edge: Int,
+    val top: Int,
+    val w: Int,
+    val h: Int,
+    val shape: Shape,
+    val tone: Int, // 0 hero, 1 container, 2 accent, 3 onContainer
+    val rot: Float = 0f,
+)
+
+private val EDGE_SHAPES = listOf(
+    EdgeShape(true, -72, -24, 176, 176, PolarShape(9, 0.07f), 0),
+    EdgeShape(true, 74, 6, 56, 56, PolarShape(8, 0.09f), 2),
+    EdgeShape(true, 22, 148, 74, 30, RoundedCornerShape(50), 3, 14f),
+    EdgeShape(true, -6, 206, 100, 100, PolarShape(4, 0.2f, 0.4f), 1),
+    EdgeShape(false, -84, 4, 196, 196, PolarShape(6, 0.11f), 0),
+    EdgeShape(false, 56, -16, 64, 64, PolarShape(5, 0.14f, 0.2f), 3),
+    EdgeShape(false, 30, 176, 82, 32, RoundedCornerShape(50), 1, -18f),
+    EdgeShape(false, 6, 226, 84, 84, PolarShape(3, 0.17f, 0.3f), 2),
+)
+
+@Composable
+private fun EdgeShapes(modifier: Modifier = Modifier) {
+    val anims = remember { List(EDGE_SHAPES.size) { androidx.compose.animation.core.Animatable(0f) } }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        anims.forEachIndexed { i, a ->
+            launch {
+                delay(60L + i * 70L)
+                a.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.72f, stiffness = androidx.compose.animation.core.Spring.StiffnessLow))
+            }
+        }
+    }
+    Box(modifier.clipToBounds()) {
+        EDGE_SHAPES.forEachIndexed { i, sh ->
+            val color = when (sh.tone) {
+                0 -> NyaoColors.Hero
+                1 -> NyaoColors.Primary
+                2 -> NyaoColors.Lavender
+                else -> NyaoColors.OnPrimary
+            }
+            val dir = if (sh.left) -1f else 1f
+            Box(
+                Modifier.align(if (sh.left) Alignment.TopStart else Alignment.TopEnd)
+                    .offset(x = (if (sh.left) sh.edge else -sh.edge).dp, y = sh.top.dp)
+                    .size(sh.w.dp, sh.h.dp)
+                    .graphicsLayer {
+                        val p = anims[i].value
+                        translationX = (1f - p) * dir * 520.dp.toPx()
+                        rotationZ = sh.rot + (1f - p) * dir * 40f
+                        alpha = p.coerceIn(0f, 1f)
+                    }
+                    .clip(sh.shape)
+                    .background(color),
+            )
+        }
+        // низ не режется, а плавно уходит в фон
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(130.dp)
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, WaveBg.copy(alpha = 0.75f), WaveBg))),
+        )
+    }
+}
 
 @Composable
 fun WaveScreen(model: AppModel) {
@@ -96,17 +168,17 @@ fun WaveScreen(model: AppModel) {
             Text("Моя волна", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
             Box(Modifier.size(48.dp))
         }
-        // Пучок линий, два «печенья»-подложки и большая кнопка
+        // Фигуры по краям (как на ПК), два «печенья»-подложки и большая кнопка
         Box(Modifier.fillMaxWidth().height(330.dp), contentAlignment = Alignment.Center) {
-            FlowLines(Modifier.fillMaxSize(), lines = 14, animate = active, amplitude = 0.14f, spread = 0.2f, center = 0.5f, middle = NyaoColors.Lavender)
+            EdgeShapes(Modifier.fillMaxSize())
             // Подложки медленно вращаются навстречу друг другу, кнопка «дышит», пока играет волна
             val inf = rememberInfiniteTransition(label = "waveBg")
             val spin by inf.animateFloat(0f, (2 * Math.PI).toFloat(), infiniteRepeatable(tween(40000, easing = LinearEasing)), label = "spin")
             val breath by inf.animateFloat(1f, 1.05f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "breath")
             val k = if (active) 1f else 0f
             val b = if (active) breath else 1f
-            Box(Modifier.size(264.dp).graphicsLayer { scaleX = b; scaleY = b }.clip(PolarShape(12, 0.045f, spin / 12f * k)).background(Color(0xFF2E2650)))
-            Box(Modifier.size(226.dp).clip(PolarShape(12, 0.03f, (Math.PI / 12).toFloat() - spin / 12f * k)).background(Color(0xFF342B5C)))
+            Box(Modifier.size(264.dp).graphicsLayer { scaleX = b; scaleY = b }.clip(PolarShape(12, 0.045f, spin / 12f * k)).background(NyaoColors.Tonal))
+            Box(Modifier.size(226.dp).clip(PolarShape(12, 0.03f, (Math.PI / 12).toFloat() - spin / 12f * k)).background(androidx.compose.ui.graphics.lerp(NyaoColors.Tonal, NyaoColors.Hero, 0.45f)))
             Box(
                 Modifier.size(180.dp).bouncy().clip(rememberPlayShape(active, 9, 0.075f)).background(NyaoColors.Lavender).clickable { model.waveButton() },
                 contentAlignment = Alignment.Center,

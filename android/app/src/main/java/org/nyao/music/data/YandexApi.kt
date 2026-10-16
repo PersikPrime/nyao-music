@@ -1,5 +1,7 @@
 package org.nyao.music.data
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -30,6 +32,23 @@ class YandexApi(private val prefs: Prefs) {
         fun cover(uri: String?, size: Int = 400): String? =
             uri?.takeIf { it.isNotBlank() }?.let { "https://" + it.replace("%%", "${size}x$size") }
 
+        /** «Вышло недавно»: Сегодня, Вчера, 3 дня назад, 2 недели назад… */
+        fun releaseAgo(ts: Long, now: Long = System.currentTimeMillis()): String {
+            val d = ((now - ts) / 86_400_000L).toInt()
+            fun pl(n: Int, one: String, few: String, many: String): String {
+                val a = n % 10
+                val b = n % 100
+                return if (a == 1 && b != 11) one else if (a in 2..4 && (b < 10 || b >= 20)) few else many
+            }
+            return when {
+                d <= 0 -> "Сегодня"
+                d == 1 -> "Вчера"
+                d < 7 -> "$d ${pl(d, "день", "дня", "дней")} назад"
+                d < 30 -> (d / 7).let { "$it ${pl(it, "неделю", "недели", "недель")} назад" }
+                else -> (d / 30).let { "$it ${pl(it, "месяц", "месяца", "месяцев")} назад" }
+            }
+        }
+
         fun mapTrack(t: JSONObject?): Track? {
             if (t == null || !t.has("id")) return null
             val id = t.optString("id")
@@ -47,6 +66,8 @@ class YandexApi(private val prefs: Prefs) {
                 duration = (t.optLong("durationMs", 0) / 1000).toInt(),
                 cover = cover(t.str("coverUri") ?: album?.str("coverUri") ?: t.str("ogImage")),
                 available = t.optBoolean("available", true),
+                artistId = t.arr("artists").objects().firstOrNull()?.opt("id")?.toString(),
+                loud = t.optJSONObject("r128")?.let { r -> if (r.has("i")) r.optDouble("i").takeIf { !it.isNaN() } else null },
             )
         }
     }
@@ -158,6 +179,23 @@ class YandexApi(private val prefs: Prefs) {
         return sequence(session)
     }
 
+    // ---------- Радио по треку: станция track:ID (своя сессия, волну не трогает) ----------
+    private var radioSession: String? = null
+
+    suspend fun radioStart(trackId: String): List<Track> {
+        val id = trackId.substringBefore(":")
+        val s = obj("POST", "/rotor/session/new", json = JSONObject().put("seeds", JSONArray().put("track:$id")).put("includeTracksInResponse", true).put("includeWaveModel", false).put("interactive", true))
+        radioSession = s.str("radioSessionId")
+        return sequence(s)
+    }
+
+    suspend fun radioMore(queueIds: List<String>): List<Track> {
+        val sid = radioSession ?: return emptyList()
+        val ids = JSONArray()
+        queueIds.filter { it.startsWith("ya:") }.takeLast(10).forEach { ids.put(it.removePrefix("ya:")) }
+        return sequence(obj("POST", "/rotor/session/$sid/tracks", json = JSONObject().put("queue", ids)))
+    }
+
     suspend fun waveMore(queueIds: List<String>, diversity: String?, mood: String?): List<Track> {
         val sid = waveSession ?: return waveStart(diversity, mood)
         val ids = JSONArray()
@@ -195,6 +233,110 @@ class YandexApi(private val prefs: Prefs) {
         } catch (_: Exception) {
             // фидбек не критичен
         }
+    }
+
+    /** Страница исполнителя: популярное и альбомы */
+    suspend fun artist(id: String): ArtistPage {
+        val r = obj("GET", "/artists/$id/brief-info")
+        val a = r.obj("artist")
+        val albums = (r.arr("albums").objects() + r.arr("alsoAlbums").objects()).map { al ->
+            Playlist(
+                id = "yaalbum:${al.opt("id")}",
+                source = SOURCE_YA,
+                title = al.optString("title"),
+                count = al.optInt("trackCount"),
+                cover = cover(al.str("coverUri"), 300),
+                subtitle = listOfNotNull(al.optInt("year").takeIf { it > 0 }?.toString(), if (al.str("type") == "single") "сингл" else "альбом").joinToString(" · "),
+            )
+        }
+        return ArtistPage(
+            source = SOURCE_YA,
+            id = id,
+            name = a?.optString("name") ?: "Исполнитель",
+            cover = cover(a?.obj("cover")?.str("uri") ?: a?.str("ogImage"), 600),
+            listeners = r.obj("stats")?.optLong("lastMonthListeners")?.takeIf { it > 0 },
+            popular = r.arr("popularTracks").objects().mapNotNull { mapTrack(it) },
+            albums = albums,
+        )
+    }
+
+    /**
+     * Новые релизы любимых исполнителей (как на ПК): лайкнутые исполнители, а если их мало — самые частые в лайках;
+     * у каждого — альбомы и синглы за последние ~4 месяца, новые сверху.
+     */
+    suspend fun newReleases(days: Int = 120, limit: Int = 18): List<Playlist> = kotlinx.coroutines.coroutineScope {
+        val uid = uid()
+        val ids = LinkedHashSet<String>()
+        runCatching { arr("GET", "/users/$uid/likes/artists").objects().forEach { x -> (x.optJSONObject("artist") ?: x).opt("id")?.toString()?.let { ids += it } } }
+        if (ids.size < 12) runCatching {
+            likedTracks(300).mapNotNull { it.artistId }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.forEach { ids += it.key }
+        }
+        val now = System.currentTimeMillis()
+        val since = now - days * 86_400_000L
+        val sem = kotlinx.coroutines.sync.Semaphore(6)
+        val found = ids.take(40).map { id ->
+            async {
+                sem.acquire()
+                try {
+                    runCatching {
+                        obj("GET", "/artists/$id/direct-albums", query = mapOf("page" to "0", "page-size" to "6", "sort-by" to "year")).arr("albums").objects().mapNotNull { al ->
+                            val ts = al.str("releaseDate")?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() } ?: return@mapNotNull null
+                            if (ts < since || ts > now + 86_400_000L) return@mapNotNull null
+                            ts to al
+                        }
+                    }.getOrDefault(emptyList())
+                } finally {
+                    sem.release()
+                }
+            }
+        }.awaitAll().flatten()
+        found.distinctBy { it.second.opt("id")?.toString() }.sortedByDescending { it.first }.take(limit).map { (ts, al) ->
+            Playlist(
+                id = "yaalbum:${al.opt("id")}",
+                source = SOURCE_YA,
+                title = al.optString("title") + (al.str("version")?.let { " ($it)" } ?: ""),
+                count = al.optInt("trackCount"),
+                cover = cover(al.str("coverUri"), 300),
+                subtitle = al.arr("artists").objects().mapNotNull { it.str("name") }.joinToString(", "),
+                note = (if (al.str("type") == "single") "Сингл" else "Альбом") + " · " + releaseAgo(ts, now),
+            )
+        }
+    }
+
+    /** Новый приватный плейлист с треками (перенос плейлистов). → id вида ya:uid:kind */
+    suspend fun createPlaylist(title: String, tracks: List<Track>): String {
+        val uid = uid()
+        val pl = obj("POST", "/users/$uid/playlists/create", form = mapOf("title" to title.take(100), "visibility" to "private"))
+        val kind = pl.opt("kind")?.toString() ?: throw ApiException("Яндекс не создал плейлист")
+        var revision = pl.optInt("revision", 1)
+        tracks.chunked(100).forEachIndexed { i, chunk ->
+            val items = JSONArray()
+            chunk.forEach { t -> items.put(JSONObject().put("id", t.srcId.substringBefore(':')).apply { t.albumId?.let { put("albumId", it) } }) }
+            val diff = JSONArray().put(JSONObject().put("op", "insert").put("at", i * 100).put("tracks", items))
+            val r = obj("POST", "/users/$uid/playlists/$kind/change-relative", form = mapOf("diff" to diff.toString(), "revision" to revision.toString()))
+            revision = if (r.has("revision")) r.optInt("revision") else revision + 1
+        }
+        return "ya:$uid:$kind"
+    }
+
+    suspend fun albumTracks(id: String): List<Track> {
+        val r = obj("GET", "/albums/${id.removePrefix("yaalbum:")}/with-tracks")
+        val vols = r.arr("volumes")
+        return (0 until (vols?.length() ?: 0)).flatMap { i -> vols!!.optJSONArray(i).objects().mapNotNull { mapTrack(it) } }
+    }
+
+    /** Подробности трека: год, жанр, лейбл, номер в альбоме, «18+» */
+    suspend fun trackDetails(trackId: String): TrackDetails {
+        val t = arr("GET", "/tracks/${trackId.substringBefore(":")}").objects().firstOrNull() ?: return TrackDetails()
+        val al = t.arr("albums").objects().firstOrNull()
+        val pos = al?.obj("trackPosition")
+        return TrackDetails(
+            year = al?.optInt("year")?.takeIf { it > 0 } ?: al?.str("releaseDate")?.take(4)?.toIntOrNull(),
+            genre = al?.str("genre"),
+            label = al?.arr("labels")?.let { a -> (0 until a.length()).mapNotNull { i -> (a.opt(i) as? JSONObject)?.str("name") ?: (a.opt(i) as? String) } }?.joinToString(", ")?.ifBlank { null },
+            position = pos?.optInt("index")?.takeIf { it > 0 }?.let { i -> "$i" + (al?.optInt("trackCount")?.takeIf { it > 0 }?.let { " из $it" } ?: "") },
+            explicit = t.str("contentWarning") == "explicit",
+        )
     }
 
     // ---------- Медиатека ----------
@@ -255,6 +397,54 @@ class YandexApi(private val prefs: Prefs) {
             val album = i.str("albumId")
             if (album != null) "${i.optString("id")}:$album" else i.optString("id")
         })
+    }
+
+    /**
+     * Текст трека от Яндекса (лицензированный). format: "LRC" — по строкам со временем, "TEXT" — просто текст.
+     * Подпись запроса — как в приложении Яндекс Музыки. → (текст, поставщик) или null
+     */
+    suspend fun lyrics(trackId: String, format: String = "LRC"): Pair<String, String?>? {
+        val id = trackId.substringBefore(':')
+        val ts = (System.currentTimeMillis() / 1000).toString()
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        mac.init(javax.crypto.spec.SecretKeySpec("p93jhgh689SBReK6ghtw62".toByteArray(), "HmacSHA256"))
+        val sign = android.util.Base64.encodeToString(mac.doFinal("$id$ts".toByteArray()), android.util.Base64.NO_WRAP)
+        val r = try {
+            obj("GET", "/tracks/$id/lyrics", query = mapOf("format" to format, "timeStamp" to ts, "sign" to sign))
+        } catch (e: ApiException) {
+            if (e.code in listOf(400, 403, 404)) return null else throw e
+        }
+        val url = r.str("downloadUrl") ?: return null
+        val (code, text) = Net.call(Request.Builder().url(url).build())
+        if (code !in 200..299 || text.isBlank()) return null
+        val major = r.obj("major")?.let { it.str("prettyName") ?: it.str("name") }?.let {
+            when (it.uppercase()) { "MUSIXMATCH" -> "Musixmatch"; "LYRICFIND" -> "LyricFind"; else -> it }
+        }
+        return text to major
+    }
+
+    /** Все треки исполнителя (по популярности) */
+    suspend fun artistTracks(id: String): List<Track> =
+        obj("GET", "/artists/$id/tracks", query = mapOf("page" to "0", "page-size" to "500")).arr("tracks").objects().mapNotNull { mapTrack(it) }
+
+    suspend fun searchArtists(text: String): List<SearchArtist> {
+        val res = obj("GET", "/search", query = mapOf("text" to text, "type" to "artist", "page" to "0"))
+        return res.path("artists")?.arr("results").objects().mapNotNull { a ->
+            val id = a.opt("id")?.toString() ?: return@mapNotNull null
+            SearchArtist(SOURCE_YA, id, a.optString("name"), cover(a.obj("cover")?.str("uri"), 200))
+        }.take(10)
+    }
+
+    suspend fun searchAlbums(text: String): List<Playlist> {
+        val res = obj("GET", "/search", query = mapOf("text" to text, "type" to "album", "page" to "0"))
+        return res.path("albums")?.arr("results").objects().map { al ->
+            Playlist(
+                id = "yaalbum:${al.opt("id")}", source = SOURCE_YA,
+                title = al.optString("title") + (al.str("version")?.let { " ($it)" } ?: ""),
+                count = al.optInt("trackCount"), cover = cover(al.str("coverUri"), 300),
+                subtitle = listOfNotNull(al.arr("artists").objects().mapNotNull { it.str("name") }.joinToString(", ").ifBlank { null }, al.optInt("year").takeIf { it > 0 }?.toString()).joinToString(" · "),
+            )
+        }.take(12)
     }
 
     suspend fun search(text: String): List<Track> {

@@ -17,7 +17,15 @@ const DEFAULT_SETTINGS = {
   layout: null,          // 'player' | 'wave'; null — ещё не выбран (предложим выбрать при запуске)
   splitLiked: false,     // «Мне нравится» отдельно по сервисам
   waveTab: false,        // вкладка «Моя волна» в меню в режиме «Плеер»
-  eq: null               // эквалайзер { on, preset, gains[10] }; null — выключен
+  eq: null,              // эквалайзер { on, preset, gains[10] }; null — выключен
+  normalize: false,      // выравнивать громкость треков (по данным Яндекса и YouTube)
+  fade: 0,               // плавные переходы между треками, секунд (0 — выкл)
+  fsAutoHide: false,
+  accent: 'lavender',     // акцентный цвет: lavender | coral | mint | sun | cover     // полноэкранный режим: прятать кнопки, если мышь не двигается
+  continueSimilar: true, // список доиграл — продолжать похожим (радио по последнему треку)
+  searchPlay: 'similar', // трек из поиска: 'similar' — дальше похожее, 'list' — остальные результаты
+  globalKeys: true,      // сочетания Ctrl+Alt+… работают, даже когда окно свёрнуто
+  closeToTray: false     // крестик прячет окно в трей, музыка играет дальше
 };
 
 function dataPath(name) {

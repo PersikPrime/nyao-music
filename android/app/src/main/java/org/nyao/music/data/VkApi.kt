@@ -255,11 +255,16 @@ class VkApi(private val prefs: Prefs) {
     /** «Моя музыка» */
     suspend fun likedTracks(limit: Int = 5000): List<Track> {
         val me = uid ?: throw ApiException("Нужен вход во VK")
+        return loadPlaylist(me.toString(), "-1", "", limit)
+    }
+
+    /** Треки плейлиста (playlist_id -1 — «Моя музыка») */
+    private suspend fun loadPlaylist(owner: String, playlistId: String, hash: String, limit: Int = 5000): List<Track> {
         val out = ArrayList<JSONArray>()
         var offset = 0
         for (page in 0 until 60) {
             if (out.size >= limit) break
-            val data = post("load_section", mapOf("owner_id" to me, "playlist_id" to -1, "offset" to offset, "type" to "playlist", "access_hash" to "", "is_loading_all" to 1))
+            val data = post("load_section", mapOf("owner_id" to owner, "playlist_id" to playlistId, "offset" to offset, "type" to "playlist", "access_hash" to hash, "is_loading_all" to 1))
             val pl = findPlaylist(data)
             val items = collect(pl?.optJSONArray("list") ?: data)
             if (items.isEmpty()) {
@@ -271,6 +276,46 @@ class VkApi(private val prefs: Prefs) {
             offset = pl.optInt("nextOffset").takeIf { it > 0 } ?: (offset + items.size)
         }
         return remember(out.take(limit))
+    }
+
+    /** Свои плейлисты VK: id вида vk:владелец_плейлист_ключ */
+    suspend fun playlists(): List<Playlist> {
+        val me = uid ?: return emptyList()
+        data class P(val owner: String, val id: String, val hash: String, val title: String, val count: Int, val cover: String?)
+        val viaApi: suspend () -> List<P> = {
+            val r = api("audio.getPlaylists", mapOf("owner_id" to me.toString(), "count" to "100"))
+            (r as? JSONObject)?.optJSONArray("items").objects().map { p ->
+                val th = p.optJSONArray("thumbs")?.optJSONObject(0) ?: p.optJSONObject("photo")
+                P(p.opt("owner_id").toString(), p.opt("id").toString(), p.optString("access_key"), p.optString("title"), p.optInt("count"), th?.let { it.str("photo_600") ?: it.str("photo_300") ?: it.str("photo_270") })
+            }
+        }
+        val viaMobile: suspend () -> List<P> = {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val (_, html) = send(Request.Builder().url(base.replace("://", "://m.") + "/audio?act=audio_playlists$me").header("X-Requested-With", "XMLHttpRequest"))
+                val seen = HashSet<String>()
+                Regex("act=audio_playlist(-?\\d+)_(\\d+)(?:&(?:amp;)?access_hash=([0-9a-f]+))?[^>]*>([\\s\\S]{0,1500}?)</a>").findAll(html).mapNotNull { m ->
+                    if (!seen.add(m.groupValues[1] + "_" + m.groupValues[2])) return@mapNotNull null
+                    val inner = m.groupValues[4]
+                    val title = Regex("class=\"[^\"]*(?:Title|title)[^\"]*\"[^>]*>([^<]+)<").find(inner)?.groupValues?.get(1)?.trim().orEmpty()
+                    val cover = Regex("url\\((?:&quot;|'|\")?(https:[^)'\"&]+)").find(inner)?.groupValues?.get(1)
+                    P(m.groupValues[1], m.groupValues[2], m.groupValues[3], title, 0, cover)
+                }.toList()
+            }
+        }
+        for ((name, fn) in listOf("api" to viaApi, "m.vk" to viaMobile)) {
+            try {
+                val list = fn()
+                if (list.isNotEmpty()) return list.map { p -> Playlist("vk:${p.owner}_${p.id}_${p.hash}", SOURCE_VK, unescapeHtml(p.title).ifBlank { "Плейлист" }, p.count, p.cover, "VK Музыка") }
+            } catch (e: Exception) {
+                debug("playlists / $name: ${e.message}")
+            }
+        }
+        return emptyList()
+    }
+
+    suspend fun playlistTracks(id: String): List<Track> {
+        val m = Regex("^vk:(-?\\d+)_(-?\\d+)_?(\\w*)$").find(id) ?: throw ApiException("Странный плейлист VK")
+        return loadPlaylist(m.groupValues[1], m.groupValues[2], m.groupValues[3])
     }
 
     private suspend fun section(name: String, extra: Map<String, Any?> = emptyMap()): List<Track> {

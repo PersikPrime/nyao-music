@@ -33,19 +33,35 @@ object Repo {
         private set
     lateinit var mixStore: MixStore
         private set
+    lateinit var lastfm: LastFm
+        private set
+    lateinit var radio: Radio
+        private set
     private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
-    enum class Mode { LIST, WAVE }
+    enum class Mode { LIST, WAVE, RADIO }
 
     /** Что сейчас играет: «Моя волна» (сама подгружает треки) или обычный список */
     val mode = MutableStateFlow(Mode.LIST)
     val queueLabel = MutableStateFlow("")
+    /** Трек из поиска в режиме «дальше похожее»: продолжить радио, даже если общая настройка выключена */
+    @Volatile var forceContinue = false
 
     private val tracks = ConcurrentHashMap<String, Track>()
     private val yaStreamCache = ConcurrentHashMap<String, Pair<String, Long>>()
 
     private val _accounts = MutableStateFlow<Map<String, Account?>>(mapOf(SOURCE_YA to null, SOURCE_YT to null, SOURCE_SC to null, SOURCE_VK to null))
     val accounts: StateFlow<Map<String, Account?>> = _accounts
+
+    /** Техработы и сбои сервисов — опрашивается раз в 2 минуты из NyaoRoot */
+    val status = MutableStateFlow(SvcStatus())
+    fun up(source: String) = source !in status.value.outages
+
+    suspend fun refreshStatus(): SvcStatus? {
+        val s = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cloud.status() } }.getOrNull() ?: return null
+        status.value = s
+        return s
+    }
 
     private val _liked = MutableStateFlow<Set<String>>(emptySet())
     val liked: StateFlow<Set<String>> = _liked
@@ -54,17 +70,19 @@ object Repo {
         if (::prefs.isInitialized) return
         prefs = Prefs(context.applicationContext)
         ya = YandexApi(prefs)
-        yt = YtMusicApi(prefs)
+        yt = YtMusicApi(prefs, context.applicationContext.filesDir)
         ytStreams = YtStreams(yt)
         sc = ScApi(prefs)
         vk = VkApi(prefs)
         cloud = NyaoCloud(prefs, context.applicationContext.filesDir)
         mixStore = MixStore(context.applicationContext.filesDir)
+        lastfm = LastFm(prefs, context.applicationContext.filesDir)
         org.nyao.music.playback.Offline.init(context)
         // изменения настроек волны, вида и миксов уезжают на другие устройства
         prefs.onSyncChange = { key -> bg.launch { runCatching { cloud.pushState(key, stateData(key)) } } }
         mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
-        wave = WaveMixer(ya, yt, sc, vk, prefs) { cloud.recentIds() }
+        radio = Radio(ya, yt, sc, vk) { !up(it) }
+        wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) })
     }
 
     fun track(id: String): Track? = tracks[id]
@@ -184,6 +202,17 @@ object Repo {
         HomeData(a.await().take(10), sections.take(6))
     }
 
+    private var releasesCache: Pair<Long, List<Playlist>>? = null
+
+    /** Новые релизы любимых исполнителей (только Яндекс). Кэш на 6 часов */
+    suspend fun newReleases(force: Boolean = false): List<Playlist> {
+        if (!ya.loggedIn || up(SOURCE_YA).not()) return releasesCache?.second ?: emptyList()
+        releasesCache?.let { (at, list) -> if (!force && System.currentTimeMillis() - at < 6 * 3600_000L) return list }
+        val list = runCatching { ya.newReleases() }.getOrNull() ?: return releasesCache?.second ?: emptyList()
+        releasesCache = System.currentTimeMillis() to list
+        return list
+    }
+
     suspend fun likedTracks(): List<Track> = coroutineScope {
         val a = async { if (ya.loggedIn) runCatching { ya.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
         val b = async { if (yt.loggedIn) runCatching { yt.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
@@ -198,7 +227,8 @@ object Repo {
         val a = async { if (ya.loggedIn) runCatching { ya.playlists() }.getOrDefault(emptyList()) else emptyList() }
         val b = async { if (yt.loggedIn) runCatching { yt.playlists() }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (sc.loggedIn) runCatching { sc.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        listOfNotNull(org.nyao.music.playback.Offline.asPlaylist()) + a.await() + b.await() + c.await()
+        val d = async { if (vk.loggedIn) runCatching { vk.playlists() }.getOrDefault(emptyList()) else emptyList() }
+        listOfNotNull(org.nyao.music.playback.Offline.asPlaylist()) + a.await() + b.await() + c.await() + d.await()
     }
 
     suspend fun playlistTracks(id: String): List<Track> = remember(
@@ -208,21 +238,151 @@ object Repo {
             id == "liked" -> likedTracks()
             id.startsWith("liked:") -> likedTracks().filter { it.source == id.removePrefix("liked:") }
             id.startsWith("mix:") -> mixStore.get(id)?.tracks ?: emptyList()
+            id.startsWith("yaalbum:") -> ya.albumTracks(id)
+            id.startsWith("artist:") -> artistTracks(id)
             id.startsWith("ya:") -> ya.playlistTracks(id)
             id.startsWith("sc:") -> sc.playlistTracks(id)
+            id.startsWith("vk:") -> vk.playlistTracks(id)
             else -> yt.playlistTracks(id)
         },
     )
 
     suspend fun search(q: String): SearchResult = coroutineScope {
         // Поиск YouTube Music работает и без входа
-        val a = async { if (ya.loggedIn) runCatching { ya.search(q) }.getOrDefault(emptyList()) else emptyList() }
-        val b = async { runCatching { yt.search(q) }.getOrDefault(emptyList()) }
-        val c = async { runCatching { sc.search(q) }.getOrDefault(emptyList()) }
-        val d = async { if (vk.loggedIn) runCatching { vk.search(q) }.getOrDefault(emptyList()) else emptyList() }
-        SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()))
+        val a = async { if (ya.loggedIn && up(SOURCE_YA)) runCatching { ya.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        val b = async { if (up(SOURCE_YT)) runCatching { yt.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        val c = async { if (up(SOURCE_SC)) runCatching { sc.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        val d = async { if (vk.loggedIn && up(SOURCE_VK)) runCatching { vk.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        // исполнители и альбомы: Яндекс и YouTube Music
+        val arYa = async { if (ya.loggedIn && up(SOURCE_YA)) runCatching { ya.searchArtists(q) }.getOrDefault(emptyList()) else emptyList() }
+        val arYt = async { if (up(SOURCE_YT)) runCatching { yt.searchArtists(q) }.getOrDefault(emptyList()) else emptyList() }
+        val alYa = async { if (ya.loggedIn && up(SOURCE_YA)) runCatching { ya.searchAlbums(q) }.getOrDefault(emptyList()) else emptyList() }
+        val alYt = async { if (up(SOURCE_YT)) runCatching { yt.searchAlbums(q) }.getOrDefault(emptyList()) else emptyList() }
+        val nq = Search.norm(q)
+        val artists = alternateAll(arYa.await(), arYt.await()).distinctBy { Search.norm(it.name) }.sortedByDescending { Search.norm(it.name) == nq }.take(10)
+        val albums = alternateAll(alYa.await(), alYt.await()).take(12)
+        SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()), artists, albums)
     }
 
+    /** «Все треки» исполнителя: id вида artist:<сервис>:<id>:<имя>. SoundCloud и VK — поиском по имени */
+    private suspend fun artistTracks(key: String): List<Track> {
+        val parts = key.split(":", limit = 4)
+        val source = parts.getOrNull(1) ?: return emptyList()
+        val id = parts.getOrNull(2)?.ifBlank { null }
+        val name = parts.getOrNull(3) ?: ""
+        val full = runCatching {
+            when {
+                source == SOURCE_YA && id != null && ya.loggedIn -> ya.artistTracks(id)
+                source == SOURCE_YT && id != null -> yt.artistTracks(id)
+                else -> null
+            }
+        }.getOrNull()
+        if (!full.isNullOrEmpty()) return full
+        val found = runCatching { searchIn(source, name) }.getOrDefault(emptyList())
+        return found.filter { it.artist.contains(name, ignoreCase = true) }.ifEmpty { found }
+    }
+
+    /** Страница исполнителя: у Яндекса и YouTube — настоящая, у SoundCloud и VK — его треки из поиска */
+    suspend fun artistPage(source: String, id: String?, name: String): ArtistPage {
+        val page = runCatching {
+            when {
+                source == SOURCE_YA && id != null && ya.loggedIn -> ya.artist(id)
+                source == SOURCE_YT && id != null -> yt.artist(id)
+                else -> null
+            }
+        }.getOrNull()
+        if (page != null) {
+            remember(page.popular)
+            return page
+        }
+        val main = name.substringBefore(",").trim()
+        val found = when (source) {
+            SOURCE_SC -> runCatching { sc.search(main) }.getOrDefault(emptyList())
+            SOURCE_VK -> if (vk.loggedIn) runCatching { vk.search(main) }.getOrDefault(emptyList()) else emptyList()
+            SOURCE_YA -> if (ya.loggedIn) runCatching { ya.search(main) }.getOrDefault(emptyList()) else emptyList()
+            else -> runCatching { yt.search(main) }.getOrDefault(emptyList())
+        }
+        val mine = found.filter { it.artist.contains(main, ignoreCase = true) }.ifEmpty { found }
+        remember(mine)
+        return ArtistPage(source, id, main, mine.firstOrNull()?.cover, null, mine, emptyList())
+    }
+
+    suspend fun trackDetails(t: Track): TrackDetails = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            when (t.source) {
+                SOURCE_YA -> if (ya.loggedIn) ya.trackDetails(t.srcId) else TrackDetails()
+                SOURCE_SC -> sc.trackDetails(t.srcId)
+                else -> TrackDetails()
+            }
+        }.getOrDefault(TrackDetails())
+    }
+
+    // ---------- «Слушать вместе» и перенос плейлистов ----------
+
+    private fun usable(s: String) = up(s) && when (s) {
+        SOURCE_YT, SOURCE_SC -> true
+        SOURCE_YA -> ya.loggedIn
+        SOURCE_VK -> vk.loggedIn
+        else -> false
+    }
+
+    private suspend fun searchIn(source: String, q: String): List<Track> = when (source) {
+        SOURCE_YA -> ya.search(q)
+        SOURCE_YT -> yt.search(q)
+        SOURCE_SC -> sc.search(q)
+        SOURCE_VK -> vk.search(q)
+        else -> emptyList()
+    }
+
+    /** Трек из чужого сервиса → тот, что можно включить здесь (свой сервис или найденный похожий) */
+    suspend fun playable(t: Track): Track? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (usable(t.source)) return@withContext t.also { rememberTrack(it) }
+        for (s in listOf(SOURCE_YA, SOURCE_VK, SOURCE_YT, SOURCE_SC).filter { usable(it) }) {
+            Match.find(t) { q -> searchIn(s, q) }?.let { rememberTrack(it); return@withContext it }
+        }
+        null
+    }
+
+    data class TransferTarget(val id: String, val name: String, val ok: Boolean)
+    data class TransferResult(val found: Int, val total: Int, val missing: List<Track>, val playlistId: String?)
+
+    fun transferTargets(): List<TransferTarget> = listOf(
+        TransferTarget("mix", "Nyao-микс", true),
+        TransferTarget(SOURCE_YA, "Яндекс Музыка", ya.loggedIn && up(SOURCE_YA)),
+        TransferTarget(SOURCE_YT, "YouTube Music", yt.loggedIn && up(SOURCE_YT)),
+    )
+
+    /** Перенос: каждый трек ищем в целевом сервисе и собираем новый плейлист (порядок сохраняется) */
+    suspend fun transfer(tracks: List<Track>, title: String, target: String, onProgress: (done: Int, total: Int, found: Int) -> Unit): TransferResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val out = arrayOfNulls<Track>(tracks.size)
+        val done = java.util.concurrent.atomic.AtomicInteger()
+        val found = java.util.concurrent.atomic.AtomicInteger()
+        val sem = kotlinx.coroutines.sync.Semaphore(4)
+        tracks.mapIndexed { i, t ->
+            async {
+                sem.acquire()
+                try {
+                    out[i] = if (target == "mix" || t.source == target) t else Match.find(t) { q -> searchIn(target, q) }
+                } finally {
+                    sem.release()
+                }
+                if (out[i] != null) found.incrementAndGet()
+                onProgress(done.incrementAndGet(), tracks.size, found.get())
+            }
+        }.forEach { it.await() }
+        val matched = out.filterNotNull().distinctBy { it.id }
+        val missing = tracks.filterIndexed { i, _ -> out[i] == null }
+        val title2 = title.take(80).ifBlank { "Перенесённый плейлист" }
+        val id = if (matched.isEmpty()) null else when (target) {
+            "mix" -> mixStore.create(title2, matched).id
+            SOURCE_YA -> ya.createPlaylist(title2, matched)
+            else -> yt.createPlaylist(title2, matched.map { it.srcId })
+        }
+        TransferResult(matched.size, tracks.size, missing, id)
+    }
+
+    suspend fun radioStart(t: Track): List<Track> = remember(radio.start(t))
+    suspend fun radioMore(queueIds: List<String>): List<Track> = remember(radio.more(queueIds))
     suspend fun waveStart(): List<Track> = remember(wave.start())
     suspend fun waveMore(queueIds: List<String>): List<Track> = remember(wave.more(queueIds))
 

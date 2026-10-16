@@ -12,6 +12,10 @@ data class Track(
     val duration: Int = 0,
     val cover: String? = null,
     val available: Boolean = true,
+    /** Громкость трека в LUFS (Яндекс, r128) — для выравнивания громкости */
+    val loud: Double? = null,
+    /** id основного исполнителя в сервисе (Яндекс — число, YouTube — UC…), для страницы исполнителя */
+    val artistId: String? = null,
 ) {
     val isYa: Boolean get() = source == SOURCE_YA
 }
@@ -23,6 +27,8 @@ data class Playlist(
     val count: Int = 0,
     val cover: String? = null,
     val subtitle: String = "",
+    /** Доп. подпись, например «Сингл · 3 дня назад» у новых релизов */
+    val note: String = "",
 )
 
 data class HomeSection(
@@ -38,7 +44,13 @@ data class HomeData(
     val ytSections: List<HomeSection> = emptyList(),
 )
 
-data class SearchResult(val ya: List<Track> = emptyList(), val yt: List<Track> = emptyList(), val sc: List<Track> = emptyList(), val vk: List<Track> = emptyList())
+data class SearchResult(
+    val ya: List<Track> = emptyList(), val yt: List<Track> = emptyList(), val sc: List<Track> = emptyList(), val vk: List<Track> = emptyList(),
+    val artists: List<SearchArtist> = emptyList(), val albums: List<Playlist> = emptyList(),
+)
+
+/** Исполнитель в результатах поиска (Яндекс или YouTube Music) */
+data class SearchArtist(val source: String, val id: String, val name: String, val cover: String?)
 
 const val SOURCE_YA = "ya"
 const val SOURCE_YT = "yt"
@@ -87,3 +99,24 @@ fun <T> alternate(a: List<T>, b: List<T>): List<T> {
     }
     return out
 }
+
+/** Подробности трека для «О треке» — что сервис сообщает */
+data class TrackDetails(
+    val year: Int? = null,
+    val genre: String? = null,
+    val label: String? = null,
+    val position: String? = null,
+    val plays: Long? = null,
+    val explicit: Boolean = false,
+)
+
+/** Страница исполнителя */
+data class ArtistPage(
+    val source: String,
+    val id: String?,
+    val name: String,
+    val cover: String? = null,
+    val listeners: Long? = null,
+    val popular: List<Track> = emptyList(),
+    val albums: List<Playlist> = emptyList(),
+)

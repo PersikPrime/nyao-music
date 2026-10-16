@@ -108,6 +108,9 @@ private fun routeOrder(r: Route): Int = when (r) {
     Route.Search -> 3
     Route.Settings -> 4
     is Route.PlaylistPage -> 5
+    is Route.ArtistPage -> 6
+    Route.Together -> 7
+    Route.Stats -> 8
 }
 
 /** icon — обычная (контурная), iconOn — залитая для выбранной вкладки, как в Material 3 Expressive */
@@ -162,6 +165,19 @@ fun NyaoRoot() {
                 delay(5 * 60_000L)
             }
         }
+        // техработы и сбои сервисов: сразу и потом раз в 2 минуты
+        launch {
+            var wasDown = false
+            while (true) {
+                val s = Repo.refreshStatus()
+                if (s != null) {
+                    if (s.maintenance.active && !wasDown) org.nyao.music.playback.PlayerConnection.pauseIfPlaying()
+                    if (!s.maintenance.active && wasDown) PlaybackEvents.emit("Nyao снова работает")
+                    wasDown = s.maintenance.active
+                }
+                delay(2 * 60_000L)
+            }
+        }
         launch {
             delay(3000)
             runCatching { org.nyao.music.data.Updates.check(org.nyao.music.BuildConfig.VERSION_CODE) }.getOrNull()?.let { u ->
@@ -198,10 +214,31 @@ fun NyaoRoot() {
             })
         }
 
+        // проверка SoundCloud (капча): после неё досылаем отложенные лайки
+        val captcha by Repo.sc.captcha.collectAsState()
+        captcha?.let { url ->
+            org.nyao.music.ui.screens.ScCaptchaScreen(url) { ok ->
+                Repo.sc.captcha.value = null
+                if (ok) scope.launch {
+                    runCatching { Repo.flushScLikes() }
+                    PlaybackEvents.emit("Проверка пройдена — лайки SoundCloud отправлены")
+                }
+            }
+        }
+
+        // техработы — заглушка поверх всего (скачанное слушать можно)
+        val svc by Repo.status.collectAsState()
+        AnimatedVisibility(svc.maintenance.active, enter = fadeIn(), exit = fadeOut()) {
+            org.nyao.music.ui.screens.MaintenanceScreen(model)
+        }
+
         TopToast(toast, onDismiss = { toast = null }, modifier = Modifier.align(Alignment.TopCenter))
 
         // режим «Плеер»: окно нового микса; после обновления с 0.4 — выбор вида; устаревшая сборка — обновиться
         if (model.mixBuilderOpen) org.nyao.music.ui.screens.MixBuilderDialog(model)
+        // Nyao Connect и перенос плейлиста
+        if (model.connectOpen) org.nyao.music.ui.screens.ConnectSheet(model) { model.connectOpen = false }
+        model.transferFor?.let { (p, t) -> org.nyao.music.ui.screens.TransferSheet(model, p, t) { model.transferFor = null } }
         if (settings.onboarded && settings.layout == null) org.nyao.music.ui.screens.LayoutAskDialog()
         if (requiredUpdate != null || outdated > 0) org.nyao.music.ui.screens.OutdatedDialog(requiredUpdate?.apkUrl)
     }
@@ -229,6 +266,9 @@ private fun Content(model: AppModel, wide: Boolean) {
             Route.Library -> LibraryScreen(model, wide)
             Route.Settings -> SettingsScreen(model)
             is Route.PlaylistPage -> PlaylistScreen(model, r.playlist)
+            is Route.ArtistPage -> org.nyao.music.ui.screens.ArtistScreen(model, r)
+            Route.Together -> org.nyao.music.ui.screens.TogetherScreen(model)
+            Route.Stats -> org.nyao.music.ui.screens.StatsScreen(model)
         }
     }
 }
@@ -306,6 +346,18 @@ private fun PhoneLayout(model: AppModel) {
             },
         ) { Content(model, wide = false) }
         BottomBlur(shot, barsTop)
+        // вся нижняя зона (вокруг плеера и панели) забирает касания себе — иначе тап мимо кнопок попадал в список под ней
+        if (!barsTop.isNaN()) {
+            val topDp = with(androidx.compose.ui.platform.LocalDensity.current) { barsTop.toDp() } - 10.dp
+            Box(
+                Modifier.fillMaxSize().padding(top = topDp.coerceAtLeast(0.dp))
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                        }
+                    },
+            )
+        }
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)
                 .onGloballyPositioned { barsTop = it.positionInParent().y },
@@ -356,7 +408,7 @@ private fun BottomBlur(shot: androidx.compose.ui.graphics.layer.GraphicsLayer, b
 /** Плавающая панель из макета: выбранная вкладка раскрывается в «таблетку» с подписью */
 @Composable
 private fun FloatingToolbar(model: AppModel) {
-    val selectedRoute = if (model.route is Route.PlaylistPage || (model.route == Route.Search && Repo.prefs.settings.value.isWaveLayout)) Route.Library else model.route
+    val selectedRoute = if (model.route == Route.Together || model.route == Route.Stats) Route.Home else if (model.route is Route.PlaylistPage || model.route is Route.ArtistPage || (model.route == Route.Search && Repo.prefs.settings.value.isWaveLayout)) Route.Library else model.route
     Surface(shape = RoundedCornerShape(30.dp), color = NyaoColors.S3, shadowElevation = 12.dp) {
         Row(Modifier.height(60.dp).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             tabsFor(Repo.prefs.settings.collectAsState().value).forEach { tab ->

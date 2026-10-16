@@ -86,7 +86,7 @@ object PlayerConnection {
         if (newId != lastNowId || c.isPlaying != lastNowPlaying) {
             lastNowId = newId
             lastNowPlaying = c.isPlaying
-            pushNow()
+            pushNowMain()
         }
         _queue.value = (0 until c.mediaItemCount).mapNotNull { Repo.track(c.getMediaItemAt(it).mediaId) }
         _index.value = c.currentMediaItemIndex
@@ -124,14 +124,32 @@ object PlayerConnection {
         val skipped = listened < minOf(30, dur / 2)
         if (listened < 5 && !skipped) return
         ioScope.launch { runCatching { Repo.cloud.recordPlay(t, listened, skipped) } }
+        ioScope.launch { runCatching { Repo.lastfm.scrobble(if (t.duration > 0) t else t.copy(duration = dur), listened) } }
     }
 
-    private fun pushNow() {
+    /** «Сейчас играет» на сервер (пульт на других устройствах) и, если ведём комнату, — в неё */
+    fun pushNow(force: Boolean = false) {
+        mainScope.launch { pushNowMain(force) }
+    }
+
+    private var lastQueueKey = ""
+
+    private fun pushNowMain(force: Boolean = false) {
         val c = controller ?: return
         val t = c.currentMediaItem?.mediaId?.let { Repo.track(it) }
         val pos = c.currentPosition / 1000.0
         val playing = c.isPlaying
-        ioScope.launch { runCatching { Repo.cloud.setNow(t, pos, playing) } }
+        Together.push()
+        // очередь «откуда играет и что дальше» — только когда она поменялась (в порядке воспроизведения, с учётом перемешивания)
+        val next = _upNext.value
+        val key = "${t?.id}|${c.currentMediaItemIndex}|${c.mediaItemCount}|${Repo.mode.value}|${Repo.queueLabel.value}|${c.shuffleModeEnabled}"
+        val queue = if (t != null && key != lastQueueKey) org.nyao.music.data.HandoffQueue(
+            listOf(t) + next.map { it.second }.take(99), 0, Repo.queueLabel.value,
+            when (Repo.mode.value) { Repo.Mode.WAVE -> "wave"; Repo.Mode.RADIO -> "radio"; else -> "list" },
+        ) else null
+        lastQueueKey = key
+        ioScope.launch { runCatching { Repo.cloud.setNow(t, pos, playing, Live.volume(), force, queue) } }
+        if (playing && t != null) ioScope.launch { runCatching { Repo.lastfm.nowPlaying(t) } }
     }
 
     /** Раз в 2 секунды запоминаем позицию (для истории), раз в 30 секунд — «сейчас играет» на сервер */
@@ -146,10 +164,51 @@ object PlayerConnection {
                     lastPosMs = c.currentPosition
                     if (c.duration > 0) lastDurMs = c.duration
                 }
-                if (++n % 15 == 0 && c.isPlaying) pushNow()
+                if (++n % 15 == 0 && c.isPlaying) pushNowMain()
                 if (n % 150 == 0) ioScope.launch { runCatching { Repo.cloud.flush() } }
             }
         }
+    }
+
+    /** Список с нужного трека и места (команда с другого устройства, «Слушать вместе») */
+    fun playListAt(list: List<Track>, index: Int, label: String, positionMs: Long, play: Boolean = true) {
+        if (list.isEmpty()) return
+        list.forEach { Repo.rememberTrack(it) }
+        Repo.mode.value = Repo.Mode.LIST
+        Repo.queueLabel.value = label
+        withController { c ->
+            c.setMediaItems(list.map { Repo.mediaItem(it) }, index.coerceIn(0, list.lastIndex), positionMs.coerceAtLeast(0L))
+            c.prepare()
+            if (play) c.play() else c.pause()
+        }
+    }
+
+    /** Весь список (результаты поиска) — сразу после текущего трека или в конец очереди. Ничего не играет — просто включает */
+    fun enqueueAll(list: List<Track>, next: Boolean, label: String) {
+        val playable = list.filter { it.available }
+        if (playable.isEmpty()) return
+        if (_current.value == null) return playList(playable, 0, label)
+        val cur = _current.value?.id
+        val items = playable.filter { it.id != cur }
+        items.forEach { Repo.rememberTrack(it) }
+        withController { c ->
+            val at = if (next) c.currentMediaItemIndex + 1 else c.mediaItemCount
+            c.addMediaItems(at.coerceIn(0, c.mediaItemCount), items.map { Repo.mediaItem(it) })
+        }
+    }
+
+    /** Забрать музыку с другого устройства: весь его список (или волну) с того же трека и места */
+    fun handoff(track: Track, positionSec: Double, queue: org.nyao.music.data.HandoffQueue?, fallbackLabel: String) {
+        val ms = if (track.duration > 0 && positionSec > track.duration - 5) 0L else (positionSec * 1000).toLong()
+        if (queue == null) return resume(track, ms, fallbackLabel)
+        var list = queue.tracks
+        var i = list.indexOfFirst { it.id == track.id }
+        if (i < 0) {
+            list = listOf(track) + list
+            i = 0
+        }
+        playListAt(list, i, queue.label.ifBlank { fallbackLabel }, ms)
+        if (queue.mode == "wave") Repo.mode.value = Repo.Mode.WAVE
     }
 
     /** «Продолжить с другого устройства»: включает трек с нужного места */
@@ -199,6 +258,7 @@ object PlayerConnection {
     fun playList(list: List<Track>, start: Int, label: String) {
         val playable = list.filter { it.available }
         if (playable.isEmpty()) return
+        Repo.forceContinue = false
         val startIndex = playable.indexOf(list.getOrNull(start)).coerceAtLeast(0)
         Repo.mode.value = Repo.Mode.LIST
         Repo.queueLabel.value = label
@@ -207,6 +267,47 @@ object PlayerConnection {
             c.prepare()
             c.play()
         }
+    }
+
+    /** Радио по треку: сам трек и бесконечное «похожее» */
+    fun startRadio(t: Track) {
+        ioScope.launch {
+            try {
+                val tracks = Repo.radioStart(t)
+                withContext(Dispatchers.Main) {
+                    Repo.mode.value = Repo.Mode.RADIO
+                    Repo.queueLabel.value = "Радио: ${t.title}"
+                    withController { c ->
+                        c.shuffleModeEnabled = false
+                        if (c.repeatMode == Player.REPEAT_MODE_ALL) c.repeatMode = Player.REPEAT_MODE_OFF
+                        c.setMediaItems(tracks.map { Repo.mediaItem(it) }, 0, 0L)
+                        c.prepare()
+                        c.play()
+                    }
+                }
+            } catch (e: Exception) {
+                PlaybackEvents.emit(e.message ?: "Не удалось запустить радио")
+            }
+        }
+    }
+
+    /** В конец очереди */
+    fun addToQueue(t: Track) = withController { c ->
+        c.addMediaItem(Repo.mediaItem(t))
+        if (c.mediaItemCount == 1) {
+            c.prepare()
+            c.play()
+        }
+    }
+
+    /** Убрать из очереди (играющий не трогаем) */
+    fun removeAt(index: Int) = withController { c ->
+        if (index != c.currentMediaItemIndex && index in 0 until c.mediaItemCount) c.removeMediaItem(index)
+    }
+
+    /** Переставить трек в очереди */
+    fun move(from: Int, to: Int) = withController { c ->
+        if (from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount && from != to) c.moveMediaItem(from, to)
     }
 
     suspend fun startWave() {
@@ -233,6 +334,9 @@ object PlayerConnection {
         }
     }
 
+    /** Пауза, если играет (техработы) */
+    fun pauseIfPlaying() = withController { c -> if (c.isPlaying) c.pause() }
+
     fun toggle() = withController { c ->
         if (c.isPlaying) c.pause() else {
             if (c.playbackState == Player.STATE_IDLE) c.prepare()
@@ -258,7 +362,10 @@ object PlayerConnection {
         if (c.currentPosition > 3000 || !c.hasPreviousMediaItem()) c.seekTo(0) else c.seekToPreviousMediaItem()
     }
 
-    fun seekTo(ms: Long) = withController { it.seekTo(ms) }
+    fun seekTo(ms: Long) = withController {
+        it.seekTo(ms)
+        Together.push()
+    }
 
     fun playAt(index: Int) = withController { c ->
         c.seekTo(index, 0L)

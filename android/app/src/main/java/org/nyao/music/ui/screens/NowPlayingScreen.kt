@@ -126,7 +126,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     Text("ИГРАЕТ ИЗ", style = MaterialTheme.typography.labelSmall, color = pal.sub)
                     Text(label.ifEmpty { "Очередь" }, style = MaterialTheme.typography.titleSmall, color = pal.onContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Spacer(Modifier.size(48.dp))
+                IconButton(onClick = { model.connectOpen = true }) { Icon(NyaoIcons.Devices, "Устройства и «Слушать вместе»", tint = pal.onContainer) }
             }
         }
         item {
@@ -280,6 +280,18 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                         Text(q.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = pal.sub)
                     }
                     SourceTag(q.source)
+                    // очередь можно править: убрать трек или переставить
+                    Box {
+                        var qm by remember { mutableStateOf(false) }
+                        IconButton(onClick = { qm = true }, modifier = Modifier.size(36.dp)) { Icon(NyaoIcons.MoreVert, "Ещё", tint = pal.sub) }
+                        androidx.compose.material3.DropdownMenu(expanded = qm, onDismissRequest = { qm = false }) {
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("Играть следующим") }, onClick = { qm = false; PlayerConnection.move(queueIndex, index + 1) })
+                            if (queueIndex > index + 1) androidx.compose.material3.DropdownMenuItem(text = { Text("Выше") }, onClick = { qm = false; PlayerConnection.move(queueIndex, queueIndex - 1) })
+                            if (queueIndex < queue.size - 1) androidx.compose.material3.DropdownMenuItem(text = { Text("Ниже") }, onClick = { qm = false; PlayerConnection.move(queueIndex, queueIndex + 1) })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("Убрать из очереди") }, onClick = { qm = false; PlayerConnection.removeAt(queueIndex) })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("Похожее · радио по треку") }, onClick = { qm = false; PlayerConnection.startRadio(q) })
+                        }
+                    }
                 }
             }
         }
@@ -302,6 +314,8 @@ private fun trackLink(t: org.nyao.music.data.Track): String = when (t.source) {
 private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClose: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    var details by remember(t.id) { mutableStateOf<org.nyao.music.data.TrackDetails?>(null) }
+    androidx.compose.runtime.LaunchedEffect(t.id) { details = Repo.trackDetails(t) }
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onClose) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding(),
@@ -328,6 +342,12 @@ private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClos
                 Info("Альбом", t.album)
                 Info("Длительность", if (t.duration > 0) org.nyao.music.data.formatTime(t.duration) else "")
                 Info("Сервис", org.nyao.music.data.sourceName(t.source))
+                Info("Год", details?.year?.toString().orEmpty())
+                Info("Жанр", details?.genre.orEmpty())
+                Info("Лейбл", details?.label.orEmpty())
+                Info("Номер в альбоме", details?.position.orEmpty())
+                Info("Прослушиваний", details?.plays?.let { java.text.NumberFormat.getInstance(java.util.Locale("ru")).format(it) }.orEmpty())
+                Info("Возраст", if (details?.explicit == true) "18+" else "")
                 Info("ID в сервисе", t.srcId)
             }
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -337,12 +357,15 @@ private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClos
                 }) { Text("Скопировать") }
                 androidx.compose.material3.OutlinedButton(onClick = {
                     onClose()
-                    model.nowPlayingOpen = false
-                    val q = t.artist.substringBefore(",").trim()
-                    model.searchQuery = q
-                    model.runSearch(q)
-                    model.go(org.nyao.music.ui.Route.Search)
-                }) { Text("Ещё от исполнителя") }
+                    model.openArtist(t)
+                }) { Text("Исполнитель") }
+                model.albumOf(t)?.let { al ->
+                    androidx.compose.material3.OutlinedButton(onClick = {
+                        onClose()
+                        model.nowPlayingOpen = false
+                        model.go(org.nyao.music.ui.Route.PlaylistPage(al))
+                    }) { Text("Альбом") }
+                }
                 androidx.compose.material3.OutlinedButton(onClick = {
                     runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(trackLink(t))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }) { Text("Открыть в ${if (t.source == org.nyao.music.data.SOURCE_YA) "Яндексе" else org.nyao.music.data.sourceName(t.source)}") }
@@ -386,7 +409,7 @@ private fun Tool(icon: ImageVector, label: String, on: Boolean, pal: CoverPalett
 }
 
 
-/** Синхронный текст из LRCLIB: текущая строка крупнее и ярче, панель сама прокручивается, тап по строке — перемотка */
+/** Синхронный текст (Яндекс Музыка, LRCLIB или YouTube Music): текущая строка крупнее и ярче, панель сама прокручивается, тап по строке — перемотка */
 @Composable
 private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: CoverPalette) {
     var lyrics by remember(track.id) { mutableStateOf<org.nyao.music.data.Lyrics?>(null) }
@@ -427,6 +450,7 @@ private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: Cove
                             .padding(horizontal = 22.dp, vertical = 7.dp),
                     )
                 }
+                item { Text("Текст: ${l.source}", style = MaterialTheme.typography.labelSmall, color = pal.sub, modifier = Modifier.padding(horizontal = 22.dp, vertical = 16.dp)) }
             }
         }
     }

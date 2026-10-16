@@ -2,8 +2,12 @@ import { Player } from './player.js';
 import { Ribbon } from './ribbon.js';
 import { Onboarding } from './onboarding.js';
 import { layoutChoiceHtml } from './layouts.js';
-import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel } from './eq.js';
+import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain } from './eq.js';
 import { FullScreen } from './fullscreen.js';
+import { ACCENTS, paletteFor, applyAccent } from './accent.js';
+import { releaseAgo } from './releases.js';
+import { arrangeSearch } from './search.js';
+import { handoffPlan, queueSnapshot, REACTIONS, JOIN_BASE, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
 
 const api = window.nyao;
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -31,11 +35,16 @@ const state = {
   home: null,
   lib: { lists: null, filter: 'all', selected: 'liked', tracks: null, counts: null },
   search: { q: '', res: null, filter: 'all', loading: false },
-  tab: 'cover',
+  drawer: null,
   lyrics: { id: null, data: undefined },
   artist: { ref: null, data: null, error: null, kind: 'album' },
   album: { ref: null, data: null, error: null },
+  trackList: { title: '', sub: '', tracks: null, error: null },
   npArtist: { ref: null, data: null },
+  connect: { devices: null, error: null },
+  room: null, // «Слушать вместе»: снимок комнаты + isHost
+  roomSync: { hostTrackId: null },
+  stats: { period: 'month', data: null, error: null, loading: false },
   version: ''
 };
 const lists = {}; // списки на экране: клики по строкам берут трек отсюда
@@ -158,14 +167,18 @@ const ICONS = {
   plus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   search: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>',
   back: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg>',
-  wave: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0"/></svg>'
+  wave: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0"/></svg>',
+  transfer: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h14l-3.5-3.5M20 16H6l3.5 3.5"/></svg>',
+  prev: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>',
+  next: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>'
 };
 const NAV = [
   ['home', 'Главная', 'M4 10.5 12 4l8 6.5V20h-5v-6H9v6H4z'],
   ['search', 'Поиск', 'M11 4.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13M20 20l-4.2-4.2'],
   ['wave', 'Моя волна', 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0'],
-  ['player', 'Сейчас играет', 'M9 18V6l11-2v12M9 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0M20 16a3 3 0 1 1-6 0a3 3 0 1 1 6 0'],
-  ['library', 'Медиатека', 'M5 4v16M10 4v16M15 5l4 15']
+  ['library', 'Медиатека', 'M5 4v16M10 4v16M15 5l4 15'],
+  ['together', 'Вместе', 'M9 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.6a3.4 3.4 0 0 1 0 6.3M18 14.8c1.8.7 3 2.4 3.5 5.2'],
+  ['stats', 'Итоги', 'M5 20V11M12 20V5M19 20v-6']
 ];
 const SETTINGS_ICON = 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1';
 
@@ -204,6 +217,32 @@ function waveControlsHtml(compact = false) {
     <div class="balance"><div class="track" id="share-track" style="background:${balanceTrack(share)}"></div><input type="range" min="0" max="100" step="5" value="${share}" data-input="share" aria-label="Доля YouTube Music"></div>
     <div class="balance-legend"><span>${badge('ya')}<b id="share-ya">${100 - share}%</b></span><span><b id="share-yt">${share}%</b>${badge('yt')}${state.status.sc ? badge('sc') : ''}${state.status.vk ? badge('vk') : ''}</span></div>
   </div>`;
+}
+
+// ---------- Акцентный цвет ----------
+let accentPalette = paletteFor('lavender', { mac: IS_MAC });
+let bgRibbon = null;
+let accentCover = { id: null, rgb: null };
+function accentColor() {
+  return accentPalette.a;
+}
+/** Применяет палитру из настроек; для «Из обложки» берёт цвет текущей обложки */
+function refreshAccent() {
+  const id = (state.settings && state.settings.accent) || 'lavender';
+  const t = player.current;
+  if (id === 'cover' && t && t.cover && accentCover.id !== t.id) {
+    const tid = t.id;
+    accentCover = { id: tid, rgb: accentCover.rgb };
+    api.coverColor(t.cover).then((rgb) => {
+      if (accentCover.id !== tid) return;
+      accentCover.rgb = rgb;
+      refreshAccent();
+    }).catch(() => {});
+  }
+  accentPalette = paletteFor(id, { mac: IS_MAC, coverRgb: accentCover.rgb });
+  applyAccent(document.body, accentPalette, IS_MAC);
+  if (bgRibbon) bgRibbon.accent = accentPalette.a;
+  $$('.wave-shapes').forEach((el) => el.style.setProperty('--sh-a', accentPalette.a));
 }
 
 // ---------- Вид приложения ----------
@@ -319,9 +358,15 @@ function renderAccounts() {
 }
 
 function go(route, params = {}, push = true) {
+  // «Сейчас играет» больше не вкладка (0.7.43): старые ссылки открывают выезжающую панель
+  if (route === 'player') return openDrawer('info');
   if (push && (state.route !== route || JSON.stringify(state.params) !== JSON.stringify(params))) {
     state.stack.push({ route: state.route, params: state.params });
     if (state.stack.length > 30) state.stack.shift();
+  }
+  if (state.route !== route) {
+    state.waveShown = false;
+    state.waveTune = false;
   }
   state.route = route;
   state.params = params;
@@ -332,8 +377,9 @@ function go(route, params = {}, push = true) {
   if (route === 'library') loadLibrary();
   if (route === 'artist') loadArtist(params.ref);
   if (route === 'album') loadAlbum(params.ref);
-  if (route === 'player') loadNpArtist();
   if (route === 'settings' && state.cloud.loggedIn) loadCloudDevices();
+  if (route === 'together') loadRoom();
+  if (route === 'stats') loadStats();
 }
 function back() {
   const prev = state.stack.pop();
@@ -383,12 +429,14 @@ function renderHome() {
       </button>` : ''}
     </div>
     ${!h && loggedAny ? '<div class="skeleton" style="height:220px"></div>' : ''}
+    ${releasesHtml()}
     ${tiles.length ? `<section><div class="sec-head"><h2 class="sec">Плейлисты и миксы</h2><button class="link" data-action="go" data-route="library">Вся медиатека</button></div>
       <div class="tiles">${tiles.map((p) => `<button class="tile" data-action="open-pl" data-id="${esc(p.id)}">${coverHtml(p, '', true)}<div class="t">${esc(p.title)}</div><div class="s">${esc(p.sub || (p.count ? p.count + ' треков' : ''))}</div></button>`).join('')}</div></section>` : ''}
     ${ytSection ? `<section><h2 class="sec" style="margin-bottom:12px">${esc(ytSection.title)}</h2>${tracksHtml(ytSection.tracks.slice(0, 8), 'home-yt')}</section>` : ''}
   </div>`;
   if (ytSection) lists['home-section'] = ytSection.tracks;
-  new Ribbon($('#home-ribbon'), { lines: 14, cy: 0.42, amp: 0.9, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+  new Ribbon($('#home-ribbon'), { lines: 14, cy: 0.42, amp: 0.9, accent: accentColor() });
+  injectOutage();
 }
 
 // ---------- Главная в режиме «Плеер» ----------
@@ -441,6 +489,7 @@ function renderHomePlayer() {
     ${loggedAny ? `<section class="qgrid">${tiles.map(quickTile).join('')}</section>` : ''}
     ${recent.length ? `<section><div class="sec-head"><h2 class="sec">Недавно слушал</h2></div>
       <div class="recent-row">${recent.slice(0, 12).map((t, i) => `<button class="rcard" data-action="play-row" data-list="home-recent" data-i="${i}">${coverHtml(t, '', true)}<b>${esc(t.title)}</b><span>${esc(t.artist)}</span></button>`).join('')}</div></section>` : ''}
+    ${releasesHtml()}
     <div class="home-split">
       ${top.length ? `<section class="top-col"><div class="sec-head"><h2 class="sec">Чаще всего за месяц</h2><button class="link" data-action="mix-builder">Собрать микс из них</button></div>
         ${tracksHtml(top.map((x) => x.track), 'home-top')}</section>` : ''}
@@ -453,7 +502,8 @@ function renderHomePlayer() {
     </div>
     ${ytSection ? `<section><h2 class="sec" style="margin-bottom:12px">${esc(ytSection.title)}</h2>${tracksHtml(ytSection.tracks.slice(0, 8), 'home-yt')}</section>` : ''}
   </div>`;
-  new Ribbon($('#home-ribbon'), { lines: 12, cy: 0.5, amp: 0.8, accent: IS_MAC ? '#D8CEFF' : '#C6B8FF' });
+  new Ribbon($('#home-ribbon'), { lines: 12, cy: 0.5, amp: 0.8, accent: accentColor() });
+  injectOutage();
 }
 /** История и «чаще всего» для главной */
 async function loadRecent() {
@@ -476,148 +526,208 @@ async function loadRecent() {
   if (state.route === 'home') renderHome();
 }
 
+// Фигуры M3 Expressive по краям «Моей волны»: плотные, в цветах акцента, выезжают с краёв по очереди.
+// Размеры в em: контейнер масштабируется от ширины окна, фигуры остаются у краёв.
+function polarPath(r, lobes, depth, rot = 0, steps = 180) {
+  const pts = [];
+  const R = r * (1 + depth);
+  for (let i = 0; i < steps; i++) {
+    const a = (2 * Math.PI * i) / steps;
+    const rr = r * (1 + depth * Math.cos(lobes * (a + rot)));
+    pts.push(`${(R + rr * Math.cos(a)).toFixed(1)} ${(R + rr * Math.sin(a)).toFixed(1)}`);
+  }
+  return { d: `M${pts.join(' L')} Z`, size: 2 * R };
+}
+// [сторона, лепестки, глубина, поворот, радиус, позиция (em), цвет]
+const WAVE_SHAPES = [
+  ['l', 9, 0.07, 0, 15, { left: -18, top: -4 }, 'deep'],
+  ['l', 4, 0.2, 0.4, 9.2, { left: 1, top: 25 }, 'strong'],
+  ['l', 8, 0.09, 0, 5.8, { left: 18.7, top: 0.7 }, 'a'],
+  ['l', 12, 0.05, 0, 10, { left: -6.5, bottom: -11.5 }, 'dark'],
+  ['l', 0, 0, 0, 0, { left: 7, bottom: 9.5, pill: [13, 5.2, 14] }, 'light'],
+  ['r', 6, 0.11, 0, 18, { right: -16, top: -6 }, 'deep'],
+  ['r', 3, 0.17, 0.3, 8.2, { right: 13.4, top: 28.4 }, 'a'],
+  ['r', 5, 0.14, 0.2, 6, { right: 8.2, top: -2.8 }, 'light'],
+  ['r', 7, 0.1, 0, 12, { right: 22.8, bottom: -17 }, 'dark'],
+  ['r', 0, 0, 0, 0, { right: 27, top: 4.6, pill: [16, 6, -18] }, 'strong']
+];
+function waveShapesHtml(animate) {
+  return `<div class="wave-shapes ${animate ? 'anim' : ''}" aria-hidden="true">${WAVE_SHAPES.map(([side, lobes, depth, rot, r, pos, col], i) => {
+    const place = Object.entries(pos).filter(([k]) => k !== 'pill').map(([k, v]) => `${k}:${v}em`).join(';');
+    const style = `${place};--i:${i};--dx:${side === 'l' ? -1 : 1};--c:var(${col === 'a' ? '--accent' : `--accent-${col}`})`;
+    if (pos.pill) {
+      const [w, h, deg] = pos.pill;
+      return `<span class="wsh pill" style="${style};width:${w}em;height:${h}em;--rot:${deg}deg"></span>`;
+    }
+    const { d, size } = polarPath(r * 10, lobes, depth, rot);
+    return `<svg class="wsh" style="${style};width:${(size / 10).toFixed(2)}em;height:${(size / 10).toFixed(2)}em" viewBox="0 0 ${size.toFixed(1)} ${size.toFixed(1)}"><path d="${d}"/></svg>`;
+  }).join('')}</div><div class="wave-fade" aria-hidden="true"></div>`;
+}
+function waveSummary() {
+  const s = state.settings || {};
+  const div = (DIVERSITY.find((d) => d[0] === s.waveDiversity) || DIVERSITY[0])[1];
+  const mood = (MOODS.find((m) => m[0] === s.waveMood) || [])[1];
+  return [div, mood, shareLabel(s.ytmShare ?? 30)].filter(Boolean).join(' · ');
+}
+function waveTuneHtml() {
+  return `<div class="wave-scrim" data-action="wave-tune-close"></div>
+  <aside class="wave-tune" role="dialog" aria-label="Настроить волну">
+    <div class="wt-head"><h2>Настроить волну</h2><button class="ic dr-close" data-action="wave-tune-close" aria-label="Закрыть" title="Закрыть (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="wt-body">${waveControlsHtml()}</div>
+  </aside>`;
+}
+function closeWaveTune() {
+  if (!state.waveTune) return false;
+  state.waveTune = false;
+  $('.wave-tune-layer', view)?.classList.remove('open');
+  $('.wave-tune-btn', view)?.setAttribute('aria-expanded', 'false');
+  return true;
+}
 function renderWave() {
   const t = player.current;
   const waveOn = player.mode === 'wave';
   const playing = waveOn && player.playing;
   const next = waveOn ? player.queue.slice(player.index + 1, player.index + 6) : [];
+  const animate = !state.waveShown;
+  state.waveShown = true;
+  const extra = [state.status.yt && ['yt', 'YouTube Music'], state.status.sc && ['sc', 'SoundCloud'], state.status.vk && ['vk', 'VK']].filter(Boolean);
   view.innerHTML = `<div class="wave-view">
     <section class="wave-hero">
-      <canvas id="wave-ribbon"></canvas>
-      <div class="top"><span class="srcs"><span class="dotsrc ya"></span>Яндекс<span style="opacity:.4">+</span><span class="dotsrc yt"></span>YouTube Music<span style="opacity:.4">→</span><span style="color:var(--accent)">одна волна</span></span><span></span></div>
+      ${waveShapesHtml(animate)}
+      <div class="top">
+        <span class="glass-cap srcs"><span class="dotsrc ya"></span>Яндекс${extra.map(([k, n]) => `<span class="plus">+</span><span class="dotsrc ${k}"></span>${n}`).join('')}<span class="plus">→</span><span class="one">одна волна</span></span>
+        <span class="glass-cap" id="wave-summary">${esc(waveSummary())}</span>
+      </div>
       <div class="center">
         <h1 class="wave-title">Моя волна</h1>
         <button class="wave-play" data-action="wave-toggle" aria-label="${playing ? 'Пауза' : 'Слушать волну'}">${playing ? ICONS.pauseBig : ICONS.playBig}</button>
-        ${waveOn && t ? `<button class="now-pill" data-action="go" data-route="player">${coverHtml(t, '')}<span class="ttl">${esc(t.title)}</span><span class="muted">${esc(t.artist)}</span>${badge(t.source)}</button>` : ''}
+        <div class="wave-row">
+          ${waveOn && t ? `<button class="now-pill" data-action="fullscreen" title="Полный экран">${coverHtml(t, '')}<span class="ttl">${esc(t.title)}</span><span class="muted">${esc(t.artist)}</span>${badge(t.source)}</button>` : ''}
+          <button class="wave-tune-btn" data-action="wave-tune" aria-haspopup="dialog" aria-expanded="${!!state.waveTune}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4"/></svg>Настроить волну</button>
+        </div>
       </div>
     </section>
-    <section class="wave-panels">${waveControlsHtml()}</section>
     <section class="next-up">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><h2 class="sec" style="font-size:17px">Дальше в волне</h2><span class="hint">дослушанные и пропущенные треки учат ленту Яндекса</span></div>
       ${next.length ? `<div class="next-grid">${next.map((n, i) => `<button class="next-card" data-action="q-play" data-i="${player.index + 1 + i}">${coverHtml(n, 'xs')}<span class="meta"><span class="t" style="display:block">${esc(n.title)}</span><span class="s" style="display:block">${esc(n.artist)}</span></span><span class="dotsrc ${n.source}"></span></button>`).join('')}</div>` : '<div class="hint">Запусти волну — здесь появятся следующие треки.</div>'}
     </section>
-  </div>`;
+  </div>
+  <div class="wave-tune-layer ${state.waveTune ? 'open' : ''}">${waveTuneHtml()}</div>`;
   $$('input[data-input="share"]', view).forEach(setRangeFill);
-  new Ribbon($('#wave-ribbon'), { lines: 18, cy: 0.5, amp: 1, accent: '#C6B8FF' });
 }
 
-function renderPlayer() {
+// ---------- Выезжающая панель справа: «Об исполнителе / Далее / Об этом треке» и очередь ----------
+// Открывается кнопками в плеере, закрывается той же кнопкой, крестиком или Esc
+function openDrawer(mode = 'info') {
+  state.drawer = mode;
+  const el = $('#drawer');
+  el.classList.add('open');
+  el.setAttribute('aria-hidden', 'false');
+  el.removeAttribute('inert');
+  el.setAttribute('aria-label', mode === 'queue' ? 'Очередь' : 'Об исполнителе и треке');
+  renderDrawer(true);
+  if (mode === 'info') loadNpArtist();
+  syncDrawerButtons();
+}
+function closeDrawer() {
+  if (!state.drawer) return false;
+  state.drawer = null;
+  const el = $('#drawer');
+  el.classList.remove('open');
+  el.setAttribute('aria-hidden', 'true');
+  el.setAttribute('inert', '');
+  syncDrawerButtons();
+  return true;
+}
+function toggleDrawer(mode) {
+  if (state.drawer === mode) closeDrawer();
+  else openDrawer(mode);
+}
+function syncDrawerButtons() {
+  $('#pb-panel').classList.toggle('on', state.drawer === 'info');
+  $('#pb-panel').setAttribute('aria-pressed', String(state.drawer === 'info'));
+  $('#pb-queue').classList.toggle('on', state.drawer === 'queue');
+  $('#pb-queue').setAttribute('aria-pressed', String(state.drawer === 'queue'));
+}
+function queueListHtml() {
+  return tracksHtml(player.queue, 'queue', { action: 'q-play' });
+}
+function renderDrawer(scrollToCur) {
+  const el = $('#drawer');
+  if (!state.drawer || !el) return;
   const t = player.current;
-  const tabs = [['cover', 'Обложка'], ['lyrics', 'Текст'], ['queue', 'Очередь']];
-  let body = '';
-  if (state.tab === 'cover') {
-    body = t ? `<div class="np-cover">
-      <div class="np-art-wrap" data-dbl="fullscreen" title="Двойной клик — полный экран">${coverHtml(t, 'np-art')}</div>
-      <div class="np-info">
-        <div class="src-chips"><span class="src-chip">${badge(t.source)}Играет из ${srcName(t.source, true)}</span>${player.label ? `<span class="src-chip" style="padding-left:10px">${esc(player.label)}</span>` : ''}</div>
-        <h1>${esc(t.title)}</h1>
-        <div class="by">${t.artistRef ? `<button class="link-plain" data-action="open-artist" data-ref="${esc(t.artistRef)}">${esc(t.artist)}</button>` : esc(t.artist)}${t.album ? ` <span class="muted">·</span> ${t.albumRef ? `<button class="link-plain" data-action="open-album" data-ref="${esc(t.albumRef)}">${esc(t.album)}</button>` : esc(t.album)}` : ''}</div>
-        <div class="row-actions">
-          <button class="btn ${player.liked.has(t.id) ? 'primary' : ''}" data-action="like-cur">${player.liked.has(t.id) ? ICONS.heartOn : ICONS.heart}${player.liked.has(t.id) ? 'В «Мне нравится»' : 'Нравится'}</button>
-          <button class="btn" data-action="cur-more">${ICONS.plus}В микс</button>
-          ${player.mode === 'wave' ? `<button class="btn" data-action="go" data-route="wave">${ICONS.tune}Волна</button>` : ''}
-          <button class="btn" data-action="fullscreen">${FS_ICON}Полный экран</button>
-        </div>
-        <div class="lyric-peek" data-action="tab" data-v="lyrics"><span class="eyebrow">Текст</span><span class="cur" id="peek-cur">…</span><span class="nx" id="peek-nx"></span></div>
-      </div>
-    </div>` : `<div class="empty">Ничего не играет.<br><br><button class="btn primary" data-action="wave-toggle">${ICONS.play}Моя волна</button></div>`;
-  } else if (state.tab === 'lyrics') {
-    body = '<div class="lyrics" id="lyrics"></div>';
-  } else {
-    body = `<div class="qwrap"><div class="eyebrow" style="margin-bottom:8px">${player.mode === 'wave' ? 'Моя волна · без конца' : player.queue.length ? `Очередь · ${player.queue.length}` : 'Очередь пуста'}</div><div id="qlist">${tracksHtml(player.queue, 'queue', { action: 'q-play' })}</div></div>`;
+  const head = (title) => `<div class="dr-head"><span class="dr-title">${title}</span><button class="ic dr-close" data-action="drawer-close" aria-label="Закрыть панель" title="Закрыть (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
+  if (state.drawer === 'queue') {
+    const label = player.mode === 'wave' ? 'Моя волна · без конца' : player.queue.length ? `${player.label ? esc(player.label) + ' · ' : ''}${player.queue.length}` : 'Очередь пуста';
+    el.innerHTML = `${head('Очередь')}<div class="dr-sub">${label}</div><div class="dr-scroll"><div id="qlist">${queueListHtml()}</div></div>`;
+    $$('#qlist .trow', el).forEach((r) => (r.draggable = true));
+    if (scrollToCur) {
+      // только прокрутка списка: scrollIntoView двигал бы всё окно, пока панель ещё за краем
+      const cur = $('#qlist .trow.cur', el);
+      const sc = $('.dr-scroll', el);
+      if (cur && sc) sc.scrollTop = Math.max(0, cur.offsetTop - sc.offsetTop - sc.clientHeight / 2 + cur.offsetHeight / 2);
+    }
+    return;
   }
   const nx = player.queue[player.index + 1];
-  const a = state.npArtist.data;
-  view.innerHTML = `<div class="np">
-    <div class="np-main">
-      <div class="np-tabs" role="tablist">${tabs.map(([v, l]) => `<button role="tab" aria-selected="${state.tab === v}" class="${state.tab === v ? 'on' : ''}" data-action="tab" data-v="${v}">${l}</button>`).join('')}</div>
-      <div class="np-body" id="np-body">${body}</div>
+  const a = state.npArtist.data && t && state.npArtist.ref === t.artistRef ? state.npArtist.data : null;
+  el.innerHTML = `${head('Сейчас играет')}<div class="dr-scroll">
+    ${t ? `<div class="np-card artist" ${t.artistRef ? `data-action="open-artist" data-ref="${esc(t.artistRef)}"` : ''}>
+      <div class="ph">${a && a.cover ? `<img src="${esc(a.cover)}" alt="">` : ''}<span class="eyebrow" style="position:absolute;left:16px;top:14px;color:#fff">Об исполнителе</span></div>
+      <div class="bd"><span style="font-size:18px;font-weight:700">${esc(a ? a.name : t.artist)}</span>
+      <span class="muted" style="font-size:12px">${a ? [a.refs.ya ? 'есть в Яндексе' : '', a.refs.yt ? 'есть в YouTube Music' : ''].filter(Boolean).join(' · ') : t.artistRef ? 'Загружаю…' : ''}</span>
+      ${a && a.description ? `<span class="np-desc">${esc(a.description)}</span>` : ''}</div>
+    </div>` : '<div class="empty">Ничего не играет.<br><br><button class="btn primary" data-action="wave-toggle">' + ICONS.play + 'Моя волна</button></div>'}
+    <div class="np-card">
+      <div class="h"><span>Далее</span><button class="link" data-action="drawer-queue">Открыть очередь</button></div>
+      ${nx ? `<div class="np-next" data-action="q-play" data-i="${player.index + 1}">${coverHtml(nx, 'xs')}<div style="flex:1;min-width:0"><div class="np-next-t">${esc(nx.title)}</div><div class="muted" style="font-size:12px">${esc(nx.artist)}</div></div>${badge(nx.source)}</div>` : '<span class="muted" style="font-size:13px">Дальше пусто</span>'}
     </div>
-    <aside class="np-aside">
-      ${t ? `<div class="np-card artist" ${t.artistRef ? `data-action="open-artist" data-ref="${esc(t.artistRef)}"` : ''}>
-        <div class="ph">${a && a.cover ? `<img src="${esc(a.cover)}" alt="">` : ''}<span class="eyebrow" style="position:absolute;left:16px;top:14px;color:#fff">Об исполнителе</span></div>
-        <div class="bd"><span style="font-size:18px;font-weight:700">${esc(a ? a.name : t.artist)}</span>
-        <span class="muted" style="font-size:12px">${a ? [a.refs.ya ? 'есть в Яндексе' : '', a.refs.yt ? 'есть в YouTube Music' : ''].filter(Boolean).join(' · ') : 'Загружаю…'}</span>
-        ${a && a.description ? `<span style="font-size:13px;color:var(--text2);line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(a.description)}</span>` : ''}</div>
-      </div>` : ''}
-      <div class="np-card">
-        <div class="h"><span>Далее</span><button class="link" data-action="tab" data-v="queue">Открыть очередь</button></div>
-        ${nx ? `<div style="display:flex;align-items:center;gap:12px;cursor:pointer" data-action="q-play" data-i="${player.index + 1}">${coverHtml(nx, 'xs')}<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nx.title)}</div><div class="muted" style="font-size:12px">${esc(nx.artist)}</div></div>${badge(nx.source)}</div>` : '<span class="muted" style="font-size:13px">Дальше пусто</span>'}
-      </div>
-      ${t ? `<div class="np-card"><div class="h"><span>Об этом треке</span></div><div class="facts">
-        <span>Исполнитель</span><span>${esc(t.artist)}</span>
-        ${t.album ? `<span>Альбом</span><span>${esc(t.album)}</span>` : ''}
-        <span>Источник</span><span>${srcName(t.source)}</span>
-        <span>Откуда</span><span>${esc(player.label || '—')}</span>
-      </div></div>` : ''}
-    </aside>
+    ${t ? `<div class="np-card"><div class="h"><span>Об этом треке</span></div><div class="facts">
+      <span>Название</span><span>${esc(t.title)}</span>
+      <span>Исполнитель</span><span>${esc(t.artist)}</span>
+      ${t.album ? `<span>Альбом</span><span>${t.albumRef ? `<button class="link-plain" data-action="open-album" data-ref="${esc(t.albumRef)}">${esc(t.album)}</button>` : esc(t.album)}</span>` : ''}
+      <span>Источник</span><span>${srcName(t.source)}</span>
+      <span>Откуда</span><span>${esc(player.label || '—')}</span>
+      <span id="facts-more" style="display:contents"></span>
+    </div></div>` : ''}
   </div>`;
-  if (state.tab === 'lyrics') renderLyrics();
-  else if (state.tab === 'queue') {
-    const cur = $('#qlist .trow.cur');
-    if (cur) cur.scrollIntoView({ block: 'center' });
-  } else ensureLyrics().then(() => syncLyrics(true));
+  if (t) loadTrackFacts(t);
 }
 
-async function ensureLyrics() {
+// «Об этом треке»: год, жанр, лейбл — догружаются у сервиса
+const factsCache = new Map();
+async function loadTrackFacts(t) {
+  let d = factsCache.get(t.id);
+  if (!d) {
+    d = await api.trackDetails(t).catch(() => ({}));
+    factsCache.set(t.id, d || {});
+  }
+  const el = $('#facts-more');
+  if (!el || !player.current || player.current.id !== t.id || !d) return;
+  const rows = [
+    ['Год', d.year],
+    ['Жанр', d.genre],
+    ['Лейбл', d.label],
+    ['Номер в альбоме', d.position],
+    ['Прослушиваний', Number.isFinite(d.plays) ? d.plays.toLocaleString('ru-RU') : null],
+    ['Возраст', d.explicit ? '18+' : null]
+  ].filter((r) => r[1]);
+  el.innerHTML = rows.map(([k, v]) => `<span>${k}</span><span>${esc(v)}</span>`).join('');
+}
+
+/** Текст текущего трека. Один запрос на трек: все, кто спросил (экран, полный экран), ждут его же */
+function ensureLyrics() {
   const t = player.current;
-  if (!t) return null;
-  if (state.lyrics.id !== t.id) {
-    state.lyrics = { id: t.id, data: undefined };
-    const data = await api.lyrics(t).catch(() => null);
-    if (state.lyrics.id !== t.id) return null;
-    state.lyrics.data = data;
+  if (!t) return Promise.resolve(null);
+  if (state.lyrics.id !== t.id || !state.lyrics.promise) {
+    const id = t.id;
+    const promise = api.lyrics(t).catch(() => null).then((data) => {
+      if (state.lyrics.id === id) state.lyrics.data = data;
+      return data;
+    });
+    state.lyrics = { id, data: undefined, promise };
   }
-  return state.lyrics.data;
-}
-
-async function renderLyrics() {
-  const box = $('#lyrics');
-  const t = player.current;
-  if (!box) return;
-  if (!t) {
-    box.innerHTML = '<div class="empty">Ничего не играет</div>';
-    return;
-  }
-  if (state.lyrics.id !== t.id || state.lyrics.data === undefined) box.innerHTML = '<div class="empty">Ищу текст…</div>';
-  const d = await ensureLyrics();
-  const el = $('#lyrics');
-  if (!el || state.lyrics.id !== (player.current && player.current.id)) return;
-  if (!d || !d.lines.length) {
-    el.innerHTML = '<div class="empty">Текст не найден в LRCLIB</div>';
-    return;
-  }
-  el.classList.toggle('plain', !d.synced);
-  el.innerHTML = d.lines.map((l, i) => `<p data-i="${i}" ${d.synced ? `data-action="lyric-seek" data-t="${l.time}"` : ''}>${esc(l.text) || '♪'}</p>`).join('');
-  syncLyrics(true);
-}
-
-let lastLyric = -1;
-function syncLyrics(force) {
-  const d = state.lyrics.data;
-  if (!d || !d.synced) {
-    const pc = $('#peek-cur');
-    if (pc) pc.textContent = d === null || (d && !d.lines.length) ? 'Текст не найден' : d && !d.synced ? d.lines[0].text : '…';
-    return;
-  }
-  const time = player.audio.currentTime + 0.25;
-  let idx = -1;
-  for (let i = 0; i < d.lines.length; i++) if (d.lines[i].time <= time) idx = i;
-  if (idx === lastLyric && !force) return;
-  lastLyric = idx;
-  const pc = $('#peek-cur');
-  if (pc) {
-    pc.textContent = (d.lines[idx] && d.lines[idx].text) || '♪';
-    $('#peek-nx').textContent = (d.lines[idx + 1] && d.lines[idx + 1].text) || '';
-  }
-  const el = $('#lyrics');
-  if (!el) return;
-  $$('p', el).forEach((p, i) => {
-    p.classList.toggle('on', i === idx);
-    p.classList.toggle('past', i < idx);
-  });
-  const on = el.querySelector('p.on');
-  if (on) on.scrollIntoView({ block: 'center', behavior: force ? 'auto' : 'smooth' });
+  return state.lyrics.promise;
 }
 
 function libraryCounts() {
@@ -663,6 +773,7 @@ function renderLibrary() {
           <button class="icbtn" data-action="pl-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
           <span class="grow"></span>
           ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}${lib.tracks.some((t) => t.source === 'sc') ? `<span class="dotsrc sc" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sc').length}` : ''}${lib.tracks.some((t) => t.source === 'vk') ? `<span class="dotsrc vk" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'vk').length}` : ''}</span>` : ''}
+          ${lib.tracks && lib.tracks.length ? `<button class="icbtn" data-action="pl-transfer" aria-label="Перенести в другой сервис" title="Перенести в другой сервис">${ICONS.transfer}</button>` : ''}
           ${sel.source === 'mix' && !isLiked(sel) ? `<button class="icbtn" data-action="del-mix" aria-label="Удалить микс">${ICONS.ban}</button>` : ''}
         </div>
       </div>
@@ -673,18 +784,23 @@ function renderLibrary() {
 
 function renderSearch() {
   const s = state.search;
-  let merged = [];
-  if (s.res) {
-    const lists = [s.res.ya, s.res.yt, s.res.sc || [], s.res.vk || []];
-    for (let i = 0; i < Math.max(...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) merged.push(l[i]);
-    if (s.filter !== 'all') merged = merged.filter((t) => t.source === s.filter);
-  }
+  const arranged = arrangeSearch(s.res, s.filter, s.q);
+  const merged = arranged.tracks;
+  const { best, albums } = arranged;
+  const artists = arranged.artists.filter((a) => a !== best);
+  const srcLabel = (x) => (x === 'ya' ? 'Яндекс Музыка' : x === 'yt' ? 'YouTube Music' : srcName(x));
+  const extra = s.loading || !s.res ? '' : `
+    ${best ? `<button class="best-artist" data-action="open-artist" data-ref="${esc(best.ref)}">${coverHtml(best, 'round')}<span class="ba-meta"><span class="eyebrow">Исполнитель · ${esc(srcLabel(best.source))}</span><b>${esc(best.name)}</b><span class="muted">Популярное, альбомы и все треки</span></span><span class="ba-go">${ICONS.play}</span></button>` : ''}
+    ${artists.length ? `<section><h2 class="sec" style="margin:18px 0 12px">Исполнители</h2><div class="artist-row">${artists.map((a) => `<button class="artist-chip" data-action="open-artist" data-ref="${esc(a.ref)}">${coverHtml(a, 'round')}<b>${esc(a.name)}</b><span>${badge(a.source)}</span></button>`).join('')}</div></section>` : ''}
+    ${albums.length ? `<section><h2 class="sec" style="margin:18px 0 12px">Альбомы</h2><div class="recent-row">${albums.map((al) => `<button class="rcard" data-action="open-album" data-ref="${esc(al.ref)}">${coverHtml(al, '', true)}<b>${esc(al.title)}</b><span>${esc(al.artist || '')}${al.year ? ' · ' + esc(al.year) : ''}</span></button>`).join('')}</div></section>` : ''}
+    ${merged.length ? `<div class="sec-head" style="margin:22px 0 12px"><h2 class="sec">Треки</h2><span class="grow"></span><button class="btn sm" data-action="search-next" title="Сразу после текущего трека">${ICONS.plus}Играть следующими</button><button class="btn sm" data-action="search-last">${ICONS.plus}В конец очереди</button></div>` : ''}`;
   const f = (v, label, dot) => `<button class="chip solid ${s.filter === v ? 'on' : ''}" data-action="search-filter" data-v="${v}">${dot ? `<span class="d" style="background:${dot}"></span>` : ''}${label}</button>`;
   view.innerHTML = `<div class="scroll">
     <h1 class="page">Поиск</h1>
     <form class="search-field" data-form="search" style="max-width:640px">${ICONS.search}<input name="q" type="search" value="${esc(s.q)}" placeholder="Трек или исполнитель" aria-label="Поиск"></form>
     ${s.res ? `<div class="chips">${f('all', 'Все')}${f('ya', `Яндекс · ${s.res.ya.length}`, 'var(--ya)')}${f('yt', `YouTube Music · ${s.res.yt.length}`, 'var(--yt-bright)')}${f('sc', `SoundCloud · ${(s.res.sc || []).length}`, 'var(--sc)')}${(s.res.vk || []).length ? f('vk', `VK · ${s.res.vk.length}`, 'var(--vk)') : ''}</div>` : ''}
-    ${s.loading ? '<div class="skeleton" style="height:300px"></div>' : s.res ? (merged.length ? tracksHtml(merged, 'search') : '<div class="empty">Ничего не нашлось</div>') : ''}
+    ${extra}
+    ${s.loading ? '<div class="skeleton" style="height:300px"></div>' : s.res ? (merged.length ? tracksHtml(merged, 'search') : !best && !artists.length && !albums.length ? '<div class="empty">Ничего не нашлось</div>' : '') : ''}
   </div>`;
   const input = $('input[name=q]', view);
   if (input && !s.res) input.focus();
@@ -723,6 +839,7 @@ function renderArtist() {
       <div class="main">
         <h2 class="sec" style="margin-bottom:10px">Популярное</h2>
         ${a.popular.length ? `<div class="tracks">${a.popular.map((r, i) => mergedRowHtml(r, i, 'artist-popular')).join('')}</div>` : '<div class="hint">Популярных треков нет</div>'}
+        <button class="btn all-tracks" data-action="artist-all">${ICONS.list || ''}Все треки</button>
       </div>
       ${latest ? `<div class="side"><button class="release" data-action="open-album" data-ref="${esc(latest.ref)}">
         <span class="eyebrow">Последний релиз</span>
@@ -738,7 +855,20 @@ function renderArtist() {
       <div class="artist-grid">${a.similar.map((s) => `<button class="artist-tile" data-action="open-artist" data-ref="${esc(s.ref)}"><div class="cover round" style="background:#14101e">${esc((s.name || '?').charAt(0).toUpperCase())}${s.cover ? `<img src="${esc(s.cover)}" alt="">` : ''}</div><span class="t">${esc(s.name)}</span></button>`).join('')}</div>
     </section>` : ''}
   </div>`;
-  if (!a.cover) new Ribbon($('#artist-ribbon'), { lines: 12, cy: 0.45, amp: 0.8, accent: '#C6B8FF' });
+  if (!a.cover) new Ribbon($('#artist-ribbon'), { lines: 12, cy: 0.45, amp: 0.8, accent: accentColor() });
+}
+
+/** Простой список треков: «Все треки» исполнителя */
+function renderTrackList() {
+  const tl = state.trackList;
+  view.innerHTML = `<div class="scroll">
+    <button class="back" data-action="back">${ICONS.back}Назад</button>
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:12px 0 18px">
+      <div><span class="eyebrow">${esc(tl.sub)}</span><h1 class="page">${esc(tl.title)}</h1>${tl.tracks ? `<span class="muted" style="font-size:13px">${tl.tracks.length} ${pl(tl.tracks.length, 'трек', 'трека', 'треков')}</span>` : ''}</div>
+      <div class="row-actions" style="padding:0"><button class="btn primary" data-action="tl-play" ${tl.tracks && tl.tracks.length ? '' : 'disabled'}>${ICONS.play}Слушать</button><button class="icbtn" data-action="tl-shuffle" aria-label="Вперемешку">${ICONS.shuffle}</button></div>
+    </div>
+    ${tl.error ? `<div class="hint err">${esc(tl.error)}</div>` : !tl.tracks ? '<div class="skeleton" style="height:320px"></div>' : tl.tracks.length ? tracksHtml(tl.tracks, 'tracklist') : '<div class="empty">Треков не нашлось</div>'}
+  </div>`;
 }
 
 function renderAlbum() {
@@ -810,6 +940,7 @@ function svcCard(svc) {
         <div class="st">${st ? `Вход выполнен: ${esc(st.name)}${st.error ? ' (токен не принят — войди заново)' : ''}${extra}` : svc === 'sc' ? 'Не подключено · поиск работает и без входа' : 'Не подключено'}</div></div>
       ${st ? `<button class="btn danger" data-action="logout" data-svc="${svc}">Выйти</button>` : `<button class="btn primary" data-action="login" data-svc="${svc}">Войти</button>`}
     </div>
+    ${svc === 'yt' ? `<div class="hint svc-diag">Плейлисты не открываются? <button class="link-plain" data-action="yt-log">Открой отчёт</button> и пришли его разработчику — там только ошибки и структура ответа YouTube, без cookies и личных данных.</div>` : ''}
     <details><summary>${SVC_HELP[svc].manual}</summary>
       <div class="manual">${SVC_HELP[svc].input}
       ${svc === 'vk' ? '' : `<button class="btn" data-action="manual-save" data-svc="${svc}">Сохранить</button>`}</div>
@@ -969,13 +1100,43 @@ function continueHtml() {
   </section>`;
 }
 let nowTimer;
-function pushNow() {
+let lastQueueKey = '';
+function pushNow(force = false) {
+  roomPush();
   if (!api.cloud || !state.cloud.loggedIn) return;
   clearTimeout(nowTimer);
   nowTimer = setTimeout(() => {
     const t = player.current;
-    api.cloud.now({ track: t, position: player.audio.currentTime || 0, playing: player.playing, context: player.mode || '' }).catch(() => {});
-  }, 800);
+    // очередь («откуда играет и что дальше») — только когда она поменялась, чтобы перенос на другое устройство брал весь список
+    const key = t ? `${t.id}|${player.index}|${player.queue.length}|${player.mode}|${player.label}` : '';
+    const queue = t && key !== lastQueueKey ? queueSnapshot(player.queue, player.index, player.label, player.mode) : null;
+    lastQueueKey = key;
+    api.cloud.now({ track: t, position: player.audio.currentTime || 0, playing: player.playing, context: player.mode || '', volume: player.audio.volume, force: force === true, ...(queue ? { queue } : {}) }).catch(() => {});
+  }, force === true ? 100 : 800);
+}
+/** Забрать музыку с другого устройства: весь его список или волну, с того же места */
+function playHandoff(d, fallbackLabel) {
+  const plan = handoffPlan(d);
+  if (!plan) return;
+  if (state.room && !state.room.isHost) leaveRoom(true);
+  playListAt(plan.tracks, plan.index, plan.label || fallbackLabel, plan.position);
+  if (plan.mode === 'wave') {
+    player.mode = 'wave';
+    player.maybeMore();
+  }
+  renderBar();
+}
+
+function accentPickerHtml() {
+  const cur = (state.settings && state.settings.accent) || 'lavender';
+  return `<div class="accent-pick">
+    <div><b>Акцентный цвет</b><span class="hint">Как в Android 16: один цвет красит фигуры «Моей волны», кнопки, выделение и прогресс. «Из обложки» подстраивается под текущий трек.</span></div>
+    <div class="accent-row" role="radiogroup" aria-label="Акцентный цвет">${ACCENTS.map(([id, label]) => {
+      const p = id === 'cover' ? null : paletteFor(id, { mac: IS_MAC });
+      const sw = p ? `<span class="sw"><i style="background:${p.a}"></i><i style="background:${p.strong}"></i><i style="background:${p.deep}"></i></span>` : '<span class="sw cover"></span>';
+      return `<button class="accent-sw ${cur === id ? 'on' : ''}" role="radio" aria-checked="${cur === id}" data-action="set-accent" data-v="${id}">${sw}<span class="nm">${label}</span></button>`;
+    }).join('')}</div>
+  </div>`;
 }
 
 function renderSettings() {
@@ -985,6 +1146,7 @@ function renderSettings() {
     <section class="card">
       <div><h2 class="sec">Вид приложения</h2><div class="hint">Что главное при запуске. Через аккаунт Nyao едет на все устройства.</div></div>
       ${layoutChoiceHtml(layout(), 'data-action="set-layout"')}
+      ${accentPickerHtml()}
       <div class="pref-row"><span><b>«Мне нравится» по сервисам</b><span class="hint">Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud — плюс общий.</span></span>
         <button class="switch ${state.settings.splitLiked ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.splitLiked}" aria-label="«Мне нравится» по сервисам" data-action="split-liked" data-v="${state.settings.splitLiked ? 0 : 1}"><span></span></button></div>
       ${layout() === 'player' ? `<div class="pref-row"><span><b>Вкладка «Моя волна» в меню</b><span class="hint">В режиме «Плеер» волна живёт плиткой на главной. Можно вернуть её отдельной вкладкой.</span></span>
@@ -992,17 +1154,21 @@ function renderSettings() {
     </section>
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Аккаунты</h2>${SERVICES.map((x) => svcCard(x.id)).join('')}</section>
     <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Моя волна</h2>${waveControlsHtml()}</section>
+    ${soundCardHtml()}
     ${eqCardHtml()}
     ${discordCardHtml()}
+    <section class="card" id="lastfm-card">${lastfmCardInner()}</section>
+    ${controlCardHtml()}
     ${updateCardHtml()}
     <section class="card">
       <h2 class="sec">О приложении</h2>
-      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · тема ${IS_MAC ? 'macOS (Liquid Glass)' : 'Windows'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из LRCLIB.</div>
+      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · тема ${IS_MAC ? 'macOS (Liquid Glass)' : 'Windows'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
       <button class="btn" data-action="onboarding" style="margin-top:12px">Показать приветствие снова</button>
     </section>
   </div>`;
   $$('input[data-input="share"]', view).forEach(setRangeFill);
   refreshRpcStatus();
+  refreshLastfm();
 }
 
 function eqCardHtml() {
@@ -1015,6 +1181,93 @@ function eqCardHtml() {
   </section>`;
 }
 
+// ---------- Управление: глобальные сочетания и трей ----------
+function controlCardHtml() {
+  const s = state.settings;
+  const mod = IS_MAC ? '⌘⌥' : 'Ctrl+Alt+';
+  return `<section class="card eq-card">
+    <div class="pref-row"><span><b>Сочетания клавиш везде</b><span class="hint">Работают, даже когда окно свёрнуто: ${mod}Пробел — пауза, ${mod}→ / ${mod}← — следующий и предыдущий, ${mod}L — «Мне нравится». Медиаклавиши клавиатуры работают всегда.</span></span>
+      <button class="switch ${s.globalKeys !== false ? 'on' : ''}" role="switch" aria-checked="${s.globalKeys !== false}" aria-label="Сочетания клавиш везде" data-action="toggle-globalkeys"><span></span></button></div>
+    <div class="pref-row"><span><b>Сворачивать в трей при закрытии</b><span class="hint">Крестик прячет окно, музыка играет дальше. Иконка Nyao в трее — управление и выход.</span></span>
+      <button class="switch ${s.closeToTray ? 'on' : ''}" role="switch" aria-checked="${!!s.closeToTray}" aria-label="Сворачивать в трей при закрытии" data-action="toggle-tray"><span></span></button></div>
+    <div class="pref-row"><span><b>Прятать кнопки в полноэкранном режиме</b><span class="hint">Если мышь не двигается 3 секунды, кнопки исчезают и остаются обложка и текст</span></span>
+      <button class="switch ${s.fsAutoHide ? 'on' : ''}" role="switch" aria-checked="${!!s.fsAutoHide}" aria-label="Прятать кнопки в полноэкранном режиме" data-action="toggle-fshide"><span></span></button></div>
+  </section>`;
+}
+
+// ---------- Last.fm ----------
+let lastfmState = { configured: true, connected: false, name: null, queued: 0, waiting: false };
+function lastfmCardInner() {
+  const s = lastfmState;
+  const st = !s.configured ? 'В этой сборке Last.fm выключен'
+    : s.waiting ? 'Подтверди доступ на странице Last.fm в браузере…'
+    : s.connected ? `Подключено: ${esc(s.name)}${s.queued ? ` · ждут отправки: ${s.queued}` : ''}`
+    : 'Записывает прослушанное из всех сервисов в твой профиль Last.fm';
+  const btn = !s.configured ? '' : s.waiting ? '<button class="btn" data-action="lastfm-cancel">Отмена</button>'
+    : s.connected ? '<button class="btn" data-action="lastfm-disconnect">Отключить</button>'
+    : '<button class="btn primary" data-action="lastfm-connect">Подключить</button>';
+  return `<div class="svc">
+    <div class="logo" style="background:#D51007;color:#fff;font-weight:800;font-size:13px">fm</div>
+    <div class="info"><div class="name">Last.fm</div><div class="st">${st}</div></div>
+    ${btn}
+  </div>`;
+}
+function renderLastfm() {
+  const el = $('#lastfm-card');
+  if (el) el.innerHTML = lastfmCardInner();
+}
+async function refreshLastfm() {
+  try {
+    lastfmState = { ...lastfmState, ...(await api.lastfm.status()) };
+  } catch {
+    // нет связи с главным процессом — оставим как есть
+  }
+  renderLastfm();
+}
+
+// ---------- Звук: выравнивание громкости и плавные переходы ----------
+function soundCardHtml() {
+  const s = state.settings;
+  const fade = Number(s.fade) || 0;
+  return `<section class="card eq-card">
+    <div class="pref-row"><span><b>Выравнивать громкость</b><span class="hint">Треки из разных сервисов звучат одинаково громко — по данным Яндекса и YouTube о громкости трека. SoundCloud и VK такие данные не дают.</span></span>
+      <button class="switch ${s.normalize ? 'on' : ''}" role="switch" aria-checked="${!!s.normalize}" aria-label="Выравнивать громкость" data-action="toggle-normalize"><span></span></button></div>
+    <div class="pref-row"><span><b>Плавные переходы</b><span class="hint" id="fade-label">${fade ? `Трек затихает за ${fade} с до конца, следующий плавно нарастает` : 'Выключены — треки сменяются сразу'}</span></span>
+      <input type="range" min="0" max="10" step="1" value="${fade}" data-input="fade" aria-label="Плавные переходы, секунд" style="width:180px"></div>
+    <div class="pref-row"><span><b>Продолжать похожим</b><span class="hint">Плейлист или альбом доиграл — дальше без паузы идёт радио по последнему треку</span></span>
+      <button class="switch ${s.continueSimilar !== false ? 'on' : ''}" role="switch" aria-checked="${s.continueSimilar !== false}" aria-label="Продолжать похожим" data-action="toggle-continue"><span></span></button></div>
+    <div class="pref-row"><span><b>Трек из поиска</b><span class="hint">${(s.searchPlay || 'similar') === 'similar' ? 'Играет он, а дальше — похожее на него, как в Яндексе' : 'После него играют остальные найденные треки'}</span></span>
+      <div class="pill-seg" role="radiogroup" aria-label="Что играть после трека из поиска">${[['similar', 'Дальше похожее'], ['list', 'Весь поиск']].map(([v, l]) => `<button role="radio" aria-checked="${(s.searchPlay || 'similar') === v}" class="${(s.searchPlay || 'similar') === v ? 'on' : ''}" data-action="search-play" data-v="${v}">${l}</button>`).join('')}</div></div>
+  </section>`;
+}
+
+let normSeq = 0;
+async function applyTrackSound() {
+  const t = player.current;
+  const s = state.settings || {};
+  fadingOut = false;
+  if (Number(s.fade) > 0) {
+    eq.fade(0, 0.01);
+    eq.fade(1, Math.min(2, Number(s.fade)));
+  } else eq.unfade();
+  const seq = ++normSeq;
+  if (!t || !s.normalize) return eq.setTrackGain(0);
+  const yt = t.source === 'yt' ? await api.loudness(t.id).catch(() => null) : null;
+  if (seq === normSeq) eq.setTrackGain(normalizeGain(t, yt));
+}
+
+let fadingOut = false;
+function checkFadeOut() {
+  const fade = Number((state.settings || {}).fade) || 0;
+  const a = player.audio;
+  if (!fade || fadingOut || !Number.isFinite(a.duration) || player.repeat === 'one') return;
+  const left = a.duration - a.currentTime;
+  if (left > 0 && left <= fade) {
+    fadingOut = true;
+    eq.fade(0, Math.max(0.2, left - 0.1));
+  }
+}
+
 let eqSaveTimer;
 function saveEq(next, rerender = true) {
   state.settings = { ...state.settings, eq: next };
@@ -1022,6 +1275,59 @@ function saveEq(next, rerender = true) {
   clearTimeout(eqSaveTimer);
   eqSaveTimer = setTimeout(() => api.settings.set({ eq: next }).catch(() => {}), 300);
   if (rerender && state.route === 'settings') renderSettings();
+}
+
+// ---------- Техработы и сбои сервисов (статус с сервера Nyao) ----------
+const SVC_NAMES = { ya: 'Яндекс Музыка', yt: 'YouTube Music', sc: 'SoundCloud', vk: 'VK Музыка' };
+let svcStatus = { maintenance: { active: false }, outages: [] };
+const hiddenOutages = new Set();
+
+function injectOutage() {
+  const box = $('.scroll', view);
+  if (!box) return;
+  const list = svcStatus.outages.filter((id) => !hiddenOutages.has(id));
+  if (!list.length) return;
+  const names = list.map((id) => SVC_NAMES[id] || id);
+  const one = names.length === 1;
+  box.insertAdjacentHTML('afterbegin', `<div class="outage" role="status">
+    <span class="outage-ic">${list.map((id) => badge(id)).join('')}</span>
+    <span class="outage-txt"><b>${esc(names.join(', '))} ${one ? 'сейчас не отвечает' : 'сейчас не отвечают'}</b><span>${one ? 'Его треки' : 'Их треки'} в волне и поиске пока пропускаем, остальное работает. Вернётся — подключим сами.</span></span>
+    <button class="ic" data-action="outage-hide" aria-label="Скрыть"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>`);
+}
+
+function applyStatus(s) {
+  const was = svcStatus.maintenance && svcStatus.maintenance.active;
+  svcStatus = { maintenance: (s && s.maintenance) || { active: false }, outages: (s && s.outages) || [] };
+  const m = svcStatus.maintenance;
+  let el = $('#mt');
+  if (m.active) {
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'mt';
+      el.className = 'mt';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = `<div class="mt-brand"><svg width="22" height="22" viewBox="0 0 64 64" fill="none" stroke-width="7" stroke-linecap="round" aria-hidden="true"><path d="M10 26c8-12 16-12 22 0s14 12 22 0" stroke="#FFD60A"/><path d="M10 32c8-12 16-12 22 0s14 12 22 0" stroke="#D8CEFF"/><path d="M10 38c8-12 16-12 22 0s14 12 22 0" stroke="#F0574A"/></svg>Nyao Music</div>
+      <div class="mt-body">
+        <svg class="mt-waves" width="260" height="120" viewBox="0 0 260 120" fill="none" stroke-width="14" stroke-linecap="round" aria-hidden="true"><path d="M20 52c26-34 52-34 74 0s48 34 74 0 50-34 72 0" stroke="#FFD60A"/><path d="M20 66c26-34 52-34 74 0s48 34 74 0 50-34 72 0" stroke="#D8CEFF"/><path d="M20 80c26-34 52-34 74 0s48 34 74 0 50-34 72 0" stroke="#F0574A"/></svg>
+        <h1>${esc(m.title || 'Скоро вернёмся')}</h1>
+        <p>${esc(m.text || '')}</p>
+        ${m.until ? `<div class="mt-eta"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>${esc(m.until)}</div>` : ''}
+        <button class="btn primary mt-retry" data-mt="retry">Проверить снова</button>
+      </div>
+      <div class="mt-foot">Лайки, плейлисты и входы в сервисы в порядке · проверяем каждые 2 минуты сами</div>`;
+    el.querySelector('[data-mt="retry"]').onclick = async (e) => {
+      e.currentTarget.disabled = true;
+      applyStatus(await api.status.get(true).catch(() => svcStatus));
+      if (svcStatus.maintenance.active) toast('Пока ещё чиним — загляни чуть позже');
+    };
+    if (!was && player.playing) player.toggle();
+  } else if (el) {
+    el.remove();
+    if (was) toast('Nyao снова работает');
+  }
+  if (state.route === 'home') RENDER.home();
 }
 
 const RPC_STATUS = { off: 'выключено', 'no-id': 'выключено', connecting: 'жду Discord… (он должен быть запущен)', connected: 'подключено' };
@@ -1058,15 +1364,32 @@ function pushRpc() {
   }, 400);
 }
 
-const RENDER = { home: renderHome, wave: renderWave, player: renderPlayer, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum };
+const RENDER = { home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList };
 
 // ---------- Загрузка данных ----------
 async function loadStatus() {
   state.status = await api.auth.status().catch(() => ({ ya: null, yt: null, sc: null, vk: null }));
   renderAccounts();
 }
+function releasesHtml() {
+  const r = state.releases;
+  if (!r || !r.length) return '';
+  return `<section><div class="sec-head"><h2 class="sec">Новые релизы любимых исполнителей</h2></div>
+    <div class="recent-row releases-row">${r.map((al) => `<button class="rcard" data-action="open-album" data-ref="${esc(al.ref)}">${coverHtml(al, '', true)}<b>${esc(al.title)}</b><span>${esc(al.artist)}</span><span class="rel-when">${al.kind === 'single' ? 'Сингл' : 'Альбом'} · ${esc(releaseAgo(al.releaseDate))}</span></button>`).join('')}</div></section>`;
+}
+async function loadReleases() {
+  if (!api.releases || !state.status.ya) return;
+  try {
+    state.releases = await api.releases();
+  } catch {
+    state.releases = [];
+  }
+  if (state.route === 'home') renderHome();
+}
+
 async function loadHome() {
   loadRecent();
+  if (!state.releases) loadReleases();
   if (layout() === 'player' && !state.lib.lists) loadLibrary();
   if (!state.status.ya && !state.status.yt) return;
   try {
@@ -1165,7 +1488,7 @@ async function loadNpArtist() {
     const data = await fetchArtist(ref);
     if (state.npArtist.ref !== ref) return;
     state.npArtist.data = data;
-    if (state.route === 'player') renderPlayer();
+    if (state.drawer === 'info') renderDrawer();
   } catch {
     // карточка исполнителя просто останется без фото
   }
@@ -1173,7 +1496,7 @@ async function loadNpArtist() {
 
 async function setWave(patch) {
   state.settings = await api.settings.set(patch);
-  if (['home', 'wave', 'player', 'settings'].includes(state.route)) RENDER[state.route]();
+  if (['home', 'wave', 'settings'].includes(state.route)) RENDER[state.route]();
   if (player.mode === 'wave') {
     toast('Перенастраиваю волну…');
     player.refreshWave().catch((e) => toast(e.message, true));
@@ -1181,11 +1504,19 @@ async function setWave(patch) {
 }
 
 // ---------- Меню «⋯» ----------
-function openMenu(x, y, track) {
+function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
   const menu = $('#menu');
   const mixes = (state.lib.lists || []).filter((p) => p.source === 'mix');
-  menu.innerHTML = `
+  const inQueue = queueIndex > -1 && queueIndex !== player.index;
+  menu.innerHTML = addOnly ? `
+    <div class="lbl">Добавить «${esc(track.title)}»</div>
+    ${mixes.map((m) => `<button data-m="mix" data-id="${esc(m.id)}">${esc(m.title)}</button>`).join('') || '<div class="lbl" style="text-transform:none;letter-spacing:0">Миксов пока нет</div>'}
+    <button data-m="newmix">${ICONS.plus} Новый микс…</button>
+    <button data-m="next">Играть следующим</button>` : `
     <button data-m="next">Играть следующим</button>
+    <button data-m="last">В конец очереди</button>
+    ${inQueue ? '<button data-m="remove">Убрать из очереди</button>' : ''}
+    <button data-m="radio">Похожее · радио по треку</button>
     <button data-m="like">${player.liked.has(track.id) ? 'Убрать из «Мне нравится»' : 'В «Мне нравится»'}</button>
     ${track.artistRef ? '<button data-m="artist">Открыть исполнителя</button>' : ''}
     ${track.albumRef ? '<button data-m="album">Открыть альбом</button>' : ''}
@@ -1194,8 +1525,9 @@ function openMenu(x, y, track) {
     <button data-m="newmix">${ICONS.plus} Новый микс…</button>`;
   menu.hidden = false;
   const r = menu.getBoundingClientRect();
-  menu.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`;
-  menu.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
+  menu.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8))}px`;
+  // из плеера меню раскрывается вверх, над кнопкой
+  menu.style.top = `${Math.max(8, addOnly ? y - r.height : Math.min(y, innerHeight - r.height - 8))}px`;
   menu.onclick = async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -1204,6 +1536,13 @@ function openMenu(x, y, track) {
       if (b.dataset.m === 'next') {
         player.enqueueNext(track);
         toast('Будет играть следующим');
+      } else if (b.dataset.m === 'last') {
+        player.enqueueLast(track);
+        toast('Добавлено в конец очереди');
+      } else if (b.dataset.m === 'remove') {
+        player.removeAt(queueIndex);
+      } else if (b.dataset.m === 'radio') {
+        await player.startRadio(track);
       } else if (b.dataset.m === 'like') {
         await player.toggleLike(track);
       } else if (b.dataset.m === 'artist') {
@@ -1255,13 +1594,514 @@ function askText(label, value = '') {
   });
 }
 
+// ---------- Nyao Connect: пульт для других устройств ----------
+function devIcon(platform) {
+  return platform === 'android'
+    ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="6.5" y="2.5" width="11" height="19" rx="3"/><path d="M11 18.5h2"/></svg>'
+    : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2.5"/><path d="M8 20h8M12 16v4"/></svg>';
+}
+function connectCardHtml(d) {
+  const t = d.track;
+  const status = d.online ? (t ? (d.playing ? 'Играет' : 'На паузе') : 'В сети') : `Не в сети${d.lastSeen ? ' · ' + ago(new Date(d.lastSeen).getTime()) : ''}`;
+  return `<div class="cx-dev ${d.online ? 'on' : ''}">
+    <div class="cx-top"><span class="cx-ic">${devIcon(d.platform)}</span><div class="cx-name"><b>${esc(d.device)}</b><span>${esc(status)}</span></div><span class="cx-dot" aria-hidden="true"></span></div>
+    ${t ? `<div class="cx-track">${coverHtml(t, 'sm')}<div class="cx-meta"><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></div></div>` : ''}
+    ${d.online ? `<div class="cx-ctl">
+        <button class="ic" data-action="cx-cmd" data-cmd="prev" data-id="${esc(d.deviceId)}" aria-label="Предыдущий">${ICONS.prev}</button>
+        <button class="play" data-action="cx-cmd" data-cmd="toggle" data-id="${esc(d.deviceId)}" aria-label="${d.playing ? 'Пауза' : 'Играть'}">${d.playing ? ICONS.pause : ICONS.play}</button>
+        <button class="ic" data-action="cx-cmd" data-cmd="next" data-id="${esc(d.deviceId)}" aria-label="Следующий">${ICONS.next}</button>
+        ${d.volume != null ? `<input type="range" class="cx-vol" min="0" max="100" value="${Math.round(d.volume * 100)}" data-cx-vol="${esc(d.deviceId)}" aria-label="Громкость на «${esc(d.device)}»">` : ''}
+      </div>
+      <div class="cx-acts">
+        ${t ? `<button class="btn" data-action="cx-take" data-id="${esc(d.deviceId)}">Забрать сюда</button>` : ''}
+        ${player.current ? `<button class="btn primary" data-action="cx-send" data-id="${esc(d.deviceId)}">Включить там</button>` : ''}
+      </div>` : ''}
+  </div>`;
+}
+function renderConnect() {
+  const el = $('#connect');
+  if (el.hidden) return;
+  if (!state.cloud.loggedIn) {
+    el.innerHTML = `<div class="cx-head"><b>Nyao Connect</b><span>Управляй музыкой на своих устройствах</span></div>
+      <div class="hint">Войди в аккаунт Nyao на этом и другом устройстве — и сможешь переключать треки на телефоне с компьютера и наоборот.</div>
+      <button class="btn primary" data-action="go" data-route="settings">Войти в аккаунт Nyao</button>`;
+    return;
+  }
+  const devs = state.connect.devices;
+  const others = (devs || []).filter((d) => !d.current).sort((a, b) => b.online - a.online);
+  const t = player.current;
+  el.innerHTML = `<div class="cx-head"><b>Nyao Connect</b><button class="icbtn" data-action="cx-refresh" aria-label="Обновить" title="Обновить"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg></button></div>
+    <div class="cx-dev me on"><div class="cx-top"><span class="cx-ic">${devIcon(api.platform)}</span><div class="cx-name"><b>Это устройство</b><span>${t ? esc(t.title) + ' · ' + esc(t.artist) : 'Ничего не играет'}</span></div><span class="cx-dot"></span></div></div>
+    ${state.connect.error ? `<div class="hint err">${esc(state.connect.error)}</div>` : ''}
+    ${devs == null ? '<div class="skeleton" style="height:120px"></div>' : others.length ? others.map(connectCardHtml).join('') : '<div class="hint">Других устройств пока нет — войди в аккаунт Nyao на телефоне или другом компьютере.</div>'}
+    <button class="btn cx-together" data-action="go" data-route="together">${NAV.find((n) => n[0] === 'together') ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="${NAV.find((n) => n[0] === 'together')[2]}"/></svg>` : ''}Слушать вместе с друзьями</button>`;
+  $$('.cx-vol', el).forEach(setRangeFill);
+}
+async function loadConnect() {
+  if (!state.cloud.loggedIn) return renderConnect();
+  try {
+    state.connect.devices = await api.connect.devices();
+    state.connect.error = null;
+  } catch (e) {
+    state.connect.error = e.message;
+  }
+  renderConnect();
+}
+function toggleConnect() {
+  const el = $('#connect');
+  el.hidden = !el.hidden;
+  if (!el.hidden) {
+    renderConnect();
+    loadConnect();
+  }
+}
+
+/** Команда с другого устройства (Nyao Connect) */
+function remoteCommand(e) {
+  const a = e.args || {};
+  const from = (e.from && e.from.device) || 'другое устройство';
+  switch (e.cmd) {
+    case 'toggle':
+      player.toggle();
+      break;
+    case 'play':
+      if (player.current && !player.playing) player.toggle();
+      break;
+    case 'pause':
+      if (player.playing) player.audio.pause();
+      break;
+    case 'next':
+      player.next(true);
+      break;
+    case 'prev':
+      player.prev();
+      break;
+    case 'seek':
+      player.seek(a.position);
+      break;
+    case 'volume':
+      player.setVolume(a.volume);
+      volEl.value = Math.round(a.volume * 100);
+      setRangeFill(volEl);
+      api.settings.set({ volume: a.volume }).catch(() => {});
+      break;
+    case 'like':
+      if (player.current) player.toggleLike().catch(() => {});
+      break;
+    case 'playTracks':
+      if (!a.tracks || !a.tracks.length) break;
+      if (state.room && !state.room.isHost) leaveRoom(true);
+      playListAt(a.tracks, a.index || 0, a.title || `С «${from}»`, a.position || 0, a.play !== false);
+      toast(`Музыка перенесена с «${from}»`);
+      break;
+  }
+  setTimeout(() => pushNow(true), 400);
+}
+/** Включить список с нужного трека и места */
+function playListAt(tracks, index, label, position = 0, play = true) {
+  player.playList(tracks, index, label);
+  const once = () => {
+    player.audio.removeEventListener('loadedmetadata', once);
+    if (position > 2) player.seek(position);
+    if (!play) player.audio.pause();
+  };
+  player.audio.addEventListener('loadedmetadata', once);
+}
+function copyText(text) {
+  try {
+    navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+}
+
+// ---------- «Слушать вместе» ----------
+async function loadRoom() {
+  if (state.cloud.loggedIn) {
+    try {
+      const r = await api.room.current();
+      if (r && (!state.room || state.room.code !== r.code)) state.roomSync = { hostTrackId: null };
+      state.room = r;
+      if (r && !r.isHost) applyRoom(r.state);
+    } catch {
+      // нет связи — покажем, что есть
+    }
+  }
+  if (state.route === 'together') renderTogether();
+}
+async function joinRoom(input) {
+  const code = parseRoomCode(input);
+  if (!code) return toast('Код комнаты — 6 букв и цифр', true);
+  try {
+    state.room = await api.room.join(code);
+    state.roomSync = { hostTrackId: null };
+    toast(state.room.isHost ? 'Это твоя комната' : `Ты слушаешь вместе с ${state.room.host.name}`);
+    if (!state.room.isHost) applyRoom(state.room.state);
+  } catch (e) {
+    toast(e.message, true);
+  }
+  if (state.route === 'together') renderTogether();
+  renderBar();
+}
+async function leaveRoom(silent = false) {
+  const r = state.room;
+  if (!r) return;
+  state.room = null;
+  state.roomSync = { hostTrackId: null };
+  await api.room.leave(r.code).catch(() => {});
+  if (!silent) toast(r.isHost ? 'Комната закрыта' : 'Ты вышел из комнаты');
+  if (state.route === 'together') renderTogether();
+  renderBar();
+}
+let roomTimer;
+let roomLastBeat = 0;
+/** Хост: сообщаем комнате, что играет (сразу при смене трека/паузе, иначе раз в 15 секунд) */
+function roomPush(now = false) {
+  if (!state.room || !state.room.isHost) return;
+  clearTimeout(roomTimer);
+  roomTimer = setTimeout(() => {
+    roomLastBeat = Date.now();
+    const t = player.current;
+    api.room.state(state.room.code, { track: t, position: player.audio.currentTime || 0, playing: player.playing }).catch((e) => {
+      if (/только тот|403/.test(e.message)) {
+        state.room = null;
+        if (state.route === 'together') renderTogether();
+      }
+    });
+  }, now ? 0 : 300);
+}
+let roomBusy = false;
+/** Гость: догоняем хоста — тот же трек (или найденный в своих сервисах), то же место */
+async function applyRoom(st) {
+  if (!state.room || state.room.isHost || roomBusy) return;
+  const plan = roomSyncPlan({ hostTrackId: state.roomSync.hostTrackId, position: player.audio.currentTime || 0, playing: player.playing }, st);
+  if (plan.load) {
+    roomBusy = true;
+    const started = Date.now();
+    try {
+      const t = await api.matchPlayable(st.track).catch(() => null);
+      state.roomSync.hostTrackId = st.track.id;
+      if (!t) {
+        player.audio.pause();
+        toast(`«${st.track.title}» нет в твоих сервисах — ждём следующий трек`, true);
+        return;
+      }
+      const pos = (st.position || 0) + (st.playing ? (Date.now() - started) / 1000 : 0);
+      playListAt([t], 0, `Вместе с ${state.room ? state.room.host.name : ''}`, pos, st.playing);
+    } finally {
+      roomBusy = false;
+    }
+    return;
+  }
+  if (plan.seek != null) player.seek(plan.seek);
+  if (plan.play === true) player.audio.play().catch(() => {});
+  if (plan.play === false) player.audio.pause();
+}
+function showReaction(emoji, name) {
+  const layer = $('#react-layer') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'react-layer' }));
+  const el = document.createElement('div');
+  el.className = 'react-fly';
+  el.style.left = `${10 + Math.random() * 80}%`;
+  el.innerHTML = `<span class="e">${esc(emoji)}</span><span class="n">${esc(name || '')}</span>`;
+  layer.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+function renderTogether() {
+  const r = state.room;
+  const head = '<h1 class="page">Слушать вместе</h1>';
+  if (!state.cloud.loggedIn) {
+    view.innerHTML = `<div class="scroll together">${head}
+      <div class="card"><div class="field"><label>Нужен аккаунт Nyao</label><div class="hint">Комнаты работают через аккаунт Nyao (вход через Telegram). Токены музыкальных сервисов остаются на устройстве.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Войти</button></div></div></div>`;
+    return;
+  }
+  if (!r) {
+    view.innerHTML = `<div class="scroll together">${head}
+      <p class="muted tg-lead">Одна музыка на всех: хост включает треки, а у остальных они играют одновременно — каждый слушает в своём сервисе. Если трека там нет, Nyao найдёт его в другом.</p>
+      <div class="tg-start">
+        <section class="tg-card create"><canvas id="tg-ribbon"></canvas>
+          <span class="eyebrow">Ты ведёшь</span><h2>Создать комнату</h2><p>Получишь код и ссылку — отправь друзьям.</p>
+          <button class="btn primary" data-action="room-create">Создать</button></section>
+        <section class="tg-card"><span class="eyebrow">Тебя позвали</span><h2>Войти по коду</h2><p>Код из 6 знаков или ссылка-приглашение.</p>
+          <form data-form="room-join" class="tg-join"><input name="code" maxlength="64" placeholder="Например, K7QM2X" aria-label="Код комнаты" autocomplete="off"><button class="btn primary">Войти</button></form></section>
+      </div></div>`;
+    new Ribbon($('#tg-ribbon'), { lines: 10, cy: 0.6, amp: 0.7, accent: accentColor() });
+    return;
+  }
+  const st = r.state;
+  const t = st && st.track;
+  const people = [{ name: r.host.name, picture: r.host.picture, host: true }, ...r.members];
+  view.innerHTML = `<div class="scroll together">${head}
+    <section class="tg-room">
+      <div class="tg-code-box">
+        <span class="eyebrow">${r.isHost ? 'Твоя комната' : 'Комната ' + esc(r.host.name)}</span>
+        <button class="tg-code" data-action="room-code" title="Скопировать код">${esc(r.code)}</button>
+        <div class="tg-acts"><button class="btn" data-action="room-copy">Скопировать ссылку</button><button class="btn" data-action="room-leave">${r.isHost ? 'Закрыть комнату' : 'Выйти'}</button></div>
+      </div>
+      <div class="tg-now">
+        ${t ? `${coverHtml(t)}<div class="tg-meta"><span class="eyebrow">${st.playing ? 'Сейчас играет у всех' : 'На паузе'}</span><b>${esc(t.title)}</b><span>${badge(t.source)}${esc(t.artist)}</span></div>`
+          : `<div class="tg-meta"><span class="eyebrow">Тишина</span><b>${r.isHost ? 'Включи что-нибудь — все услышат' : 'Ждём, пока ' + esc(r.host.name) + ' включит музыку'}</b></div>`}
+      </div>
+    </section>
+    <div class="tg-cols">
+      <section class="card"><span class="eyebrow">В комнате · ${people.length}</span>
+        <div class="tg-people">${people.map((p) => `<div class="tg-person">${p.picture ? `<img src="${esc(p.picture)}" alt="">` : `<span class="av">${esc((p.name || '?').slice(0, 1))}</span>`}<b>${esc(p.name)}</b>${p.host ? '<span class="tag">ведёт</span>' : ''}</div>`).join('')}</div>
+        <span class="hint">${r.isHost ? 'Всё, что ты включаешь, ставишь на паузу или перематываешь, повторяется у всех.' : 'Музыку выбирает ' + esc(r.host.name) + '. Пауза у тебя — только у тебя: при следующем треке ты снова догонишь.'}</span>
+      </section>
+      <section class="card"><span class="eyebrow">Реакции</span>
+        <div class="tg-reacts">${REACTIONS.map((e) => `<button data-action="room-react" data-e="${e}" aria-label="Реакция ${e}">${e}</button>`).join('')}</div>
+        <span class="hint">Видны всем в комнате.</span>
+      </section>
+    </div>
+  </div>`;
+}
+function onRoomEvent(e) {
+  if (e.type === 'room-closed') {
+    if (state.room && state.room.code === e.code) {
+      state.room = null;
+      toast('Хост закрыл комнату');
+    }
+  } else if (e.type === 'room') {
+    if (!state.room || state.room.code !== e.room.code) return;
+    state.room = { ...e.room, isHost: state.room.isHost };
+    if (e.joined) toast(`${e.joined} в комнате`);
+    if (e.left) toast(`${e.left} вышел`);
+    if (!state.room.isHost) applyRoom(e.room.state);
+  } else if (e.type === 'react') {
+    showReaction(e.emoji, e.name);
+    return;
+  }
+  if (state.route === 'together') renderTogether();
+  renderBar();
+}
+
+// ---------- Итоги ----------
+async function loadStats() {
+  if (!state.cloud.loggedIn) return renderStats();
+  const period = state.stats.period;
+  state.stats.loading = true;
+  state.stats.error = null;
+  if (state.route === 'stats') renderStats();
+  try {
+    const data = await api.stats(period);
+    if (state.stats.period !== period) return;
+    state.stats.data = data;
+  } catch (e) {
+    state.stats.error = e.message;
+  }
+  state.stats.loading = false;
+  if (state.route === 'stats') renderStats();
+}
+function statTrack(t) {
+  const i = String(t.trackId).indexOf(':');
+  return { id: t.trackId, source: t.source || t.trackId.slice(0, i), srcId: t.trackId.slice(i + 1), title: t.title, artist: t.artist, cover: t.cover, duration: t.duration || 0 };
+}
+function renderStats() {
+  const s = state.stats.data;
+  const seg = `<div class="pill-seg" role="radiogroup" aria-label="Период">${PERIODS.map(([v, l]) => `<button role="radio" aria-checked="${state.stats.period === v}" class="${state.stats.period === v ? 'on' : ''}" data-action="stats-period" data-v="${v}">${l}</button>`).join('')}</div>`;
+  let body;
+  if (!state.cloud.loggedIn) {
+    body = `<div class="card"><div class="field"><label>Нужен аккаунт Nyao</label><div class="hint">Итоги собираются из истории прослушиваний со всех твоих устройств — она хранится в аккаунте Nyao.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Войти</button></div></div>`;
+  } else if (state.stats.error) {
+    body = `<div class="card"><div class="hint err">${esc(state.stats.error)}</div></div>`;
+  } else if (!s) {
+    body = '<div class="skeleton" style="height:240px"></div><div class="skeleton" style="height:160px;margin-top:16px"></div>';
+  } else if (!s.plays) {
+    body = '<div class="empty">За этот период пока нечего подводить — послушай что-нибудь, и здесь появятся итоги.</div>';
+  } else {
+    const tracks = s.topTracks.map(statTrack);
+    lists['stats-top'] = tracks;
+    const maxH = Math.max(...s.hours, 1);
+    const total = Object.values(s.sources).reduce((a, b) => a + b, 0) || 1;
+    const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+    const maxD = Math.max(...s.weekdays, 1);
+    const topA = s.topArtists[0];
+    body = `<section class="st-hero"><canvas id="st-ribbon"></canvas>
+        <button class="icbtn st-refresh" data-action="stats-refresh" aria-label="Обновить итоги" title="Обновить">${state.stats.loading ? '…' : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>'}</button>
+        <span class="eyebrow">${esc(periodTitle(s.period, s.from))}</span>
+        <div class="st-big">${num(s.minutes)}</div>
+        <div class="st-sub">${pl(s.minutes, 'минута', 'минуты', 'минут')} музыки · ${num(s.plays)} ${pl(s.plays, 'прослушивание', 'прослушивания', 'прослушиваний')}</div>
+        ${topA ? `<div class="st-topa">${coverHtml({ cover: topA.cover }, 'sm')}<span>Главный исполнитель — <b>${esc(topA.name)}</b>, ${minutesText(topA.minutes)}</span></div>` : ''}
+      </section>
+      <div class="st-facts">${statFacts(s).map((f) => `<div class="st-fact"><b>${esc(f.big)}</b><span>${esc(f.label)}</span></div>`).join('')}</div>
+      <div class="st-cols">
+        <section class="card"><span class="eyebrow">Исполнители</span>
+          <ol class="st-artists">${s.topArtists.map((a, i) => `<li><span class="n">${i + 1}</span>${coverHtml({ cover: a.cover }, 'sm')}<div><b>${esc(a.name)}</b><span>${minutesText(a.minutes)} · ${a.tracks} ${pl(a.tracks, 'трек', 'трека', 'треков')}</span></div></li>`).join('')}</ol></section>
+        <section class="card"><div class="sec-head"><span class="eyebrow">Треки</span><button class="link" data-action="stats-play">Слушать все</button></div>
+          ${tracksHtml(tracks, 'stats-top')}</section>
+      </div>
+      <div class="st-cols">
+        <section class="card"><span class="eyebrow">Когда слушаешь</span>
+          <div class="st-hours">${s.hours.map((m, h) => `<span style="height:${Math.max(3, (m / maxH) * 100)}%" title="${h}:00 — ${minutesText(m)}"></span>`).join('')}</div>
+          <div class="st-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+          <div class="st-week">${s.weekdays.map((m, i) => `<div><span style="opacity:${0.25 + (m / maxD) * 0.75}"></span><b>${days[i]}</b></div>`).join('')}</div></section>
+        <section class="card"><span class="eyebrow">Сервисы</span>
+          <div class="st-src">${Object.entries(s.sources).map(([k, m]) => `<div class="row"><span>${badge(k)}${esc(srcName(k) || 'Другое')}</span><b>${Math.round((m / total) * 100)}%</b><i style="width:${Math.max(2, (m / total) * 100)}%" class="b-${esc(k)}"></i></div>`).join('')}</div>
+          ${s.first ? `<span class="hint">Первый трек периода: «${esc(s.first.title)}» — ${esc(s.first.artist)}</span>` : ''}</section>
+      </div>`;
+  }
+  view.innerHTML = `<div class="scroll stats"><div class="st-head"><h1 class="page">Итоги</h1>${seg}</div>${body}</div>`;
+  if ($('#st-ribbon')) new Ribbon($('#st-ribbon'), { lines: 14, cy: 0.55, amp: 1, accent: accentColor() });
+}
+
+// ---------- Перенос плейлиста в другой сервис ----------
+async function openTransfer(sel, tracks) {
+  const targets = (await api.transfer.targets()).filter((t) => t.id !== sel.source || sel.id === 'liked');
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-wrap';
+  wrap.id = 'xfer';
+  const title = sel.id.startsWith('liked') ? 'Мне нравится' : sel.title;
+  const first = (targets.find((t) => t.ok) || targets[0] || {}).id;
+  wrap.innerHTML = `<div class="modal" role="dialog" aria-label="Перенос плейлиста">
+    <h2>Перенести плейлист</h2>
+    <span class="muted">«${esc(title)}» · ${tracks.length} ${pl(tracks.length, 'трек', 'трека', 'треков')}. Каждый трек найдём в выбранном сервисе, ненайденные покажем списком.</span>
+    <div class="xf-targets">${targets.map((t) => `<label class="xf-t ${t.ok ? '' : 'off'}"><input type="radio" name="xf" value="${t.id}" ${t.id === first && t.ok ? 'checked' : ''} ${t.ok ? '' : 'disabled'}>
+      <span class="xf-dot ${t.id}"></span><span><b>${esc(t.name)}</b><small>${t.id === 'mix' ? 'Плейлист внутри Nyao, синхронизируется между устройствами' : t.ok ? 'Создадим приватный плейлист' : 'Нужен вход в этот сервис'}</small></span></label>`).join('')}</div>
+    <label class="field"><span class="lbl">Название</span><input class="xf-name" value="${esc(title)}" maxlength="80"></label>
+    <div class="xf-progress" hidden><div class="xf-bar"><i></i></div><span class="muted xf-count"></span></div>
+    <div class="xf-result" hidden></div>
+    <div class="modal-foot"><button class="btn" data-x="close">Отмена</button><button class="btn primary" data-x="go" ${first ? '' : 'disabled'}>Перенести</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  let running = false;
+  const close = () => {
+    if (!running) wrap.remove();
+  };
+  wrap.addEventListener('mousedown', (e) => {
+    if (e.target === wrap) close();
+  });
+  wrap.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-x]');
+    if (!b) return;
+    if (b.dataset.x === 'close') return close();
+    if (b.dataset.x === 'open') {
+      wrap.remove();
+      await loadLibrary(true);
+      if (b.dataset.id) selectPlaylist(b.dataset.id);
+      go('library');
+      return;
+    }
+    if (b.dataset.x !== 'go' || running) return;
+    const target = ($('input[name="xf"]:checked', wrap) || {}).value;
+    if (!target) return toast('Выбери, куда переносить', true);
+    running = true;
+    b.disabled = true;
+    $('.xf-progress', wrap).hidden = false;
+    $('.xf-count', wrap).textContent = 'Ищу треки…';
+    try {
+      const r = await api.transfer.start({ tracks, title: $('.xf-name', wrap).value.trim() || title, target });
+      const res = $('.xf-result', wrap);
+      res.hidden = false;
+      res.innerHTML = `<b>${r.playlistId ? 'Готово' : 'Ничего не нашлось'}: перенесено ${r.found} из ${r.total}</b>
+        ${r.missing.length ? `<details><summary>Не нашлись (${r.missing.length})</summary><ul>${r.missing.slice(0, 200).map((m) => `<li>${esc(m.artist)} — ${esc(m.title)}</li>`).join('')}</ul></details>` : ''}`;
+      $('.modal-foot', wrap).innerHTML = `<button class="btn" data-x="close">Закрыть</button>${r.playlistId ? `<button class="btn primary" data-x="open" data-id="${esc(r.playlistId)}">Открыть</button>` : ''}`;
+    } catch (err) {
+      toast(err.message, true);
+      b.disabled = false;
+    } finally {
+      running = false;
+    }
+  });
+}
+if (api.transfer) {
+  api.transfer.onProgress((p) => {
+    const w = $('#xfer');
+    if (!w) return;
+    $('.xf-bar i', w).style.width = `${Math.round((p.done / Math.max(1, p.total)) * 100)}%`;
+    $('.xf-count', w).textContent = `Проверено ${p.done} из ${p.total} · найдено ${p.found}`;
+  });
+}
+
 // ---------- Обработчики экрана ----------
 async function handleAction(el, e) {
   const a = el.dataset.action;
   switch (a) {
     case 'go':
+      $('#connect').hidden = true;
       go(el.dataset.route);
       break;
+    case 'cx-cmd': {
+      const d = (state.connect.devices || []).find((x) => x.deviceId === el.dataset.id);
+      await api.connect.cmd(el.dataset.id, el.dataset.cmd);
+      if (d && el.dataset.cmd === 'toggle') {
+        d.position = livePosition(d);
+        d.updatedAt = Date.now();
+        d.playing = !d.playing;
+        renderConnect();
+      }
+      break;
+    }
+    case 'cx-take': {
+      // свежая запись с очередью (в живых событиях её нет)
+      const fresh = (await api.connect.devices().catch(() => null)) || [];
+      const d = fresh.find((x) => x.deviceId === el.dataset.id) || (state.connect.devices || []).find((x) => x.deviceId === el.dataset.id);
+      if (!d || !d.track) break;
+      playHandoff(d, `С «${d.device}»`);
+      api.connect.cmd(d.deviceId, 'pause').catch(() => {});
+      $('#connect').hidden = true;
+      break;
+    }
+    case 'cx-send': {
+      const d = (state.connect.devices || []).find((x) => x.deviceId === el.dataset.id);
+      if (!d || !player.current) break;
+      const q = queueForTransfer(player.queue, player.index);
+      await api.connect.cmd(d.deviceId, 'playTracks', { ...q, position: player.audio.currentTime || 0, title: player.label || '' });
+      player.audio.pause();
+      toast(`Играет на «${d.device}»`);
+      $('#connect').hidden = true;
+      break;
+    }
+    case 'cx-refresh':
+      await loadConnect();
+      break;
+    case 'room-create':
+      state.room = await api.room.create();
+      state.roomSync = { hostTrackId: null };
+      roomPush(true);
+      toast('Комната создана — поделись кодом');
+      renderTogether();
+      renderBar();
+      break;
+    case 'room-leave':
+      await leaveRoom();
+      break;
+    case 'room-copy':
+      copyText(JOIN_BASE + state.room.code);
+      toast('Ссылка скопирована');
+      break;
+    case 'room-code':
+      copyText(state.room.code);
+      toast('Код скопирован');
+      break;
+    case 'room-react':
+      if (state.room) api.room.react(state.room.code, el.dataset.e).catch((err) => toast(err.message, true));
+      break;
+    case 'stats-refresh':
+      // сначала дошлём накопленные прослушивания, потом пересчитаем
+      if (api.cloud && api.cloud.sync) await api.cloud.sync().catch(() => {});
+      await loadStats();
+      toast('Итоги обновлены');
+      break;
+    case 'stats-period':
+      state.stats.period = el.dataset.v;
+      state.stats.data = null;
+      loadStats();
+      break;
+    case 'stats-play': {
+      const tracks = lists['stats-top'] || [];
+      if (tracks.length) player.playList(tracks, 0, 'Итоги: любимое');
+      break;
+    }
+    case 'pl-transfer': {
+      const all = [...likedEntries(), ...(state.lib.lists || [])];
+      const sel = all.find((p) => p.id === state.lib.selected);
+      if (sel && state.lib.tracks) openTransfer(sel, state.lib.tracks);
+      break;
+    }
     case 'back':
       back();
       break;
@@ -1269,6 +2109,14 @@ async function handleAction(el, e) {
       if (player.mode === 'wave' && player.current) player.toggle();
       else await player.startWave();
       if (state.route === 'home' || state.route === 'wave') RENDER[state.route]();
+      break;
+    case 'wave-tune':
+      state.waveTune = true;
+      $('.wave-tune-layer', view)?.classList.add('open');
+      $('.wave-tune-btn', view)?.setAttribute('aria-expanded', 'true');
+      break;
+    case 'wave-tune-close':
+      closeWaveTune();
       break;
     case 'wave-div':
       await setWave({ waveDiversity: el.dataset.v });
@@ -1282,7 +2130,11 @@ async function handleAction(el, e) {
     case 'play-row': {
       const list = lists[el.dataset.list];
       const label = el.dataset.list === 'lib' ? libLabel() : el.dataset.list === 'search' ? 'Поиск' : el.dataset.list === 'home-recent' ? 'Недавно слушал' : el.dataset.list === 'home-top' ? 'Чаще всего' : '';
-      player.playList(list, Number(el.dataset.i), label);
+      if (el.dataset.list === 'search' && (state.settings.searchPlay || 'similar') === 'similar') {
+        // трек из поиска: только он, а дальше — похожее на него
+        player.playList([list[Number(el.dataset.i)]], 0, `Поиск: ${state.search.q}`);
+        player.forceContinue = true;
+      } else player.playList(list, Number(el.dataset.i), label);
       break;
     }
     case 'play-merged': {
@@ -1292,7 +2144,7 @@ async function handleAction(el, e) {
     }
     case 'row-more': {
       e.stopPropagation();
-      openMenu(e.clientX, e.clientY, lists[el.dataset.list][Number(el.dataset.i)]);
+      openMenu(e.clientX, e.clientY, lists[el.dataset.list][Number(el.dataset.i)], el.dataset.list === 'queue' ? Number(el.dataset.i) : -1);
       break;
     }
     case 'cur-more':
@@ -1301,9 +2153,12 @@ async function handleAction(el, e) {
     case 'fullscreen':
       fullscreen.show();
       break;
+    case 'outage-hide':
+      svcStatus.outages.forEach((id) => hiddenOutages.add(id));
+      el.closest('.outage')?.remove();
+      break;
     case 'like-cur':
       await player.toggleLike();
-      if (state.route === 'player') renderPlayer();
       break;
     case 'q-play':
       player.playAt(Number(el.dataset.i));
@@ -1311,6 +2166,43 @@ async function handleAction(el, e) {
     case 'open-pl':
       openPlaylist(el.dataset.id);
       break;
+    case 'search-next':
+    case 'search-last': {
+      const list = (lists.search || []).filter((t) => t.available !== false);
+      if (!list.length) break;
+      if (!player.current) {
+        player.playList(list, 0, `Поиск: ${state.search.q}`);
+      } else if (a === 'search-next') {
+        for (let i = list.length - 1; i >= 0; i--) if (list[i].id !== player.current.id) player.enqueueNext(list[i]);
+      } else {
+        for (const t of list) if (t.id !== player.current.id) player.enqueueLast(t);
+      }
+      toast(a === 'search-next' ? `${list.length} ${pl(list.length, 'трек', 'трека', 'треков')} — играют следующими` : `${list.length} ${pl(list.length, 'трек', 'трека', 'треков')} — в конце очереди`);
+      break;
+    }
+    case 'artist-all': {
+      const ad = state.artist.data;
+      if (!ad) break;
+      state.trackList = { title: ad.name, sub: 'Все треки', tracks: null, error: null };
+      go('tracks', { artist: state.artist.ref });
+      try {
+        state.trackList.tracks = await api.catalog.artistTracks(ad.refs);
+      } catch (err) {
+        state.trackList.error = err.message;
+      }
+      if (state.route === 'tracks') renderTrackList();
+      break;
+    }
+    case 'tl-play':
+    case 'tl-shuffle': {
+      const tl = state.trackList.tracks || [];
+      if (!tl.length) break;
+      const was = player.shuffle;
+      player.shuffle = a === 'tl-shuffle';
+      player.playList(tl, a === 'tl-shuffle' ? Math.floor(Math.random() * tl.length) : 0, `${state.trackList.title}: все треки`);
+      player.shuffle = was;
+      break;
+    }
     case 'open-artist':
       e.stopPropagation();
       go('artist', { ref: el.dataset.ref });
@@ -1338,6 +2230,54 @@ async function handleAction(el, e) {
     case 'artist-kind':
       state.artist.kind = el.dataset.v;
       renderArtist();
+      break;
+    case 'lastfm-connect':
+      lastfmState.waiting = true;
+      renderLastfm();
+      try {
+        const r = await api.lastfm.connect();
+        toast(`Last.fm подключён: ${r.name}`);
+      } catch (err) {
+        if (lastfmState.waiting) toast(err.message, true);
+      }
+      lastfmState.waiting = false;
+      refreshLastfm();
+      break;
+    case 'lastfm-cancel':
+      lastfmState.waiting = false;
+      await api.lastfm.cancel().catch(() => {});
+      renderLastfm();
+      break;
+    case 'lastfm-disconnect':
+      await api.lastfm.disconnect();
+      toast('Last.fm отключён');
+      refreshLastfm();
+      break;
+    case 'toggle-globalkeys':
+      state.settings = await api.settings.set({ globalKeys: state.settings.globalKeys === false });
+      renderSettings();
+      break;
+    case 'toggle-fshide':
+      state.settings = await api.settings.set({ fsAutoHide: !state.settings.fsAutoHide });
+      renderSettings();
+      break;
+    case 'toggle-tray':
+      state.settings = await api.settings.set({ closeToTray: !state.settings.closeToTray });
+      renderSettings();
+      break;
+    case 'toggle-continue':
+      state.settings = await api.settings.set({ continueSimilar: state.settings.continueSimilar === false });
+      player.continueSimilar = state.settings.continueSimilar !== false;
+      renderSettings();
+      break;
+    case 'search-play':
+      state.settings = await api.settings.set({ searchPlay: el.dataset.v });
+      renderSettings();
+      break;
+    case 'toggle-normalize':
+      state.settings = await api.settings.set({ normalize: !state.settings.normalize });
+      applyTrackSound();
+      renderSettings();
       break;
     case 'eq-toggle': {
       const e = normalizeEq(state.settings.eq);
@@ -1376,8 +2316,7 @@ async function handleAction(el, e) {
     case 'resume-device': {
       const d = state.cloud.others.find((x) => x.deviceId === el.dataset.id);
       if (d && d.track) {
-        const pos = d.playing ? d.position + (Date.now() - d.updatedAt) / 1000 : d.position;
-        player.resume(d.track, d.track.duration && pos > d.track.duration - 5 ? 0 : pos, `С устройства «${d.device}»`);
+        playHandoff(d, `С устройства «${d.device}»`);
         state.cloud.others = state.cloud.others.filter((x) => x !== d);
         if (state.route === 'home') renderHome();
       }
@@ -1443,6 +2382,15 @@ async function handleAction(el, e) {
     case 'set-layout':
       await setLayout(el.dataset.v);
       break;
+    case 'set-accent':
+      state.settings = await api.settings.set({ accent: el.dataset.v });
+      refreshAccent();
+      $$('.accent-sw').forEach((b) => {
+        const on = b.dataset.v === el.dataset.v;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-checked', String(on));
+      });
+      break;
     case 'toggle-wavetab':
       state.settings = await api.settings.set({ waveTab: !state.settings.waveTab });
       renderRail();
@@ -1471,8 +2419,14 @@ async function handleAction(el, e) {
       renderSearch();
       break;
     case 'tab':
-      state.tab = el.dataset.v;
-      renderPlayer();
+      if (el.dataset.v === 'lyrics') fullscreen.show();
+      else openDrawer(el.dataset.v === 'queue' ? 'queue' : 'info');
+      break;
+    case 'drawer-close':
+      closeDrawer();
+      break;
+    case 'drawer-queue':
+      openDrawer('queue');
       break;
     case 'lyric-seek':
       player.seek(Number(el.dataset.t));
@@ -1496,6 +2450,9 @@ async function handleAction(el, e) {
     case 'vk-log':
       api.vkLog && api.vkLog();
       break;
+    case 'yt-log':
+      api.ytLog && api.ytLog();
+      break;
     case 'manual-save': {
       const svc = el.dataset.svc;
       const input = $(`[data-manual="${svc}"]`, view);
@@ -1517,10 +2474,26 @@ view.addEventListener('click', async (e) => {
   }
 });
 
+$('#drawer').addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  try {
+    await handleAction(el, e);
+    // перешли к исполнителю или альбому — панель уступает место странице
+    if (['open-artist', 'open-album'].includes(el.dataset.action)) closeDrawer();
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
 view.addEventListener('submit', async (e) => {
   const form = e.target.closest('[data-form]');
   if (!form) return;
   e.preventDefault();
+  if (form.dataset.form === 'room-join') {
+    joinRoom(new FormData(form).get('code').toString());
+    return;
+  }
   const q = new FormData(form).get('q').toString().trim();
   if (!q) return;
   state.search = { q, res: null, filter: 'all', loading: true };
@@ -1538,6 +2511,16 @@ view.addEventListener('submit', async (e) => {
 });
 
 view.addEventListener('input', (e) => {
+  if (e.target.dataset.input === 'fade') {
+    const v = Number(e.target.value);
+    state.settings = { ...state.settings, fade: v };
+    const l = $('#fade-label', view);
+    if (l) l.textContent = v ? `Трек затихает за ${v} с до конца, следующий плавно нарастает` : 'Выключены — треки сменяются сразу';
+    clearTimeout(eqSaveTimer);
+    eqSaveTimer = setTimeout(() => api.settings.set({ fade: v }).catch(() => {}), 300);
+    if (!v) eq.unfade();
+    return;
+  }
   if (e.target.dataset.input === 'eq') {
     const i = Number(e.target.dataset.i);
     const cur = normalizeEq(state.settings.eq);
@@ -1635,26 +2618,65 @@ $('#pb-repeat').onclick = () => {
   renderBar();
 };
 $('#pb-like').onclick = () => player.toggleLike();
-$('#pb-coverbtn').onclick = () => {
-  state.tab = 'cover';
-  go('player');
-};
+$('#pb-coverbtn').onclick = () => fullscreen.show();
 $('#pb-title').onclick = () => {
   const t = player.current;
   if (t && t.albumRef) go('album', { ref: t.albumRef });
-  else go('player');
+  else fullscreen.show();
 };
 $('#pb-sub').addEventListener('click', (e) => {
   const el = e.target.closest('[data-action="open-artist"]');
   if (el) go('artist', { ref: el.dataset.ref });
 });
-const npOpen = (tab) => () => {
-  state.tab = tab;
-  go('player');
+$('#pb-panel').onclick = () => toggleDrawer('info');
+$('#pb-queue').onclick = () => toggleDrawer('queue');
+$('#pb-radio').onclick = () => startTrackRadio();
+$('#pb-add').onclick = async (e) => {
+  const t = player.current;
+  if (!t) return toast('Сейчас ничего не играет');
+  const r = e.currentTarget.getBoundingClientRect();
+  if (!state.lib.lists) await loadLibrary().catch(() => {});
+  openMenu(r.left, r.top - 8, t, -1, { addOnly: true });
 };
-$('#pb-np').onclick = npOpen('cover');
-$('#pb-lyrics').onclick = npOpen('lyrics');
-$('#pb-queue').onclick = npOpen('queue');
+$('#pb-more').onclick = (e) => openBarMore(e.currentTarget.getBoundingClientRect());
+async function startTrackRadio() {
+  const t = player.current;
+  if (!t) return toast('Сейчас ничего не играет');
+  try {
+    await player.startRadio(t);
+    toast(`Волна по треку «${t.title}»`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+// Узкое окно: то, что не влезло в плеер, — в меню «⋯»
+function openBarMore(r) {
+  const menu = $('#menu');
+  const rep = player.repeat || 'off';
+  menu.innerHTML = `
+    <button data-m="radio">Волна по треку</button>
+    <button data-m="full">Полный экран</button>
+    <button data-m="shuffle">${player.shuffle ? 'Не перемешивать' : 'Перемешать'}</button>
+    <button data-m="repeat">Повтор: ${{ off: 'выключен', all: 'плейлист', one: 'трек' }[rep] || 'выключен'}</button>
+    <button data-m="queue">Очередь</button>
+    <button data-m="connect">Устройства и «Слушать вместе»</button>`;
+  menu.hidden = false;
+  const m = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(r.right - m.width, innerWidth - m.width - 8))}px`;
+  menu.style.top = `${Math.max(8, r.top - m.height - 8)}px`;
+  menu.onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    menu.hidden = true;
+    const k = b.dataset.m;
+    if (k === 'radio') startTrackRadio();
+    else if (k === 'full') fullscreen.show();
+    else if (k === 'shuffle') $('#pb-shuffle').click();
+    else if (k === 'repeat') $('#pb-repeat').click();
+    else if (k === 'queue') toggleDrawer('queue');
+    else if (k === 'connect') $('#pb-connect').click();
+  };
+}
 const seekEl = $('#pb-seek');
 seekEl.addEventListener('input', () => {
   seeking = true;
@@ -1676,22 +2698,23 @@ volEl.addEventListener('input', () => {
 
 player.addEventListener('track', () => {
   renderBar();
-  lastLyric = -1;
-  if (state.route === 'player') {
-    renderPlayer();
-    loadNpArtist();
-  } else if (state.route === 'home' || state.route === 'wave' || state.route === 'album' || state.route === 'artist') RENDER[state.route]();
+  if (state.settings && state.settings.accent === 'cover') refreshAccent();
+  if (state.drawer) {
+    renderDrawer(state.drawer === 'queue');
+    if (state.drawer === 'info') loadNpArtist();
+  }
+  if (state.route === 'home' || state.route === 'wave' || state.route === 'album' || state.route === 'artist') RENDER[state.route]();
   else $$('.trow.cur').forEach((r) => r.classList.remove('cur'));
 });
 player.addEventListener('queue', () => {
-  if (state.route === 'player' && state.tab === 'queue') {
-    const q = $('#qlist');
-    if (q) {
-      const top = q.parentElement.parentElement.scrollTop;
-      q.innerHTML = tracksHtml(player.queue, 'queue', { action: 'q-play' });
-      q.parentElement.parentElement.scrollTop = top;
-    }
-  }
+  if (state.drawer === 'queue') {
+    const sc = $('#drawer .dr-scroll');
+    const top = sc ? sc.scrollTop : 0;
+    renderDrawer();
+    const sc2 = $('#drawer .dr-scroll');
+    if (sc2) sc2.scrollTop = top;
+  } else if (state.drawer === 'info') renderDrawer();
+  if (fullscreen.open) fullscreen.renderQueue();
 });
 player.addEventListener('state', () => {
   renderBar();
@@ -1700,13 +2723,13 @@ player.addEventListener('state', () => {
 });
 player.addEventListener('time', () => {
   updateTime();
-  if (state.route === 'player' && state.tab !== 'queue') syncLyrics(false);
 });
 const fullscreen = new FullScreen({
   player,
   api,
   isMac: IS_MAC,
   ensureLyrics: () => ensureLyrics(),
+  autoHide: () => !!(state.settings && state.settings.fsAutoHide),
   like: () => player.toggleLike(),
   icons: {
     play: ICONS.playBig, pause: ICONS.pauseBig, heart: ICONS.heart, heartOn: ICONS.heartOn,
@@ -1716,9 +2739,60 @@ const fullscreen = new FullScreen({
 });
 player.addEventListener('like', renderBar);
 player.addEventListener('track', () => fullscreen.update());
+player.addEventListener('track', applyTrackSound);
+player.addEventListener('time', checkFadeOut);
 player.addEventListener('state', () => fullscreen.update());
 player.addEventListener('like', () => fullscreen.update());
 player.addEventListener('time', () => fullscreen.tick());
+// команды из трея и глобальных сочетаний
+api.onControl((cmd) => {
+  if (cmd === 'toggle') player.toggle();
+  else if (cmd === 'next') player.next(true);
+  else if (cmd === 'prev') player.prev();
+  else if (cmd === 'like' && player.current) player.toggleLike().then(() => toast(player.liked.has(player.current.id) ? 'Добавлено в «Мне нравится»' : 'Убрано из «Мне нравится»')).catch(() => {});
+});
+if (api.onLive) {
+  api.onLive((e) => {
+    if (e.type === 'cmd') return remoteCommand(e);
+    if (e.type === 'now') {
+      const list = state.connect.devices;
+      if (list) {
+        const i = list.findIndex((d) => d.deviceId === e.deviceId);
+        const d = { ...(i > -1 ? list[i] : { deviceId: e.deviceId }), ...e, online: true };
+        if (i > -1) list[i] = d;
+        else list.push(d);
+        renderConnect();
+      }
+      return;
+    }
+    onRoomEvent(e);
+  });
+}
+$('#pb-connect').onclick = toggleConnect;
+$('#connect').addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  try {
+    await handleAction(el, e);
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+let cxVolTimer;
+$('#connect').addEventListener('input', (e) => {
+  const id = e.target.dataset.cxVol;
+  if (!id) return;
+  setRangeFill(e.target);
+  clearTimeout(cxVolTimer);
+  cxVolTimer = setTimeout(() => api.connect.cmd(id, 'volume', { volume: e.target.value / 100 }).catch((err) => toast(err.message, true)), 250);
+});
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('#connect') && !e.target.closest('#pb-connect')) $('#connect').hidden = true;
+});
+setInterval(() => {
+  if (state.room && state.room.isHost && player.playing && Date.now() - roomLastBeat > 15_000) roomPush(true);
+}, 5000);
+player.audio.addEventListener('seeked', () => roomPush());
 api.win.onFullscreen((on) => {
   if (!on) fullscreen.close();
 });
@@ -1770,9 +2844,18 @@ document.addEventListener('keydown', (e) => {
     fullscreen.toggle();
     return;
   }
-  if (e.code === 'Escape' && fullscreen.open) {
-    fullscreen.close();
-    return;
+  if (e.code === 'Escape') {
+    if (!$('#menu').hidden) {
+      $('#menu').hidden = true;
+      return;
+    }
+    if (fullscreen.escape()) return;
+    if (!$('#connect').hidden) {
+      $('#connect').hidden = true;
+      return;
+    }
+    if (closeWaveTune()) return;
+    if (closeDrawer()) return;
   }
   if (e.code === 'Space') {
     e.preventDefault();
@@ -2014,10 +3097,14 @@ function openMixBuilder() {
 
 // ---------- Старт ----------
 (async function init() {
-  if (IS_MAC) new Ribbon($('#bg-ribbon'), { lines: 20, cy: 0.58, amp: 1, width: 1.7, accent: '#D8CEFF', alpha: 0.9 });
   state.settings = await api.settings.get();
+  refreshAccent();
+  if (IS_MAC) bgRibbon = new Ribbon($('#bg-ribbon'), { lines: 20, cy: 0.58, amp: 1, width: 1.7, accent: accentColor(), alpha: 0.9 });
   eq.apply(state.settings.eq);
+  api.status.get().then(applyStatus).catch(() => {});
+  api.status.onChange(applyStatus);
   player.setVolume(state.settings.volume);
+  player.continueSimilar = state.settings.continueSimilar !== false;
   volEl.value = Math.round(state.settings.volume * 100);
   setRangeFill(volEl);
   renderBar();
@@ -2036,7 +3123,10 @@ function openMixBuilder() {
     api.cloud.onChanged(async (keys) => {
       // другое устройство поменяло миксы или настройки волны
       if (keys.includes('wave') || keys.includes('prefs')) state.settings = await api.settings.get();
-      if (keys.includes('prefs')) renderRail();
+      if (keys.includes('prefs')) {
+        renderRail();
+        refreshAccent();
+      }
       if (keys.includes('mixes')) {
         loadHome();
         loadLibrary();
@@ -2069,6 +3159,34 @@ function openMixBuilder() {
     else openOnboarding();
   }
 })();
+
+// Очередь: перетаскивание строк мышью
+let dragFrom = -1;
+document.addEventListener('dragstart', (e) => {
+  const row = e.target.closest && e.target.closest('#qlist .trow');
+  if (!row) return;
+  dragFrom = Number(row.dataset.i);
+  row.classList.add('dragging');
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+});
+document.addEventListener('dragover', (e) => {
+  const row = e.target.closest && e.target.closest('#qlist .trow');
+  if (!row || dragFrom < 0) return;
+  e.preventDefault();
+  $$('#qlist .trow.drop').forEach((r) => r.classList.remove('drop'));
+  row.classList.add('drop');
+});
+document.addEventListener('drop', (e) => {
+  const row = e.target.closest && e.target.closest('#qlist .trow');
+  if (!row || dragFrom < 0) return;
+  e.preventDefault();
+  player.move(dragFrom, Number(row.dataset.i));
+  dragFrom = -1;
+});
+document.addEventListener('dragend', () => {
+  dragFrom = -1;
+  $$('#qlist .trow.dragging, #qlist .trow.drop').forEach((r) => r.classList.remove('dragging', 'drop'));
+});
 
 view.addEventListener('dblclick', (e) => {
   if (e.target.closest('[data-dbl="fullscreen"]')) fullscreen.show();

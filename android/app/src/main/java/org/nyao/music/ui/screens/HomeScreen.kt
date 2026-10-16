@@ -127,6 +127,7 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                 }
             }
         }
+        item(key = "outage") { OutageBanner(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp)) }
         item {
             Text(
                 greeting(),
@@ -138,6 +139,7 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
             item(key = "continue-" + r.deviceId) { ContinueCard(model, r, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) }
         }
         item { WaveHero(model, Modifier.appear(0, 40f).padding(horizontal = 16.dp)) }
+        item { SocialRow(model, Modifier.appear(1).padding(start = 16.dp, end = 16.dp, top = 12.dp)) }
 
         if (!anyAccount) {
             item {
@@ -159,6 +161,14 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                 item {
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         itemsIndexed(continueLists) { i, p -> Box(Modifier.appear(i)) { CarouselCard(p, if (i == 0) 214 else 128) { model.go(Route.PlaylistPage(p)) } } }
+                    }
+                }
+            }
+            model.releases?.takeIf { it.isNotEmpty() }?.let { rel ->
+                item { Text("Новые релизы любимых исполнителей", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 12.dp), maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                item {
+                    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        itemsIndexed(rel) { i, p -> Box(Modifier.appear(i)) { ReleaseTile(p) { model.go(Route.PlaylistPage(p)) } } }
                     }
                 }
             }
@@ -187,6 +197,27 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                 }
             }
             if (h.yaPlaylists.isEmpty() && h.ytSections.isEmpty()) item { Hint("Здесь пока пусто — запусти волну или загляни в поиск.") }
+        }
+    }
+}
+
+/** Устройства (Nyao Connect), «Слушать вместе» и «Итоги» */
+@Composable
+private fun SocialRow(model: AppModel, modifier: Modifier = Modifier) {
+    val room by org.nyao.music.playback.Together.room.collectAsState()
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(
+            Triple(NyaoIcons.Devices, "Устройства") { model.connectOpen = true },
+            Triple(NyaoIcons.Group, if (room != null) "В комнате" else "Вместе") { model.go(Route.Together) },
+            Triple(NyaoIcons.BarChart, "Итоги") { model.go(Route.Stats) },
+        ).forEach { (icon, label, open) ->
+            Column(
+                Modifier.weight(1f).bouncy().clip(RoundedCornerShape(24.dp)).background(if (label == "В комнате") NyaoColors.Tonal else NyaoColors.S2).clickable(onClick = open).padding(vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(icon, null, tint = NyaoColors.Lavender, modifier = Modifier.size(24.dp))
+                Text(label, style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
 }
@@ -241,6 +272,18 @@ private fun CarouselCard(p: Playlist, width: Int, onClick: () -> Unit) {
             val sub = p.subtitle.ifEmpty { if (p.count > 0) "${org.nyao.music.data.sourceName(p.source)} · ${p.count}" else "" }
             if (sub.isNotEmpty() && width > 150) Text(sub, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+    }
+}
+
+/** Новый релиз: обложка, название, исполнитель и «Сингл · 3 дня назад» */
+@Composable
+private fun ReleaseTile(p: Playlist, onClick: () -> Unit) {
+    Column(Modifier.width(140.dp).bouncy().clip(RoundedCornerShape(24.dp)).clickable(onClick = onClick).padding(bottom = 6.dp)) {
+        Cover(p.cover, Modifier.size(140.dp), RoundedCornerShape(28.dp))
+        Spacer(Modifier.height(8.dp))
+        Text(p.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 6.dp))
+        Text(p.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = Modifier.padding(horizontal = 6.dp))
+        if (p.note.isNotEmpty()) Text(p.note, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
     }
 }
 

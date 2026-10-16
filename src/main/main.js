@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage, Tray, Menu, globalShortcut } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -6,15 +6,22 @@ import { fileURLToPath } from 'node:url';
 import { settings, secrets } from './store.js';
 import { YandexProvider } from './providers/yandex.js';
 import { YTMusicProvider } from './providers/ytmusic.js';
+import { shapeOf } from './providers/ytraw.js';
 import { SoundCloudProvider } from './providers/soundcloud.js';
 import { VKProvider } from './providers/vk.js';
 import { checkUpdate, downloadAsset } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
-import { findLyrics } from './lyrics.js';
+import { findLyricsChain } from './lyrics.js';
 import { Catalog } from './catalog.js';
 import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
-import { NyaoCloud } from './cloud.js';
+import { NyaoCloud, API_BASE } from './cloud.js';
+import { LastFm } from './lastfm.js';
+import { Radio } from './radio.js';
+import { LiveEvents } from './live.js';
+import { transferPlaylist, TARGETS } from './transfer.js';
+import { findMatch } from './match.js';
+import { mergeArtists } from '../renderer/search.js';
 import os from 'node:os';
 import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch } from './auth.js';
 
@@ -36,7 +43,33 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const fetchFn = (url, opts) => net.fetch(url, opts);
-let ya, yt, sc, vk, wave, streams, catalog, win, cloud;
+
+// Статус с сервера Nyao: техработы (заглушка на весь экран) и сбои отдельных сервисов (плашка, их треки пропускаем)
+let svcStatus = { maintenance: { active: false }, outages: [] };
+async function pollStatus() {
+  try {
+    const res = await net.fetch(`${API_BASE}/status`, { headers: { 'X-Nyao-Build': String(readVersion().build || 0) } });
+    if (!res.ok) return svcStatus;
+    const s = await res.json();
+    svcStatus = { maintenance: s.maintenance || { active: false }, outages: Array.isArray(s.outages) ? s.outages : [] };
+    if (win && !win.isDestroyed()) win.webContents.send('status', svcStatus);
+  } catch {
+    // сервер недоступен — работаем как обычно
+  }
+  return svcStatus;
+}
+const up = (id) => !svcStatus.outages.includes(id);
+setInterval(pollStatus, 2 * 60_000).unref?.();
+let ya, yt, sc, vk, wave, streams, catalog, win, cloud, lastfm, radio, live;
+
+/** Ключи Last.fm кладёт сборка (из секретов GitHub) в lastfm-keys.json рядом; без него Last.fm выключен */
+function lastfmKeys() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'lastfm-keys.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+}
 const rpc = new DiscordRPC({ log: (m) => console.log(m) });
 function configureRpc() {
   rpc.configure({ enabled: settings.get().discordRpc, clientId: DISCORD_APP_ID });
@@ -45,7 +78,7 @@ function configureRpc() {
 // Что из настроек едет на другие устройства (остальное — своё у каждого компьютера)
 const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood'];
 // вид приложения и «Мне нравится» по сервисам — тоже общие для всех устройств
-const PREF_KEYS = ['layout', 'splitLiked', 'waveTab'];
+const PREF_KEYS = ['layout', 'splitLiked', 'waveTab', 'accent'];
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -87,12 +120,28 @@ async function syncCloud() {
   }
 }
 
+// Отчёт о сбоях YouTube: стек ошибки и «форма» ответа (только имена полей) — без cookies и данных аккаунта
+function ytLog(op, err, meta = {}) {
+  try {
+    const file = path.join(app.getPath('userData'), 'yt-debug.log');
+    try {
+      if (fs.statSync(file).size > 2_000_000) fs.renameSync(file, file + '.old');
+    } catch {}
+    const { response, ...rest } = meta || {};
+    const lines = [`${new Date().toISOString()} [${op}] v${readVersion().name}.${readVersion().build} ${JSON.stringify(rest)}`];
+    if (err) lines.push('  ' + String((err && err.stack) || err).split('\n').slice(0, 10).join('\n  '));
+    if (response) lines.push('  shape: ' + JSON.stringify(shapeOf(response)).slice(0, 60_000));
+    fs.appendFileSync(file, lines.join('\n') + '\n');
+    if (err) console.warn('[yt]', op, err && err.message);
+  } catch {}
+}
+
 function initProviders() {
   ya = new YandexProvider({ token: secrets.get('yandexToken'), fetch: fetchFn });
   // YouTube — через fetch из Node (как в npm run yt-test): сеть Electron может подменять заголовки,
   // по которым googlevideo проверяет ссылку
   const nodeFetch = globalThis.fetch.bind(globalThis);
-  yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch });
+  yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch, log: ytLog });
   sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch });
   // VK Музыка (dev): всё через сессию окна входа VK; сырые ответы при сбоях — в vk-debug.log
   const vkLog = path.join(app.getPath('userData'), 'vk-debug.log');
@@ -119,9 +168,31 @@ function initProviders() {
     device: `${os.hostname().replace(/\.local$/, '')} · ${process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux'}`,
     log: (m) => console.log(m)
   });
+  // команды с других устройств, «сейчас играет» на них и «Слушать вместе» — в окно
+  live = new LiveEvents({ cloud, onEvent: (e) => send('live:event', e), log: (m) => console.log(m) });
+  live.start();
   const waveMemFile = path.join(app.getPath('userData'), 'wave-memory.json');
+  const lk = lastfmKeys();
+  lastfm = new LastFm({
+    key: lk.key || '',
+    secret: lk.secret || '',
+    fetch: fetchFn,
+    getSession: () => {
+      const s = secrets.get('lastfmSession');
+      return s ? JSON.parse(s) : null;
+    },
+    setSession: (s) => secrets.set('lastfmSession', s ? JSON.stringify(s) : null),
+    queueFile: path.join(app.getPath('userData'), 'lastfm-queue.json'),
+    openUrl: (url) => shell.openExternal(url),
+    log: (m) => console.log(m)
+  });
+  setInterval(() => lastfm.flush().catch(() => {}), 10 * 60_000).unref?.();
+
+  radio = new Radio({ ya, yt, sc, vk, isDown: (id) => svcStatus.outages.includes(id) });
+
   wave = new WaveMixer({
     ya, yt, sc, vk,
+    isDown: (id) => svcStatus.outages.includes(id),
     getSettings: () => settings.get(),
     getRecent: () => cloud.recentIds(),
     memory: {
@@ -255,6 +326,7 @@ function registerIpc() {
   handle('win:minimize', () => win.minimize());
   handle('win:maximize', () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   handle('win:close', () => win.close());
+  handle('status:get', (force) => (force ? pollStatus() : svcStatus));
   handle('win:fullscreen', (on) => {
     win.setFullScreen(!!on);
     return win.isFullScreen();
@@ -304,6 +376,7 @@ function registerIpc() {
   handle('settings:set', (patch) => {
     const next = settings.set(patch);
     if ('discordRpc' in patch) configureRpc();
+    if ('globalKeys' in patch) applyShortcuts();
     if (WAVE_KEYS.some((k) => k in patch) && cloud) cloud.pushState('wave', pick(next, WAVE_KEYS)).catch(() => {});
     if (PREF_KEYS.some((k) => k in patch) && cloud) cloud.pushState('prefs', pick(next, PREF_KEYS)).catch(() => {});
     return next;
@@ -311,6 +384,11 @@ function registerIpc() {
   handle('rpc:update', (info) => rpc.update(info));
   handle('rpc:status', () => rpc.status);
   handle('sc:pending', () => readPending());
+  handle('yt:openLog', () => {
+    const file = path.join(app.getPath('userData'), 'yt-debug.log');
+    if (!fs.existsSync(file)) fs.writeFileSync(file, 'Сбоев YouTube пока не было.\n');
+    return shell.openPath(file);
+  });
   handle('vk:openLog', () => shell.openPath(path.join(app.getPath('userData'), 'vk-debug.log')));
 
   // ---------- Аккаунт Nyao ----------
@@ -324,8 +402,96 @@ function registerIpc() {
   handle('cloud:logout', () => cloud.logout());
   handle('cloud:me', () => cloud.me());
   handle('cloud:removeDevice', (id) => cloud.removeDevice(id));
-  handle('cloud:play', (play) => cloud.recordPlay(play));
-  handle('cloud:now', (info) => cloud.setNow(info).catch(() => {}));
+  handle('cloud:play', (play) => {
+    lastfm.scrobble({ track: play && play.track, listened: (play && play.listened) || 0 });
+    return cloud.recordPlay(play);
+  });
+  handle('cloud:now', (info) => {
+    if (info) {
+      nowInfo = { title: (info.track && info.track.title) || '', artist: (info.track && info.track.artist) || '', playing: !!info.playing };
+      updateTray();
+    }
+    if (info && info.playing && info.track) lastfm.nowPlaying(info.track).catch(() => {});
+    return cloud.setNow(info || {}).catch(() => {});
+  });
+  handle('track:details', async (track) => {
+    if (!track) return {};
+    if (track.source === 'ya' && ya.loggedIn) return ya.trackDetails(track.srcId);
+    if (track.source === 'sc') return sc.trackDetails(track.srcId);
+    return {};
+  });
+  handle('radio:start', (track) => radio.start(track));
+  handle('radio:more', (ids) => radio.more(ids));
+  handle('lastfm:status', () => lastfm.status());
+  handle('lastfm:connect', () => lastfm.connect());
+  handle('lastfm:cancel', () => lastfm.cancel());
+  handle('lastfm:disconnect', () => lastfm.disconnect());
+  // ---------- Nyao Connect, «Слушать вместе», итоги ----------
+  const needCloud = () => {
+    if (!cloud.loggedIn) throw new Error('Нужен вход в аккаунт Nyao (настройки → Аккаунт Nyao)');
+  };
+  handle('connect:devices', async () => {
+    needCloud();
+    return (await cloud.request('GET', '/connect/devices')).devices || [];
+  });
+  handle('connect:cmd', async (deviceId, cmd, args) => {
+    needCloud();
+    return cloud.request('POST', `/connect/${encodeURIComponent(deviceId)}/cmd`, { cmd, args: args || {} });
+  });
+  handle('room:current', async () => (cloud.loggedIn ? (await cloud.request('GET', '/rooms/current')).room : null));
+  handle('room:create', async () => {
+    needCloud();
+    return (await cloud.request('POST', '/rooms')).room;
+  });
+  handle('room:join', async (code) => {
+    needCloud();
+    const c = String(code || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (c.length !== 6) throw new Error('Код комнаты — 6 букв и цифр');
+    return (await cloud.request('POST', `/rooms/${c}/join`)).room;
+  });
+  handle('room:leave', (code) => cloud.request('POST', `/rooms/${encodeURIComponent(code)}/leave`).catch(() => null));
+  handle('room:state', (code, st) => cloud.request('PUT', `/rooms/${encodeURIComponent(code)}/state`, st));
+  handle('room:react', (code, emoji) => cloud.request('POST', `/rooms/${encodeURIComponent(code)}/react`, { emoji }));
+  handle('stats', async (period, year) => {
+    needCloud();
+    const qs = new URLSearchParams({ period: period || 'month', tz: String(-new Date().getTimezoneOffset()), ...(year ? { year: String(year) } : {}) });
+    return cloud.request('GET', `/stats?${qs}`);
+  });
+  // трек из другого сервиса → тот, что можно включить здесь (для «Слушать вместе»)
+  const providers = () => ({ ya, yt, sc, vk });
+  const usable = (s) => up(s) && (s === 'yt' || s === 'sc' || (s === 'ya' && ya.loggedIn) || (s === 'vk' && vk.loggedIn));
+  handle('match:playable', async (track) => {
+    if (!track) return null;
+    if (usable(track.source)) return track;
+    const order = ['ya', 'vk', 'yt', 'sc'].filter(usable);
+    for (const s of order) {
+      const m = await findMatch(track, (q) => providers()[s].search(q));
+      if (m) return m.track;
+    }
+    return null;
+  });
+  handle('transfer:targets', () => Object.entries(TARGETS).map(([id, name]) => ({ id, name, ok: id === 'mix' || (id === 'ya' ? ya.loggedIn && up('ya') : yt.loggedIn && up('yt')) })));
+  handle('transfer:start', async ({ tracks, title, target }) => {
+    const r = await transferPlaylist({
+      tracks,
+      title: String(title || 'Перенесённый плейлист').slice(0, 80),
+      target,
+      search: (s, q) => providers()[s].search(q),
+      create: async (to, name, list) => {
+        if (to === 'mix') {
+          const all = readMixes();
+          const mix = { id: `mix:${crypto.randomUUID()}`, title: name, tracks: list };
+          all.unshift(mix);
+          writeMixes(all);
+          return mix.id;
+        }
+        if (to === 'ya') return ya.createPlaylist(name, list);
+        return yt.createPlaylist(name, list.map((t) => t.srcId));
+      },
+      onProgress: (p) => send('transfer:progress', p)
+    });
+    return r;
+  });
   handle('cloud:others', () => cloud.others());
   handle('cloud:history', () => cloud.history().slice(0, 200));
   handle('cloud:top', (opts) => cloud.top(opts || {}));
@@ -414,13 +580,24 @@ function registerIpc() {
     return { yaPlaylists: yaLists.slice(0, 8), ytHome: ytHome.slice(0, 4), mixes: readMixes().map(mixSummary) };
   });
 
+  // Новые релизы любимых исполнителей — отдельно от главной: собираются дольше. Кэш на 6 часов
+  let releasesCache = null;
+  handle('home:releases', async (force) => {
+    if (!ya.loggedIn) return [];
+    if (!force && releasesCache && Date.now() - releasesCache.at < 6 * 3600 * 1000) return releasesCache.list;
+    const list = await safe(ya.newReleases(), null);
+    if (list) releasesCache = { at: Date.now(), list };
+    return list || (releasesCache && releasesCache.list) || [];
+  });
+
   handle('library:playlists', async () => {
-    const [yaLists, ytLists, scLists] = await Promise.all([
+    const [yaLists, ytLists, scLists, vkLists] = await Promise.all([
       ya.loggedIn ? safe(ya.playlists(), []) : [],
       yt.loggedIn ? safe(yt.playlists(), []) : [],
-      sc.loggedIn ? safe(sc.playlists(), []) : []
+      sc.loggedIn ? safe(sc.playlists(), []) : [],
+      vk.loggedIn ? safe(vk.playlists(), []) : []
     ]);
-    return [...readMixes().map(mixSummary), ...yaLists, ...ytLists, ...scLists];
+    return [...readMixes().map(mixSummary), ...yaLists, ...ytLists, ...scLists, ...vkLists];
   });
 
   handle('library:liked', async () => {
@@ -443,6 +620,7 @@ function registerIpc() {
     if (playlistId.startsWith('ya:')) return ya.playlistTracks(playlistId);
     if (playlistId.startsWith('yt:')) return yt.playlistTracks(playlistId);
     if (playlistId.startsWith('sc:')) return sc.playlistTracks(playlistId);
+    if (playlistId.startsWith('vk:')) return vk.playlistTracks(playlistId);
     throw new Error('Неизвестный плейлист');
   });
 
@@ -484,8 +662,16 @@ function registerIpc() {
   handle('search', async (q) => {
     // Поиск YouTube Music работает и без входа — аккаунт нужен только для лайков и библиотеки
     // SoundCloud тоже ищет без входа
-    const [a, b, c, d] = await Promise.all([ya.loggedIn ? safe(ya.search(q), []) : [], safe(yt.search(q), []), safe(sc.search(q), []), vk.loggedIn ? safe(vk.search(q), []) : []]);
-    return { ya: a, yt: b, sc: c, vk: d };
+    const yaOn = ya.loggedIn && up('ya');
+    const [a, b, c, d, arYa, arYt, alYa, alYt] = await Promise.all([
+      yaOn ? safe(ya.search(q), []) : [], up('yt') ? safe(yt.search(q), []) : [], up('sc') ? safe(sc.search(q), []) : [], vk.loggedIn && up('vk') ? safe(vk.search(q), []) : [],
+      // исполнители и альбомы: Яндекс и YouTube Music
+      yaOn ? safe(ya.searchArtist(q), []) : [], up('yt') ? safe(yt.searchArtist(q), []) : [],
+      yaOn ? safe(ya.searchAlbum(q), []) : [], up('yt') ? safe(yt.searchAlbum(q), []) : []
+    ]);
+    const albums = [];
+    for (let i = 0; i < Math.max(alYa.length, alYt.length) && albums.length < 12; i++) for (const l of [alYa, alYt]) if (l[i] && albums.length < 12) albums.push(l[i]);
+    return { ya: a, yt: b, sc: c, vk: d, artists: mergeArtists([arYa, arYt], q), albums };
   });
 
   handle('wave:start', () => wave.start());
@@ -494,9 +680,27 @@ function registerIpc() {
 
   handle('catalog:artist', (ref) => catalog.artist(ref));
   handle('catalog:album', (ref) => catalog.album(ref));
+  handle('catalog:artistTracks', (refs) => catalog.artistTracks(refs));
   handle('stream:prepare', (trackId) => streams.prepare(trackId));
+  handle('stream:loudness', (trackId) => streams.loudness(trackId));
   handle('stream:error', (trackId) => streams.lastError(trackId));
-  handle('lyrics', (track) => findLyrics(track, fetchFn));
+  handle('lyrics', (track) => findLyricsChain(track, {
+    fetch: fetchFn,
+    log: (m) => {
+      console.log(m);
+      try {
+        fs.appendFileSync(path.join(app.getPath('userData'), 'lyrics-debug.log'), `${new Date().toISOString()} ${m}\n`);
+      } catch {
+        // не страшно
+      }
+    },
+    ya: ya.loggedIn && up('ya') ? ya : null,
+    yt: up('yt') ? yt : null,
+    matchYa: async (t) => {
+      const m = await findMatch(t, (q) => ya.search(q), { minScore: 0.75 });
+      return m && m.track;
+    }
+  }));
   handle('like', async (track, on) => {
     if (track.source === 'ya') await ya.like(track, on);
     else if (track.source === 'yt') await yt.like(track, on);
@@ -530,6 +734,16 @@ function createWindow() {
   win.on('maximize', () => win.webContents.send('win:state', { maximized: true }));
   win.on('unmaximize', () => win.webContents.send('win:state', { maximized: false }));
   win.on('leave-full-screen', () => win.webContents.send('win:fullscreen', false));
+  // «сворачивать в трей»: крестик прячет окно, музыка играет дальше
+  win.on('close', (e) => {
+    if (!quitting && settings.get().closeToTray && tray) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+  setupTray();
+  applyShortcuts();
+  win.webContents.once('did-finish-load', () => pollStatus());
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -576,6 +790,60 @@ app.whenReady().then(() => {
     cb({ requestHeaders: details.requestHeaders });
   });
 });
+
+// ---------- Трей и глобальные сочетания клавиш ----------
+let tray = null;
+let nowInfo = { title: '', artist: '', playing: false };
+let quitting = false;
+const control = (cmd) => {
+  if (win && !win.isDestroyed()) win.webContents.send('control', cmd);
+};
+function showWindow() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+function trayMenu() {
+  const label = nowInfo.title ? `${nowInfo.title} — ${nowInfo.artist}`.slice(0, 60) : 'Ничего не играет';
+  return Menu.buildFromTemplate([
+    { label, enabled: false },
+    { type: 'separator' },
+    { label: nowInfo.playing ? 'Пауза' : 'Играть', click: () => control('toggle') },
+    { label: 'Следующий', click: () => control('next') },
+    { label: 'Предыдущий', click: () => control('prev') },
+    { label: 'Мне нравится', click: () => control('like') },
+    { type: 'separator' },
+    { label: 'Открыть Nyao Music', click: showWindow },
+    { label: 'Выйти', click: () => { quitting = true; app.quit(); } }
+  ]);
+}
+function updateTray() {
+  if (!tray) return;
+  tray.setToolTip(nowInfo.title ? `Nyao Music — ${nowInfo.title}` : 'Nyao Music');
+  tray.setContextMenu(trayMenu());
+}
+function setupTray() {
+  if (tray) return;
+  const img = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'tray.png'));
+  tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img);
+  tray.on('click', () => (process.platform === 'darwin' ? tray.popUpContextMenu() : showWindow()));
+  updateTray();
+}
+const SHORTCUTS = { 'CommandOrControl+Alt+Space': 'toggle', 'CommandOrControl+Alt+Right': 'next', 'CommandOrControl+Alt+Left': 'prev', 'CommandOrControl+Alt+L': 'like' };
+function applyShortcuts() {
+  globalShortcut.unregisterAll();
+  if (!settings.get().globalKeys) return;
+  for (const [acc, cmd] of Object.entries(SHORTCUTS)) {
+    try {
+      globalShortcut.register(acc, () => control(cmd));
+    } catch {
+      // сочетание занято другой программой — пропускаем
+    }
+  }
+}
+app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('before-quit', () => { quitting = true; });
 
 app.on('window-all-closed', () => {
   rpc.disconnect();

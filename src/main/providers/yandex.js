@@ -30,7 +30,9 @@ export function mapTrack(t) {
     album: album.title || '',
     duration: Math.round((t.durationMs || 0) / 1000),
     cover: coverUrl(t.coverUri || album.coverUri || t.ogImage),
-    available: t.available !== false
+    available: t.available !== false,
+    // громкость трека (LUFS по EBU R128) — для выравнивания громкости между треками и сервисами
+    loud: t.r128 && Number.isFinite(t.r128.i) ? t.r128.i : null
   };
 }
 
@@ -139,6 +141,22 @@ export class YandexProvider {
     return (session.sequence || []).map((s) => mapTrack(s.track)).filter(Boolean);
   }
 
+  /** Радио по треку: станция Яндекса track:ID (отдельная сессия, волну не трогает) */
+  async radioStart(trackId) {
+    const id = String(trackId).split(':')[0];
+    const session = await this.request('POST', '/rotor/session/new', { json: { seeds: [`track:${id}`], includeTracksInResponse: true, includeWaveModel: false, interactive: true } });
+    this.radio = { sessionId: session.radioSessionId, batchId: session.batchId };
+    return (session.sequence || []).map((s) => mapTrack(s.track)).filter(Boolean);
+  }
+
+  async radioMore(queueIds = []) {
+    if (!this.radio) return [];
+    const ids = queueIds.filter((id) => id.startsWith('ya:')).map((id) => id.slice(3)).slice(-10);
+    const res = await this.request('POST', `/rotor/session/${this.radio.sessionId}/tracks`, { json: { queue: ids } });
+    if (res.batchId) this.radio.batchId = res.batchId;
+    return (res.sequence || []).map((s) => mapTrack(s.track)).filter(Boolean);
+  }
+
   async waveMore(queueIds = []) {
     if (!this.wave) return this.waveStart();
     const ids = queueIds.filter((id) => id.startsWith('ya:')).map((id) => id.slice(3)).slice(-10);
@@ -220,6 +238,35 @@ export class YandexProvider {
     };
   }
 
+  /** Новый приватный плейлист с треками (для переноса). → id вида ya:uid:kind */
+  async createPlaylist(title, tracks) {
+    const { uid } = await this.getAccount();
+    const pl = await this.request('POST', `/users/${uid}/playlists/create`, { form: { title: String(title).slice(0, 100), visibility: 'private' } });
+    let revision = pl.revision;
+    for (let i = 0; i < tracks.length; i += 100) {
+      const chunk = tracks.slice(i, i + 100).map((t) => ({ id: String(t.srcId).split(':')[0], ...(t.albumId ? { albumId: String(t.albumId) } : {}) }));
+      const r = await this.request('POST', `/users/${uid}/playlists/${pl.kind}/change-relative`, { form: { diff: JSON.stringify([{ op: 'insert', at: i, tracks: chunk }]), revision: String(revision) } });
+      revision = r && r.revision != null ? r.revision : revision + 1;
+    }
+    return `ya:${uid}:${pl.kind}`;
+  }
+
+  /** Подробности трека для «О треке»: год, жанр, лейбл, номер в альбоме, метка «18+» */
+  async trackDetails(trackId) {
+    const res = await this.request('GET', `/tracks/${String(trackId).split(':')[0]}`);
+    const t = (Array.isArray(res) ? res[0] : res) || {};
+    const al = (t.albums || [])[0] || {};
+    const pos = al.trackPosition || {};
+    return {
+      year: al.year || (al.releaseDate ? Number(String(al.releaseDate).slice(0, 4)) : null),
+      genre: al.genre || null,
+      label: (al.labels || []).map((l) => (typeof l === 'string' ? l : l.name)).filter(Boolean).join(', ') || null,
+      position: pos.index ? `${pos.index}${al.trackCount ? ' из ' + al.trackCount : ''}` : null,
+      explicit: t.contentWarning === 'explicit' || t.explicit === true,
+      artists: (t.artists || []).map((a) => a.name)
+    };
+  }
+
   async playlistTracks(playlistId) {
     const [, owner, kind] = playlistId.split(':');
     const res = await this.request('GET', `/users/${owner}/playlists/${kind}`, { query: { 'rich-tracks': 'true' } });
@@ -281,6 +328,84 @@ export class YandexProvider {
       cover: coverUrl(r.coverUri || r.ogImage, 600),
       tracks
     };
+  }
+
+  /**
+   * Новые релизы любимых исполнителей: лайкнутые исполнители (а если их мало — самые частые в лайках),
+   * у каждого — свежие альбомы и синглы за последние ~4 месяца.
+   */
+  async newReleases({ days = 120, limit = 18 } = {}) {
+    const { uid } = await this.getAccount();
+    const ids = [];
+    const add = (id) => {
+      if (id != null && !ids.includes(String(id))) ids.push(String(id));
+    };
+    try {
+      const liked = await this.request('GET', `/users/${uid}/likes/artists`);
+      for (const x of Array.isArray(liked) ? liked : []) add((x.artist || x).id);
+    } catch {
+      // нет лайкнутых исполнителей — возьмём из треков
+    }
+    if (ids.length < 12) {
+      try {
+        const tracks = await this.likedTracks(300);
+        const freq = new Map();
+        for (const t of tracks) if (t.artistRef) freq.set(t.artistRef.slice(3), (freq.get(t.artistRef.slice(3)) || 0) + 1);
+        [...freq.entries()].sort((a, b) => b[1] - a[1]).forEach(([id]) => add(id));
+      } catch {
+        // без лайков — без релизов
+      }
+    }
+    const since = Date.now() - days * 86400000;
+    const found = new Map();
+    const pick = ids.slice(0, 40);
+    let i = 0;
+    const worker = async () => {
+      while (i < pick.length) {
+        const id = pick[i++];
+        try {
+          const r = await this.request('GET', `/artists/${id}/direct-albums`, { query: { page: '0', 'page-size': '6', 'sort-by': 'year' } });
+          for (const a of r.albums || []) {
+            const ts = a.releaseDate ? Date.parse(a.releaseDate) : NaN;
+            if (!Number.isFinite(ts) || ts < since || ts > Date.now() + 86400000 || found.has(a.id)) continue;
+            found.set(a.id, { ...this.mapAlbumCard(a), releaseDate: new Date(ts).toISOString() });
+          }
+        } catch {
+          // у исполнителя не получилось — пропускаем
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, worker));
+    return [...found.values()].sort((a, b) => b.releaseDate.localeCompare(a.releaseDate)).slice(0, limit);
+  }
+
+  /**
+   * Текст трека от Яндекса (лицензированный: Musixmatch, LyricFind и др.). format: 'LRC' — по строкам со временем, 'TEXT' — просто текст.
+   * Запрос подписывается так же, как в приложении Яндекс Музыки. → { text, provider } или null
+   */
+  async lyrics(trackId, format = 'LRC') {
+    const id = String(trackId).split(':')[0];
+    const ts = Math.floor(Date.now() / 1000);
+    const sign = crypto.createHmac('sha256', 'p93jhgh689SBReK6ghtw62').update(`${id}${ts}`).digest('base64');
+    let r;
+    try {
+      r = await this.request('GET', `/tracks/${id}/lyrics`, { query: { format, timeStamp: String(ts), sign } });
+    } catch (e) {
+      if (e.status === 404) return null; // у трека нет текста
+      throw e;
+    }
+    if (!r || !r.downloadUrl) return null;
+    const res = await this.fetch(r.downloadUrl);
+    if (!res.ok) throw Object.assign(new Error(`файл текста: HTTP ${res.status}`), { status: res.status });
+    const text = await res.text();
+    const major = r.major && (r.major.prettyName || r.major.name);
+    return text.trim() ? { text, provider: major ? String(major).replace(/^MUSIXMATCH$/i, 'Musixmatch').replace(/^LYRICFIND$/i, 'LyricFind') : null } : null;
+  }
+
+  /** Все треки исполнителя (по популярности) */
+  async artistTracks(id, limit = 500) {
+    const r = await this.request('GET', `/artists/${id}/tracks`, { query: { page: '0', 'page-size': String(limit) } });
+    return (r.tracks || []).map(mapTrack).filter(Boolean);
   }
 
   async searchArtist(name) {

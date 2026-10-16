@@ -23,6 +23,9 @@ sealed interface Route {
     data object Library : Route
     data object Settings : Route
     data class PlaylistPage(val playlist: Playlist) : Route
+    data class ArtistPage(val source: String, val id: String?, val name: String) : Route
+    data object Together : Route
+    data object Stats : Route
 }
 
 /** Состояние экранов: живёт, пока живёт окно, чтобы вкладки не грузились заново при каждом переходе. */
@@ -33,9 +36,31 @@ class AppModel(private val scope: CoroutineScope) {
     val route: Route get() = stack.last()
     var nowPlayingOpen by mutableStateOf(false)
     var loginFor by mutableStateOf<String?>(null)
+    /** Шторка Nyao Connect и перенос плейлиста */
+    var connectOpen by mutableStateOf(false)
+    var transferFor by mutableStateOf<Pair<Playlist, List<Track>>?>(null)
+
+    fun invalidatePlaylists() {
+        playlists = null
+    }
+
+    fun openArtist(t: Track) {
+        nowPlayingOpen = false
+        go(Route.ArtistPage(t.source, t.artistId, t.artist.substringBefore(",").trim()))
+    }
+
+    /** Альбом трека как плейлист (Яндекс и YouTube Music знают альбом) */
+    fun albumOf(t: Track): Playlist? = when {
+        t.source == org.nyao.music.data.SOURCE_YA && t.albumId != null -> Playlist("yaalbum:${t.albumId}", t.source, t.album.ifBlank { "Альбом" }, cover = t.cover, subtitle = t.artist)
+        t.source == org.nyao.music.data.SOURCE_YT && t.albumId?.startsWith("MPRE") == true -> Playlist("yt:${t.albumId}", t.source, t.album.ifBlank { "Альбом" }, cover = t.cover, subtitle = t.artist)
+        else -> null
+    }
 
     fun go(r: Route) {
-        if (r is Route.PlaylistPage) stack.add(r)
+        if (r is Route.PlaylistPage || r is Route.ArtistPage || r == Route.Together || r == Route.Stats) {
+            nowPlayingOpen = false
+            stack.add(r)
+        }
         else {
             // вкладки верхнего уровня не копятся в истории
             stack.clear()
@@ -79,9 +104,14 @@ class AppModel(private val scope: CoroutineScope) {
 
     fun message(text: String) = PlaybackEvents.emit(text)
 
+    var releases by mutableStateOf<List<org.nyao.music.data.Playlist>?>(null)
+
     fun loadHome(force: Boolean = false) {
         if (homeLoading || (home != null && !force)) return
         homeLoading = true
+        scope.launch {
+            releases = runCatching { Repo.newReleases(force) }.getOrNull() ?: releases
+        }
         scope.launch {
             try {
                 home = Repo.home()
@@ -151,6 +181,7 @@ class AppModel(private val scope: CoroutineScope) {
     /** После входа/выхода всё перезагружаем */
     fun accountsChanged() {
         home = null
+        releases = null
         liked = null
         playlists = null
         playlistTracks = emptyMap()
@@ -294,8 +325,8 @@ class AppModel(private val scope: CoroutineScope) {
 
     fun resume(r: RemoteNow) {
         val pos = if (r.playing) r.positionSec + (System.currentTimeMillis() - r.updatedAt) / 1000.0 else r.positionSec
-        val ms = if (r.track.duration > 0 && pos > r.track.duration - 5) 0L else (pos * 1000).toLong()
-        PlayerConnection.resume(r.track, ms, "С устройства «${r.device}»")
+        if (org.nyao.music.playback.Together.room.value?.isHost == false) org.nyao.music.playback.Together.leave(silent = true)
+        PlayerConnection.handoff(r.track, pos, r.queue, "С устройства «${r.device}»")
         others = others - r
     }
 

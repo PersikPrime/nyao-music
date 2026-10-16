@@ -201,7 +201,7 @@ export class StreamService {
     const exclude = this.failedClients.get(trackId) || [];
     const job = (source === 'yt' ? provider.streamUrl(srcId, (u, h) => this.check(u, h), log, { exclude }) : provider.streamUrl(srcId))
       .then((r) => {
-        const entry = { source, client: r.client, url: r.url, headers: r.headers || {}, expires: Date.now() + (r.ttl || 30 * 60_000), mime: r.mime, hls: !!r.hls };
+        const entry = { source, client: r.client, url: r.url, headers: r.headers || {}, expires: Date.now() + (r.ttl || 30 * 60_000), mime: r.mime, hls: !!r.hls, loudnessDb: Number.isFinite(r.loudnessDb) ? r.loudnessDb : null };
         this.cache.set(trackId, entry);
         this.errors.delete(trackId);
         return entry;
@@ -219,6 +219,13 @@ export class StreamService {
   // Предзагрузка ссылки для следующего трека, ошибки молча игнорируем
   prepare(trackId) {
     this.resolve(trackId).catch(() => {});
+  }
+
+  /** Громкость YouTube-трека относительно эталона (дБ), если сервис её сообщил */
+  async loudness(trackId) {
+    if (!trackId.startsWith('yt:')) return null;
+    const e = await this.resolve(trackId).catch(() => null);
+    return e ? e.loudnessDb : null;
   }
 
   async handle(request) {

@@ -25,8 +25,10 @@ services:
       TG_RELAY: ${TG_RELAY:-}
       MIN_BUILD: ${MIN_BUILD:-0}
       MIRROR_DIR: /data/releases
+      STATUS_FILE: /data/status/status.json
     volumes:
       - releases:/data/releases
+      - status:/data/status
 
   caddy:
     image: caddy:2-alpine
@@ -47,5 +49,6 @@ services:
 volumes:
   pgdata:
   releases:
+  status:
   caddy_data:
   caddy_config:

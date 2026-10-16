@@ -89,6 +89,21 @@ export class Catalog {
     };
   }
 
+  /** Все треки исполнителя: из Яндекса, если он там есть и вход выполнен, иначе из YouTube Music */
+  async artistTracks(refs) {
+    for (const src of ['ya', 'yt']) {
+      const ref = refs && refs[src];
+      if (!ref || !this.available(src) || !this.p[src].artistTracks) continue;
+      try {
+        const list = await this.p[src].artistTracks(ref.slice(3));
+        if (list.length) return list;
+      } catch {
+        // следующий сервис
+      }
+    }
+    return [];
+  }
+
   async album(ref) {
     const [src, ...rest] = ref.split(':');
     const id = rest.join(':');
