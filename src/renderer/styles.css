@@ -591,10 +591,12 @@ body.fs-on .toast { z-index: 1000; }
 .fs-artist { margin-top: 4px; font-size: 16px; color: rgba(255,255,255,.75); }
 .fs-lyr.on { background: #fff; color: var(--fs-bg, #1c1a20); }
 .fs-lyr:disabled { opacity: .35; cursor: default; background: rgba(255,255,255,.08); }
-.fs-progress { position: relative; height: 16px; cursor: pointer; display: flex; align-items: center; }
+.fs-progress { position: relative; height: 16px; cursor: pointer; display: flex; align-items: center; touch-action: none; user-select: none; }
+.fs-progress.dragging .fs-knob { transform: scale(1.35); }
+.fs-progress.dragging::before, .fs-progress.dragging .fs-fill { height: 6px; }
 .fs-progress::before { content: ''; position: absolute; left: 0; right: 0; height: 4px; border-radius: 2px; background: rgba(255,255,255,.25); }
 .fs-fill { position: relative; height: 4px; border-radius: 2px; background: #fff; width: 0; }
-.fs-knob { position: absolute; top: 2px; width: 12px; height: 12px; margin-left: -6px; border-radius: 6px; background: #fff; transition: opacity .4s; }
+.fs-knob { position: absolute; top: 2px; width: 12px; height: 12px; margin-left: -6px; border-radius: 6px; background: #fff; transition: opacity .4s, transform .15s; }
 .fs-times { display: flex; justify-content: space-between; font-size: 13px; color: rgba(255,255,255,.72); font-variant-numeric: tabular-nums; margin-top: -12px; }
 .fs-controls { display: flex; align-items: center; justify-content: center; gap: 28px; transition: opacity .4s; }
 .fs-btn { width: 56px; height: 56px; border: 0; background: none; color: #fff; display: grid; place-items: center; border-radius: 28px; }
@@ -605,7 +607,7 @@ body.fs-on .toast { z-index: 1000; }
 .fs-right { position: relative; min-width: 0; height: var(--fs-lh, 70vh); display: flex; flex-direction: column; transition: height .35s ease; }
 .fs.expand .fs-right { height: 100vh; }
 .fs-lyrics { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 14px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%); }
-.fs.expand .fs-lyrics { scrollbar-width: thin; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 9%, #000 91%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 9%, #000 91%, transparent 100%); }
+.fs.expand .fs-lyrics { scrollbar-width: auto; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 9%, #000 91%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 9%, #000 91%, transparent 100%); }
 .fs-lyrics::-webkit-scrollbar { width: 4px; }
 .fs-lyrics::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }
 .fs.expand .fs-lyrics::-webkit-scrollbar-thumb { background: rgba(255,255,255,.45); }
@@ -639,7 +641,12 @@ body.fs-on .toast { z-index: 1000; }
 .fs-q-sub { font-family: var(--font); font-size: 12px; font-weight: 400; color: rgba(255,255,255,.6); margin-left: auto; margin-right: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fs-q-head { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 12px; font-family: var(--display); font-size: 18px; font-weight: 600; }
 .fs-q-head .fs-round { width: 36px; height: 36px; }
-.fs-q-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; }
+.fs-q-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 4px; margin-right: -4px; } /* без scrollbar-width: иначе Chromium рисует системную полосу со стрелками */
+.fs-q-list::-webkit-scrollbar { width: 6px; }
+.fs-q-list::-webkit-scrollbar-track { background: transparent; }
+.fs-q-list::-webkit-scrollbar-button { display: none; height: 0; }
+.fs-q-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); border-radius: 3px; }
+.fs-q-list::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.4); }
 .fs-q-row { display: flex; align-items: center; gap: 12px; padding: 8px; border: 0; border-radius: 12px; background: none; color: #fff; text-align: left; width: 100%; }
 .fs-q-row:hover { background: rgba(255,255,255,.08); }
 .fs-q-row.cur { background: rgba(255,255,255,.16); }

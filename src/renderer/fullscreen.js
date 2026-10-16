@@ -120,12 +120,40 @@ export class FullScreen {
           // не сохранилось — не страшно
         }
         this.renderLyrics();
-      } else if (a === 'seek') {
-        const r = b.getBoundingClientRect();
-        const dur = player.audio.duration;
-        if (Number.isFinite(dur)) player.seek(((e.clientX - r.left) / r.width) * dur);
       }
     });
+    // Перемотка: ползунок и время едут за курсором, перематываем, когда отпустили
+    const bar = $('.fs-progress');
+    const frac = (x) => {
+      const r = bar.getBoundingClientRect();
+      return r.width ? Math.min(1, Math.max(0, (x - r.left) / r.width)) : 0;
+    };
+    bar.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      const dur = this.duration();
+      if (!dur) return;
+      e.preventDefault();
+      this.seeking = frac(e.clientX);
+      bar.classList.add('dragging');
+      if (bar.setPointerCapture) bar.setPointerCapture(e.pointerId);
+      this.paintProgress(this.seeking, dur);
+    });
+    bar.addEventListener('pointermove', (e) => {
+      if (this.seeking == null) return;
+      this.seeking = frac(e.clientX);
+      this.paintProgress(this.seeking, this.duration());
+    });
+    const finish = (e, apply) => {
+      if (this.seeking == null) return;
+      const p = e && e.clientX != null && apply ? frac(e.clientX) : this.seeking;
+      this.seeking = null;
+      bar.classList.remove('dragging');
+      const dur = this.duration();
+      if (apply && dur) player.seek(p * dur);
+      this.tick(true);
+    };
+    bar.addEventListener('pointerup', (e) => finish(e, true));
+    bar.addEventListener('pointercancel', (e) => finish(e, false));
     el.addEventListener('dblclick', (e) => {
       if (e.target.closest('.fs-art')) this.close();
     });
@@ -340,17 +368,27 @@ export class FullScreen {
     });
   }
 
-  /** Время: прогресс и текущая строка */
-  tick(force) {
-    if (!this.open || !this.el) return;
+  duration() {
     const a = this.d.player.audio;
-    const dur = Number.isFinite(a.duration) ? a.duration : (this.d.player.current && this.d.player.current.duration) || 0;
-    const cur = a.currentTime || 0;
-    const p = dur ? Math.min(1, cur / dur) : 0;
+    return Number.isFinite(a.duration) ? a.duration : (this.d.player.current && this.d.player.current.duration) || 0;
+  }
+
+  paintProgress(p, dur) {
+    const cur = p * dur;
     this.$('.fs-fill').style.width = `${p * 100}%`;
     this.$('.fs-knob').style.left = `${p * 100}%`;
     this.$('.fs-cur').textContent = fmt(cur);
     this.$('.fs-left-time').textContent = '−' + fmt(Math.max(0, dur - cur));
+  }
+
+  /** Время: прогресс и текущая строка */
+  tick(force) {
+    if (!this.open || !this.el) return;
+    const a = this.d.player.audio;
+    const dur = this.duration();
+    const cur = a.currentTime || 0;
+    // пока тянут ползунок, он стоит под курсором, а не там, где играет
+    if (this.seeking == null) this.paintProgress(dur ? Math.min(1, cur / dur) : 0, dur);
     const d = this.lyrics;
     if (!d || !d.synced || !this.showLyrics) return;
     const time = cur + 0.25;
