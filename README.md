@@ -1,10 +1,16 @@
-# Nyao Music
+<img width="1796" height="400" alt="Group 4330" src="https://github.com/user-attachments/assets/0870edb4-5f15-4dfb-bc8b-7d2d53ce5d61" />
 
-## Проект создавался чисто как часть развлечения с Claude Code. Я не присваиваю себе всю разработку.
+<p align="center">
+  <a href="https://github.com/PersikPrime/nyao-music/releases/latest"><img src="docs/download-macos.png" width="270" alt="Скачать для macOS"></a>
+  <a href="https://github.com/PersikPrime/nyao-music/releases/latest"><img src="docs/download-windows.png" width="270" alt="Скачать для Windows"></a>
+  <a href="https://github.com/PersikPrime/nyao-music/releases/latest"><img src="docs/download-android.png" width="270" alt="Скачать для Android"></a>
+</p>
 
-Плеер для Windows, macOS и Android: Яндекс Музыка, YouTube Music и SoundCloud в одном окне, общая «Моя волна» с подмешиванием треков YTM, общие лайки и смешанные плейлисты.
 
-<img width="1804" height="1123" alt="image" src="https://github.com/user-attachments/assets/a8649434-cae0-4cec-9607-dece4b59a9b7" />
+
+
+<img width="1796" height="1122" alt="image" src="https://github.com/user-attachments/assets/091de441-8291-40b6-adf3-999c4de75a0f" />
+
 
 
 ## Запуск
