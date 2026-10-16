@@ -44,6 +44,7 @@ import org.nyao.music.data.SOURCE_YT
 import org.nyao.music.ui.AppModel
 import org.nyao.music.ui.Route
 import org.nyao.music.ui.components.NyaoWaves
+import org.nyao.music.ui.components.bouncy
 import org.nyao.music.ui.components.sourceColor
 import org.nyao.music.ui.theme.NyaoColors
 
@@ -61,13 +62,14 @@ fun ProfileScreen(model: AppModel) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().padding(horizontal = 16.dp).padding(top = 12.dp).padding(BottomInset),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        // Карточка аккаунта
+        // Карточка профиля: пока только отклик на нажатие — потом здесь откроется страница профиля (мини-соцсеть)
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(18.dp),
+            Modifier.fillMaxWidth().bouncy(0.97f).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
+                .clickable { }.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.clickable { model.go(Route.SettingsPage("account")) }) { NyaoAvatar(size = 76, shape = org.nyao.music.ui.components.PolarShape(9, 0.06f)) }
+                NyaoAvatar(size = 76, shape = org.nyao.music.ui.components.PolarShape(9, 0.06f))
                 Column(Modifier.weight(1f).padding(start = 16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(user?.name ?: "Аккаунт Nyao", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     Text(
@@ -84,25 +86,16 @@ fun ProfileScreen(model: AppModel) {
                     }
                 }
             }
-            if (user != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = { model.go(Route.Stats) }, modifier = Modifier.weight(1f).height(52.dp)) {
-                        androidx.compose.material3.Icon(org.nyao.music.ui.components.NyaoIcons.BarChart, null, modifier = Modifier.size(20.dp))
-                        Box(Modifier.size(8.dp))
-                        Text("Статистика")
-                    }
-                    FilledTonalButton(onClick = { model.connectOpen = true }, modifier = Modifier.height(52.dp)) {
-                        androidx.compose.material3.Icon(org.nyao.music.ui.components.NyaoIcons.Devices, "Устройства", modifier = Modifier.size(20.dp))
-                    }
+            if (user == null) {
+                if (model.cloudLogging) {
+                    OutlinedButton(onClick = { model.cancelCloudLogin() }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Отменить вход") }
+                } else {
+                    Button(
+                        onClick = { model.cloudLogin(context) },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF2AABEE), contentColor = Color.White),
+                    ) { Text("Войти через Telegram") }
                 }
-            } else if (model.cloudLogging) {
-                OutlinedButton(onClick = { model.cancelCloudLogin() }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Отменить вход") }
-            } else {
-                Button(
-                    onClick = { model.cloudLogin(context) },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF2AABEE), contentColor = Color.White),
-                ) { Text("Войти через Telegram") }
             }
         }
 
