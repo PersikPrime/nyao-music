@@ -216,7 +216,7 @@ export class FullScreen {
     if (this.queueOpen) this.renderQueue(true);
   }
 
-  renderQueue(scroll) {
+  renderQueue(scroll, force = false) {
     if (!this.el || !this.queueOpen) return;
     const { player } = this.d;
     const q = player.queue || [];
@@ -224,7 +224,7 @@ export class FullScreen {
     const items = q.slice(from, from + 150);
     const list = this.$('.fs-q-list');
     const key = `${player.index}|${q.length}|${q[player.index] && q[player.index].id}`;
-    if (this.queueKey === key && !scroll) return;
+    if (this.queueKey === key && !scroll && !force) return;
     this.queueKey = key;
     this.$('.fs-q-sub').textContent = player.mode === 'wave' ? 'Моя волна' : [player.label, q.length ? `${q.length} тр.` : ''].filter(Boolean).join(' · ');
     list.innerHTML = items.length ? items.map((t, k) => {
