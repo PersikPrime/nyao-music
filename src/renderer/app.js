@@ -662,8 +662,10 @@ function renderDrawer(scrollToCur) {
     el.innerHTML = `${head('Очередь')}<div class="dr-sub">${label}</div><div class="dr-scroll"><div id="qlist">${queueListHtml()}</div></div>`;
     $$('#qlist .trow', el).forEach((r) => (r.draggable = true));
     if (scrollToCur) {
+      // только прокрутка списка: scrollIntoView двигал бы всё окно, пока панель ещё за краем
       const cur = $('#qlist .trow.cur', el);
-      if (cur) cur.scrollIntoView({ block: 'center' });
+      const sc = $('.dr-scroll', el);
+      if (cur && sc) sc.scrollTop = Math.max(0, cur.offsetTop - sc.offsetTop - sc.clientHeight / 2 + cur.offsetHeight / 2);
     }
     return;
   }
