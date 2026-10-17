@@ -151,7 +151,7 @@ private val NyaoType = Typography(
     labelSmall = body(11, 600, 1.2f),
 )
 
-private fun scheme(p: AccentPalette, b: BasePalette, mono: Boolean) = darkColorScheme(
+private fun scheme(p: AccentPalette, b: BasePalette, mono: Boolean, glass: Boolean = false) = darkColorScheme(
     primary = p.a,
     onPrimary = p.onA,
     primaryContainer = if (mono) Color(0xFFF2F2F3) else p.container,
@@ -168,11 +168,12 @@ private fun scheme(p: AccentPalette, b: BasePalette, mono: Boolean) = darkColorS
     onSurface = b.text,
     surfaceVariant = b.s3,
     onSurfaceVariant = b.muted,
+    // Glass: шторки, меню и диалоги почти непрозрачные — иначе текст под ними мешает читать
     surfaceContainerLowest = b.lowest,
-    surfaceContainerLow = b.s1,
-    surfaceContainer = b.s2,
-    surfaceContainerHigh = b.s3,
-    surfaceContainerHighest = b.highest,
+    surfaceContainerLow = if (glass) Color(0xF2161320) else b.s1,
+    surfaceContainer = if (glass) Color(0xE61C1828) else b.s2,
+    surfaceContainerHigh = if (glass) Color(0xF5221E30) else b.s3,
+    surfaceContainerHighest = if (glass) Color(0xF52A2638) else b.highest,
     outline = b.outline,
     outlineVariant = b.outlineVariant,
 )
@@ -190,7 +191,7 @@ private val NyaoShapes = Shapes(
 fun NyaoTheme(content: @Composable () -> Unit) {
     val p = Accent.palette
     val look = Look.current
-    val colors = remember(p, look.theme) { scheme(p, BasePalette.of(look.theme), look.mono) }
+    val colors = remember(p, look.theme) { scheme(p, BasePalette.of(look.theme), look.mono, look.glass) }
     MaterialTheme(colorScheme = colors, typography = NyaoType, shapes = NyaoShapes, content = content)
 }
 

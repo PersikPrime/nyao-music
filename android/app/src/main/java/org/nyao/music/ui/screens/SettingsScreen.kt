@@ -211,7 +211,7 @@ fun SettingsPageScreen(model: AppModel, section: String) {
                 section == "account" -> NyaoAccountCard(model)
                 section == "sound" -> EqCard(showTitle = false)
                 section == "wave" -> WaveSettings(onChanged = { model.refreshWave() })
-                section == "cache" -> CacheCard(showTitle = false)
+                section == "cache" -> StorageCard()
                 section == "view" -> ViewSettingsCard()
                 section == "theme" -> LookSettings()
                 section == "lastfm" -> LastFmCard(model)

@@ -41,6 +41,8 @@ class AppModel(private val scope: CoroutineScope) {
     var loginFor by mutableStateOf<String?>(null)
     /** Шторка Nyao Connect и перенос плейлиста */
     var connectOpen by mutableStateOf(false)
+    /** Спотлайт-поиск: открывается свайпом вниз от верха списка */
+    var spotlightOpen by mutableStateOf(false)
     var transferFor by mutableStateOf<Pair<Playlist, List<Track>>?>(null)
 
     fun invalidatePlaylists() {

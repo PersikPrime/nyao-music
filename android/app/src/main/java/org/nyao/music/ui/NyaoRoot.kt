@@ -16,6 +16,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.layer.drawLayer
 
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 
 import androidx.compose.ui.draw.drawWithContent
 
@@ -26,6 +27,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
@@ -339,13 +341,51 @@ private fun PhoneLayout(model: AppModel) {
     // Снимок экрана под плеером: из него рисуем размытую полосу за мини-плеером и панелью
     val shot = androidx.compose.ui.graphics.rememberGraphicsLayer()
     var barsTop by remember { androidx.compose.runtime.mutableFloatStateOf(Float.NaN) }
+    // Спотлайт: список уже в самом верху, а палец тянет дальше вниз — копим «перетяг» и открываем поиск
+    val pullMax = with(androidx.compose.ui.platform.LocalDensity.current) { 120.dp.toPx() }
+    var pull by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val pullConn = remember(model, pullMax) {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput && available.y > 0f && consumed.y == 0f && model.route != Route.Search && !model.spotlightOpen) {
+                    pull += available.y
+                    if (pull >= pullMax) {
+                        pull = 0f
+                        model.spotlightOpen = true
+                    }
+                } else if (consumed.y != 0f || available.y < 0f) pull = 0f
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+            override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                pull = 0f
+                return androidx.compose.ui.unit.Velocity.Zero
+            }
+        }
+    }
+    val pullShown by androidx.compose.animation.core.animateFloatAsState((pull / pullMax).coerceIn(0f, 1f), spring(stiffness = 800f), label = "pull")
     Box(Modifier.fillMaxSize()) {
         Box(
-            Modifier.fillMaxSize().drawWithContent {
+            Modifier.fillMaxSize().nestedScroll(pullConn).drawWithContent {
                 shot.record { this@drawWithContent.drawContent() }
                 drawLayer(shot)
-            },
+            }.then(
+                // пока открыт спотлайт, экран под ним размыт
+                if (model.spotlightOpen && android.os.Build.VERSION.SDK_INT >= 31) Modifier.blur(24.dp) else Modifier,
+            ),
         ) { Content(model, wide = false) }
+        // подсказка при перетяге: капсула «Поиск» выезжает сверху
+        if (pullShown > 0.02f && !model.spotlightOpen) {
+            Row(
+                Modifier.align(Alignment.TopCenter).statusBarsPadding()
+                    .graphicsLayer { alpha = pullShown; translationY = (pullShown - 1f) * 40.dp.toPx(); scaleX = 0.8f + 0.2f * pullShown; scaleY = 0.8f + 0.2f * pullShown }
+                    .padding(top = 8.dp).clip(RoundedCornerShape(20.dp)).background(NyaoColors.S3).padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(NyaoIcons.Search, null, tint = if (pullShown >= 0.98f) NyaoColors.Lavender else NyaoColors.Muted, modifier = Modifier.size(18.dp))
+                Text(if (pullShown >= 0.98f) "Поиск" else "Тяни ниже — поиск", style = MaterialTheme.typography.labelLarge)
+            }
+        }
         BottomBlur(shot, barsTop)
         // вся нижняя зона (вокруг плеера и панели) забирает касания себе — иначе тап мимо кнопок попадал в список под ней
         if (!barsTop.isNaN()) {
@@ -374,6 +414,13 @@ private fun PhoneLayout(model: AppModel) {
             exit = slideOutVertically { it } + fadeOut(),
         ) {
             NowPlayingScreen(model, asPane = false, onClose = { model.nowPlayingOpen = false })
+        }
+        AnimatedVisibility(
+            model.spotlightOpen && !model.nowPlayingOpen,
+            enter = fadeIn(tween(180)) + slideInVertically(spring(dampingRatio = 0.8f, stiffness = 420f)) { -it / 8 },
+            exit = fadeOut(tween(140)),
+        ) {
+            org.nyao.music.ui.screens.SpotlightOverlay(model, onClose = { model.spotlightOpen = false })
         }
     }
 }
@@ -419,8 +466,9 @@ private fun FloatingToolbar(model: AppModel) {
         profileArea,
         transitionSpec = {
             val spec = spring<IntOffset>(dampingRatio = 0.8f, stiffness = 420f)
-            (fadeIn(tween(200)) + slideInHorizontally(spec) { if (targetState) it / 4 else -it / 4 } + scaleIn(tween(240), initialScale = 0.92f)) togetherWith
-                (fadeOut(tween(140)) + scaleOut(tween(180), targetScale = 0.94f))
+            ((fadeIn(tween(220, delayMillis = 60)) + slideInHorizontally(spec) { if (targetState) it / 5 else -it / 5 } + scaleIn(spring(dampingRatio = 0.7f, stiffness = 380f), initialScale = 0.9f)) togetherWith
+                (fadeOut(tween(120)) + scaleOut(tween(160), targetScale = 0.96f)))
+                .using(androidx.compose.animation.SizeTransform(clip = false) { _, _ -> spring(dampingRatio = 0.78f, stiffness = 380f) })
         },
         label = "toolbar",
     ) { profile ->
@@ -432,7 +480,14 @@ private fun FloatingToolbar(model: AppModel) {
         } else {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 // «Главная» — отдельным кружком: вернуться из профиля одним нажатием
-                Surface(shape = CircleShape, color = NyaoColors.S3, shadowElevation = 12.dp) {
+                // кружок «выкатывается» из капсулы слева
+                Surface(
+                    shape = CircleShape, color = NyaoColors.S3, shadowElevation = 12.dp,
+                    modifier = Modifier.animateEnterExit(
+                        enter = slideInHorizontally(spring(dampingRatio = 0.62f, stiffness = 320f)) { it } + scaleIn(spring(dampingRatio = 0.55f, stiffness = 320f), initialScale = 0.4f) + fadeIn(tween(180)),
+                        exit = slideOutHorizontally(tween(160)) { it } + scaleOut(tween(160), targetScale = 0.4f) + fadeOut(tween(120)),
+                    ),
+                ) {
                     Box(Modifier.size(60.dp).bouncy().clip(CircleShape).clickable { model.go(Route.Home) }, contentAlignment = Alignment.Center) {
                         Icon(NyaoIcons.Home, "Главная", tint = NyaoColors.Muted, modifier = Modifier.size(24.dp))
                     }
@@ -450,25 +505,42 @@ private fun FloatingToolbar(model: AppModel) {
 @Composable
 private fun ToolbarCapsule(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
     Surface(shape = RoundedCornerShape(30.dp), color = NyaoColors.S3, shadowElevation = 12.dp) {
-        Row(Modifier.height(60.dp).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+        // ширина капсулы пружинит, когда подпись выбранной вкладки появляется и исчезает
+        Row(Modifier.animateContentSize(spring(dampingRatio = 0.72f, stiffness = 420f)).height(60.dp).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
     }
 }
 
 @Composable
 private fun ToolbarItem(tab: Tab, selected: Boolean, onClick: () -> Unit) {
+    // подложка перетекает цветом, иконка «подпрыгивает» при выборе
+    val bg by androidx.compose.animation.animateColorAsState(if (selected) NyaoColors.Primary else NyaoColors.S3, spring(stiffness = 500f), label = "tabBg")
+    val tint by androidx.compose.animation.animateColorAsState(if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, spring(stiffness = 500f), label = "tabTint")
+    val pop = remember { androidx.compose.animation.core.Animatable(1f) }
+    var seen by remember { mutableStateOf(false) }
+    LaunchedEffect(selected) {
+        if (!seen) { seen = true; return@LaunchedEffect }
+        if (selected) {
+            pop.snapTo(0.72f)
+            pop.animateTo(1f, spring(dampingRatio = 0.38f, stiffness = 520f))
+        }
+    }
     Row(
         Modifier
             .height(44.dp)
             .bouncy().clip(RoundedCornerShape(22.dp))
-            .background(if (selected) NyaoColors.Primary else NyaoColors.S3)
+            .background(bg)
             .clickable(onClick = onClick)
             .padding(start = if (selected) 12.dp else 10.dp, end = if (selected && org.nyao.music.ui.theme.Look.current.navLabels) 16.dp else if (selected) 12.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // профиль — твой аватар из аккаунта Nyao (или буква), остальные — иконки
-        if (tab.route == Route.Settings) org.nyao.music.ui.screens.NyaoAvatar(size = 28)
-        else Icon(if (selected) tab.iconOn else tab.icon, tab.label, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
+        Box(Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }) {
+            if (tab.route == Route.Settings) org.nyao.music.ui.screens.NyaoAvatar(size = 28)
+            else androidx.compose.animation.Crossfade(selected, animationSpec = tween(180), label = "tabIcon") { on ->
+                Icon(if (on) tab.iconOn else tab.icon, tab.label, tint = tint, modifier = Modifier.size(22.dp))
+            }
+        }
         // подписи можно выключить в «Теме и сетке» — тогда выбранная вкладка просто подсвечивается
         AnimatedVisibility(selected && org.nyao.music.ui.theme.Look.current.navLabels, enter = expandHorizontally(spring(dampingRatio = 0.7f)) + fadeIn(), exit = shrinkHorizontally(spring(dampingRatio = 0.9f)) + fadeOut()) {
             Text(tab.label, style = MaterialTheme.typography.labelLarge, color = NyaoColors.OnPrimary, maxLines = 1)
