@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -165,9 +167,16 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
     val current by PlayerConnection.current.collectAsState()
     val likedIds by Repo.liked.collectAsState()
 
+    val mono = org.nyao.music.ui.theme.Look.current.mono
     val header: @Composable () -> Unit = {
         Column {
-            ScreenHeader("Медиатека", action = { CircleButton({ model.go(Route.Search) }) { Icon(NyaoIcons.Search, "Поиск", tint = NyaoColors.Text) } })
+            if (mono) {
+                // Mono: крупный заголовок, как в макете
+                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 12.dp, top = 12.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Медиатека", style = MaterialTheme.typography.displaySmall, modifier = Modifier.weight(1f))
+                    CircleButton({ model.go(Route.Search) }) { Icon(NyaoIcons.Search, "Поиск", tint = NyaoColors.Text) }
+                }
+            } else ScreenHeader("Медиатека", action = { CircleButton({ model.go(Route.Search) }) { Icon(NyaoIcons.Search, "Поиск", tint = NyaoColors.Text) } })
             ConnectedGroup(listOf("Мне нравится", "Плейлисты"), tab, { tab = it }, Modifier.padding(horizontal = 16.dp), height = 48.dp)
             Spacer(Modifier.height(14.dp))
         }
@@ -186,7 +195,8 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
                     val vk = liked.count { it.source == org.nyao.music.data.SOURCE_VK }
                     val yt = liked.size - ya - sc - vk
                     val shown = if (filter == "all") liked else liked.filter { it.source == filter }
-                    item {
+                    if (mono) item { MonoLikedCards(model, liked.size, shown) }
+                    if (!mono) item {
                         // Карточка «Мне нравится»: печенька с сердцем, счётчики и кнопки
                         Column(
                             Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(NyaoColors.Hero).padding(18.dp),
@@ -361,6 +371,40 @@ private fun OfflineButton(model: AppModel, playlist: Playlist, tracks: List<Trac
             Spacer(Modifier.size(8.dp))
             Text(if (have > 0) "Докачать (${can - have})" else "Скачать для офлайна")
         }
+    }
+}
+
+/** Mono: градиентная карточка «Мне нравится» и рядом «Скачанное», под ними — кнопки «Слушать» и «Вперемешку» */
+@Composable
+private fun MonoLikedCards(model: AppModel, total: Int, shown: List<Track>) {
+    val off by org.nyao.music.playback.Offline.state.collectAsState()
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                Modifier.weight(1.9f).fillMaxHeight().clip(RoundedCornerShape(26.dp))
+                    .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(NyaoColors.Lavender.copy(alpha = 0.55f), NyaoColors.Lavender)))
+                    .padding(16.dp),
+            ) {
+                Box(Modifier.align(Alignment.TopEnd).offset(x = 40.dp, y = (-40).dp).size(130.dp).clip(PolarShape(9, 0.07f)).background(Color.White.copy(alpha = 0.16f)))
+                Icon(NyaoIcons.Favorite, null, tint = NyaoColors.OnLavender, modifier = Modifier.size(28.dp))
+                Column(Modifier.align(Alignment.BottomStart)) {
+                    Text("Мне нравится", style = MaterialTheme.typography.titleLarge, color = NyaoColors.OnLavender)
+                    Text("$total · все сервисы", style = MaterialTheme.typography.bodySmall, color = NyaoColors.OnLavender.copy(alpha = 0.8f))
+                }
+            }
+            Box(
+                Modifier.weight(1f).fillMaxHeight().bouncy().clip(RoundedCornerShape(26.dp)).background(NyaoColors.S3)
+                    .clickable { org.nyao.music.playback.Offline.asPlaylist()?.let { model.go(Route.PlaylistPage(it)) } ?: model.message("Пока ничего не скачано") }
+                    .padding(16.dp),
+            ) {
+                Icon(NyaoIcons.Download, null, tint = NyaoColors.Muted, modifier = Modifier.size(26.dp))
+                Column(Modifier.align(Alignment.BottomStart)) {
+                    Text("Скачанное", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                    Text("${off.tracks.size}", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+                }
+            }
+        }
+        PlayButtons(shown, "Мне нравится")
     }
 }
 
