@@ -5,6 +5,7 @@ import org.nyao.music.ui.components.NyaoIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -55,7 +56,6 @@ import org.nyao.music.ui.components.Loading
 import org.nyao.music.ui.components.NyaoWaves
 import org.nyao.music.ui.components.PolarShape
 import org.nyao.music.ui.components.SourceTag
-import org.nyao.music.ui.components.rememberPlayShape
 import org.nyao.music.ui.theme.NyaoColors
 import java.util.Calendar
 
@@ -98,9 +98,11 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
         return
     }
 
+    val mono = org.nyao.music.ui.theme.Look.current.mono
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
+        if (mono) item { MonoWaveHero(model, trailing = { HomeSearchButton(model) }) }
         // Верхняя строка: бейдж приложения, поиск, аватар-печенька
-        item {
+        if (!mono) item {
             Row(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 20.dp, top = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -128,7 +130,7 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
             }
         }
         item(key = "outage") { OutageBanner(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp)) }
-        item {
+        if (!mono) item {
             Text(
                 greeting(),
                 style = MaterialTheme.typography.displayLarge,
@@ -138,7 +140,7 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
         model.others.firstOrNull()?.let { r ->
             item(key = "continue-" + r.deviceId) { ContinueCard(model, r, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) }
         }
-        item { WaveHero(model, Modifier.appear(0, 40f).padding(horizontal = 16.dp)) }
+        if (!mono) item { WaveHero(model, Modifier.appear(0, 40f).padding(horizontal = 16.dp)) }
         item { SocialRow(model, Modifier.appear(1).padding(start = 16.dp, end = 16.dp, top = 12.dp)) }
 
         if (!anyAccount) {
@@ -190,11 +192,7 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
             }
             h.ytSections.filter { it.tracks.isNotEmpty() }.forEach { section ->
                 item { Text(section.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 12.dp), maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                item {
-                    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 18.dp)) {
-                        itemsIndexed(section.tracks) { i, t -> Box(Modifier.appear(i)) { TrackTile(t) { PlayerConnection.playList(section.tracks, i, section.title) } } }
-                    }
-                }
+                item { TrackShelf(section.tracks, Modifier.padding(bottom = 18.dp)) { i -> PlayerConnection.playList(section.tracks, i, section.title) } }
             }
             if (h.yaPlaylists.isEmpty() && h.ytSections.isEmpty()) item { Hint("Здесь пока пусто — запусти волну или загляни в поиск.") }
         }
@@ -251,7 +249,7 @@ fun WaveHero(model: AppModel, modifier: Modifier = Modifier) {
             ) { Text("${100 - settings.ytmShare} : ${settings.ytmShare}", style = MaterialTheme.typography.labelMedium, color = NyaoColors.OnPrimary) }
         }
         Box(
-            Modifier.align(Alignment.BottomEnd).padding(16.dp).size(104.dp).bouncy().clip(rememberPlayShape(active)).background(NyaoColors.Lavender).clickable { model.waveButton() },
+            Modifier.align(Alignment.BottomEnd).padding(16.dp).size(104.dp).bouncy().clip(org.nyao.music.ui.theme.playButtonShape(active)).background(NyaoColors.Lavender).clickable { model.waveButton() },
             contentAlignment = Alignment.Center,
         ) {
             if (model.waveStarting) CircularProgressIndicator(color = NyaoColors.OnLavender, modifier = Modifier.size(30.dp), strokeWidth = 3.dp)
@@ -263,7 +261,7 @@ fun WaveHero(model: AppModel, modifier: Modifier = Modifier) {
 /** Карточка карусели «Продолжить»: обложка во всю карточку, подпись поверх */
 @Composable
 private fun CarouselCard(p: Playlist, width: Int, onClick: () -> Unit) {
-    Box(Modifier.width(width.dp).height(186.dp).bouncy().clip(RoundedCornerShape(30.dp)).clickable(onClick = onClick)) {
+    Box(Modifier.width(width.dp).height(186.dp).bouncy().clip(org.nyao.music.ui.theme.coverShape(30.dp)).clickable(onClick = onClick)) {
         Cover(p.cover, Modifier.fillMaxSize(), RoundedCornerShape(0.dp))
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color.Black.copy(alpha = 0.75f)))))
         SourceTag(p.source, Modifier.align(Alignment.TopStart).padding(14.dp))
@@ -279,7 +277,7 @@ private fun CarouselCard(p: Playlist, width: Int, onClick: () -> Unit) {
 @Composable
 private fun ReleaseTile(p: Playlist, onClick: () -> Unit) {
     Column(Modifier.width(140.dp).bouncy().clip(RoundedCornerShape(24.dp)).clickable(onClick = onClick).padding(bottom = 6.dp)) {
-        Cover(p.cover, Modifier.size(140.dp), RoundedCornerShape(28.dp))
+        Cover(p.cover, Modifier.size(140.dp), org.nyao.music.ui.theme.coverShape(28.dp))
         Spacer(Modifier.height(8.dp))
         Text(p.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 6.dp))
         Text(p.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = Modifier.padding(horizontal = 6.dp))
@@ -290,7 +288,7 @@ private fun ReleaseTile(p: Playlist, onClick: () -> Unit) {
 @Composable
 fun TrackTile(t: Track, onClick: () -> Unit) {
     Column(Modifier.width(140.dp).bouncy().clip(RoundedCornerShape(24.dp)).clickable(onClick = onClick).padding(bottom = 6.dp)) {
-        Cover(t.cover, Modifier.size(140.dp), RoundedCornerShape(28.dp))
+        Cover(t.cover, Modifier.size(140.dp), org.nyao.music.ui.theme.coverShape(28.dp))
         Spacer(Modifier.height(8.dp))
         Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 6.dp))
         Text(t.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = Modifier.padding(horizontal = 6.dp))
@@ -310,3 +308,71 @@ fun PlaylistTile(p: Playlist, shape: Shape = RoundedCornerShape(28.dp), size: In
     }
 }
 
+
+/** Кнопка поиска в шапке главной */
+@Composable
+fun HomeSearchButton(model: AppModel) {
+    Box(
+        Modifier.size(44.dp).bouncy().clip(CircleShape).background(Color.White.copy(alpha = 0.1f)).clickable { model.go(Route.Search) },
+        contentAlignment = Alignment.Center,
+    ) { Icon(NyaoIcons.Search, "Поиск", tint = Color.White) }
+}
+
+/**
+ * Лента треков на главной в выбранной сетке: карусель, плитка 2 колонки или мозаика
+ * (одна крупная обложка и четыре маленьких рядом).
+ */
+@Composable
+fun TrackShelf(tracks: List<Track>, modifier: Modifier = Modifier, onPlay: (Int) -> Unit) {
+    when (org.nyao.music.ui.theme.Look.current.grid) {
+        "tiles" -> Column(modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            tracks.take(6).chunked(2).forEachIndexed { r, row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEachIndexed { c, t -> CompactTrack(t, Modifier.weight(1f).appear(r * 2 + c)) { onPlay(r * 2 + c) } }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+        "mosaic" -> Row(modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            tracks.firstOrNull()?.let { t ->
+                Box(Modifier.weight(1f).aspectRatio(1f).bouncy().clip(org.nyao.music.ui.theme.coverShape(28.dp)).clickable { onPlay(0) }) {
+                    Cover(t.cover, Modifier.fillMaxSize(), RoundedCornerShape(0.dp))
+                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color.Black.copy(alpha = 0.7f)))))
+                    Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
+                        Text(t.title, style = MaterialTheme.typography.titleSmall, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(t.artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                tracks.drop(1).take(4).chunked(2).forEachIndexed { r, row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEachIndexed { c, t ->
+                            val i = 1 + r * 2 + c
+                            Cover(t.cover, Modifier.weight(1f).aspectRatio(1f).bouncy().clip(org.nyao.music.ui.theme.coverShape(20.dp)).clickable { onPlay(i) }, org.nyao.music.ui.theme.coverShape(20.dp))
+                        }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+        else -> LazyRow(modifier, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            itemsIndexed(tracks) { i, t -> Box(Modifier.appear(i)) { TrackTile(t) { onPlay(i) } } }
+        }
+    }
+}
+
+/** Трек плиткой: обложка слева, название и исполнитель */
+@Composable
+private fun CompactTrack(t: Track, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(
+        modifier.height(60.dp).bouncy().clip(RoundedCornerShape(18.dp)).background(NyaoColors.S2).clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Cover(t.cover, Modifier.size(60.dp), if (org.nyao.music.ui.theme.Look.current.covers == "cookie") org.nyao.music.ui.theme.coverShape(0.dp) else RoundedCornerShape(0.dp))
+        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+            Text(t.title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(t.artist, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}

@@ -77,6 +77,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import org.nyao.music.ui.components.bouncy
 import org.nyao.music.ui.components.appear
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -189,7 +190,12 @@ fun NyaoRoot() {
     }
 
     // Surface задаёт цвет текста по умолчанию (иначе Compose красит его в чёрный)
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
+    // Glass: под полупрозрачными поверхностями — цветной фон из акцента
+    val glass = org.nyao.music.ui.theme.Look.current.glass
+    val rootBg = if (glass) Modifier.background(
+        Brush.linearGradient(listOf(NyaoColors.Hero, Color(0xFF0E0C16), Color(0xFF0E0C16), NyaoColors.Primary.copy(alpha = 0.85f))),
+    ) else Modifier
+    Surface(Modifier.fillMaxSize().then(rootBg), color = if (glass) Color.Transparent else MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
     Box(Modifier.fillMaxSize()) {
         if (!settings.onboarded) {
             OnboardingScreen(model)
@@ -456,14 +462,15 @@ private fun ToolbarItem(tab: Tab, selected: Boolean, onClick: () -> Unit) {
             .bouncy().clip(RoundedCornerShape(22.dp))
             .background(if (selected) NyaoColors.Primary else NyaoColors.S3)
             .clickable(onClick = onClick)
-            .padding(start = if (selected) 12.dp else 10.dp, end = if (selected) 16.dp else 10.dp),
+            .padding(start = if (selected) 12.dp else 10.dp, end = if (selected && org.nyao.music.ui.theme.Look.current.navLabels) 16.dp else if (selected) 12.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // профиль — твой аватар из аккаунта Nyao (или буква), остальные — иконки
         if (tab.route == Route.Settings) org.nyao.music.ui.screens.NyaoAvatar(size = 28)
         else Icon(if (selected) tab.iconOn else tab.icon, tab.label, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
-        AnimatedVisibility(selected, enter = expandHorizontally(spring(dampingRatio = 0.7f)) + fadeIn(), exit = shrinkHorizontally(spring(dampingRatio = 0.9f)) + fadeOut()) {
+        // подписи можно выключить в «Теме и сетке» — тогда выбранная вкладка просто подсвечивается
+        AnimatedVisibility(selected && org.nyao.music.ui.theme.Look.current.navLabels, enter = expandHorizontally(spring(dampingRatio = 0.7f)) + fadeIn(), exit = shrinkHorizontally(spring(dampingRatio = 0.9f)) + fadeOut()) {
             Text(tab.label, style = MaterialTheme.typography.labelLarge, color = NyaoColors.OnPrimary, maxLines = 1)
         }
     }
@@ -494,7 +501,7 @@ private fun MiniPlayer(onOpen: () -> Unit, modifier: Modifier = Modifier) {
                 Text(t.artist + " · " + org.nyao.music.ui.components.sourceShort(t.source), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = pal.sub)
             }
             Box(
-                Modifier.size(48.dp).bouncy().clip(RoundedCornerShape(16.dp)).background(pal.accent).clickable { PlayerConnection.toggle() },
+                Modifier.size(48.dp).bouncy().clip(org.nyao.music.ui.theme.smallButtonShape()).background(pal.accent).clickable { PlayerConnection.toggle() },
                 contentAlignment = Alignment.Center,
             ) { Icon(if (playing) NyaoIcons.Pause else NyaoIcons.PlayArrow, if (playing) "Пауза" else "Играть", tint = pal.onAccent) }
             IconButton(onClick = { PlayerConnection.next() }) { Icon(NyaoIcons.SkipNext, "Следующий", tint = pal.onContainer) }

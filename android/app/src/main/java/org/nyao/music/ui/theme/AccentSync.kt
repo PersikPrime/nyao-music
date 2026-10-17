@@ -31,5 +31,9 @@ fun AccentSync() {
     val hero by animateColorAsState(target.hero, spec, label = "acc-hero")
     val tonal by animateColorAsState(target.tonal, spec, label = "acc-tonal")
     val next = AccentPalette(a, onA, c, onC, hero, tonal)
-    SideEffect { if (Accent.palette != next) Accent.palette = next }
+    val look = UiLook(settings.theme, settings.buttons, settings.grid, settings.covers, settings.navLabels)
+    SideEffect {
+        if (Accent.palette != next) Accent.palette = next
+        if (Look.current != look) Look.current = look
+    }
 }
