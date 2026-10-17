@@ -41,6 +41,9 @@ object PlayerConnection {
     private val _upNext = MutableStateFlow<List<Pair<Int, Track>>>(emptyList())
     /** Что заиграет дальше — с учётом перемешивания: пары (индекс в очереди, трек) */
     val upNext: StateFlow<List<Pair<Int, Track>>> = _upNext
+    private val _played = MutableStateFlow<List<Pair<Int, Track>>>(emptyList())
+    /** Что уже играло в этой очереди — от последнего к первому: пары (индекс в очереди, трек) */
+    val played: StateFlow<List<Pair<Int, Track>>> = _played
     private val _index = MutableStateFlow(-1)
     val index: StateFlow<Int> = _index
 
@@ -105,6 +108,16 @@ object PlayerConnection {
             }
         }
         _upNext.value = next
+        val before = ArrayList<Pair<Int, Track>>()
+        var j = c.currentMediaItemIndex
+        if (!tl.isEmpty && j >= 0) {
+            while (before.size < 50) {
+                j = tl.getPreviousWindowIndex(j, Player.REPEAT_MODE_OFF, c.shuffleModeEnabled)
+                if (j == C.INDEX_UNSET) break
+                Repo.track(c.getMediaItemAt(j).mediaId)?.let { before += j to it }
+            }
+        }
+        _played.value = before
         _shuffle.value = c.shuffleModeEnabled
     }
 

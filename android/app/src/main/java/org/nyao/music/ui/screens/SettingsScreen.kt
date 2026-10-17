@@ -106,7 +106,7 @@ fun ProfileScreen(model: AppModel) {
         }
         SettingsGroup("Приложение") {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Equalizer, "Звук и воспроизведение", if (s.eqOn) "эквалайзер вкл." else null) { model.go(Route.SettingsPage("sound")) }
-            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Waves, "Моя волна", org.nyao.music.ui.screens.DIVERSITY.firstOrNull { it.first == s.diversity }?.second) { model.go(Route.SettingsPage("wave")) }
+            // настройки волны живут на экране «Моя волна» — здесь их больше нет
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Database, "Офлайн и кэш", last = true) { model.go(Route.SettingsPage("cache")) }
         }
         SettingsGroup("Оформление") {

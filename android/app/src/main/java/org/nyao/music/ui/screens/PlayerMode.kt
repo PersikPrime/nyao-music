@@ -96,7 +96,7 @@ fun likedPlaylists(liked: List<Track>?, split: Boolean): List<Playlist> {
     return if (per.size > 1) listOf(all) + per else listOf(all)
 }
 
-private fun tint(source: String): Pair<Color, Color> = when (source) {
+private fun tint(source: String): Pair<Color, Color> = if (org.nyao.music.ui.theme.Look.current.mono) NyaoColors.S3 to NyaoColors.Text else when (source) {
     SOURCE_YA -> Color(0xFF5C4D00) to NyaoColors.Ya
     org.nyao.music.data.SOURCE_SC -> Color(0xFF6A2A00) to Color(0xFFFFB37A)
     org.nyao.music.data.SOURCE_VK -> Color(0xFF00337A) to Color(0xFFA8CCFF)

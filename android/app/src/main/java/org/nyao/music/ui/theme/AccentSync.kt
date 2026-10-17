@@ -17,7 +17,7 @@ fun AccentSync() {
     val settings by Repo.prefs.settings.collectAsState()
     val current by PlayerConnection.current.collectAsState()
     val fromCover = settings.accent == "cover"
-    val cp = rememberCoverPalette(if (fromCover) current?.cover else null)
+    val cp = rememberCoverPalette(if (fromCover) current?.cover else null, respectLook = false)
     val target = if (fromCover && current?.cover != null) {
         AccentPalette(cp.accent, cp.onAccent, cp.container, cp.onContainer, hero = cp.container, tonal = cp.surface)
     } else {

@@ -507,12 +507,12 @@ fun StatsScreen(model: AppModel) {
                 item {
                     Column(
                         Modifier.appear(0).padding(16.dp).fillMaxWidth().clip(RoundedCornerShape(36.dp))
-                            .background(Brush.linearGradient(listOf(NyaoColors.Hero, Color(0xFF120E22)))).padding(24.dp),
+                            .background(Brush.linearGradient(listOf(NyaoColors.Hero, if (org.nyao.music.ui.theme.Look.current.mono) NyaoColors.Bg else Color(0xFF120E22)))).padding(24.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(periodTitle(period, s.str("from")), style = MaterialTheme.typography.labelLarge, color = NyaoColors.Lavender, modifier = Modifier.weight(1f))
                             FilledIconButton(onClick = { refresh() }, enabled = !refreshing, colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(containerColor = Color.Black.copy(alpha = 0.3f), contentColor = Color.White)) {
-                                Icon(NyaoIcons.Refresh, "Обновить итоги")
+                                Icon(NyaoIcons.Refresh, "Обновить статистику")
                             }
                         }
                         Text(num(minutes), fontSize = 72.sp, fontWeight = FontWeight.Bold, lineHeight = 76.sp)

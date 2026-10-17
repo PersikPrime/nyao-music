@@ -177,10 +177,11 @@ fun WavyProgress(
     color: Color = NyaoColors.Lavender,
     trackColor: Color = Color.White.copy(alpha = 0.18f),
     height: Dp = 28.dp,
+    wavy: Boolean = true,
 ) {
     var drag by remember { mutableStateOf<Float?>(null) }
     val seek by rememberUpdatedState(onSeek)
-    val amp by animateFloatAsState(if (playing && drag == null) 1f else 0f, tween(500), label = "amp")
+    val amp by animateFloatAsState(if (wavy && playing && drag == null) 1f else 0f, tween(500), label = "amp")
     val anim = rememberInfiniteTransition(label = "wave")
     val phase by anim.animateFloat(0f, TAU, infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart), label = "phase")
     val shown = (drag ?: progress).coerceIn(0f, 1f)

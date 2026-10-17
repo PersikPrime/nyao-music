@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -105,6 +106,17 @@ fun Hint(text: String, modifier: Modifier = Modifier) {
     Text(text, style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted, modifier = modifier.padding(horizontal = 20.dp, vertical = 12.dp))
 }
 
+/** Значок «скачано»: трек есть в офлайне и заиграет без интернета. Пустой, если не скачан */
+@Composable
+fun DownloadedMark(track: Track, size: Dp = 16.dp) {
+    val st by org.nyao.music.playback.Offline.state.collectAsState()
+    val ids = remember(st.tracks) { st.ids }
+    if (track.id !in ids) return
+    Box(Modifier.size(size).clip(CircleShape).background(NyaoColors.Lavender), contentAlignment = Alignment.Center) {
+        Icon(NyaoIcons.DownloadDone, "Скачано", tint = NyaoColors.OnLavender, modifier = Modifier.size(size * 0.72f))
+    }
+}
+
 /**
  * Строка трека в сгруппированном списке: плитки идут с зазором 3 dp,
  * у первой и последней сильно скруглены внешние углы.
@@ -153,6 +165,7 @@ fun TrackRow(
                 color = (if (current) NyaoColors.OnPrimary else NyaoColors.Text).copy(alpha = alpha),
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                DownloadedMark(track)
                 SourceTag(track.source)
                 Text(
                     track.artist + if (track.duration > 0) " · ${formatTime(track.duration)}" else "",
@@ -205,8 +218,19 @@ fun paletteFor(hue: Float, sat: Float = 1f): CoverPalette {
 
 val DefaultPalette = paletteFor(262f)
 
+/** Mono: плеер без цвета обложки — почти чёрный фон, серые плашки, белая кнопка */
+val MonoPalette = CoverPalette(
+    accent = Color(0xFFF2F2F3),
+    onAccent = Color(0xFF0B0B0C),
+    container = Color(0xFF2A2A2D),
+    onContainer = Color(0xFFF2F2F3),
+    background = Color(0xFF0B0B0C),
+    surface = Color(0xFF161618),
+    sub = Color(0xFF9A9AA2),
+)
+
 @Composable
-fun rememberCoverPalette(url: String?): CoverPalette {
+fun rememberCoverPalette(url: String?, respectLook: Boolean = true): CoverPalette {
     val context = LocalContext.current
     var hue by remember { mutableStateOf<Pair<Float, Float>?>(null) }
     LaunchedEffect(url) {
@@ -222,7 +246,8 @@ fun rememberCoverPalette(url: String?): CoverPalette {
         }
         hue = bmp?.let { dominantHue(it) }
     }
-    val target = hue?.let { paletteFor(it.first, it.second) } ?: DefaultPalette
+    val mono = respectLook && org.nyao.music.ui.theme.Look.current.mono
+    val target = if (mono) MonoPalette else hue?.let { paletteFor(it.first, it.second) } ?: DefaultPalette
     val spec = tween<Color>(600)
     val accent by animateColorAsState(target.accent, spec, label = "a")
     val onAccent by animateColorAsState(target.onAccent, spec, label = "oa")

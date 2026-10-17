@@ -182,8 +182,10 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                     quick.take(4).forEachIndexed { i, (title, open) ->
                         val st = MIX_STYLES[i % MIX_STYLES.size]
                         Column(Modifier.width(76.dp).bouncy().clickable(onClick = open), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Box(Modifier.size(72.dp).clip(st.shape).background(st.bg), contentAlignment = Alignment.Center) {
-                                Box(Modifier.size(20.dp).clip(CircleShape).background(st.fg))
+                            // Mono: те же фигуры, но серые с белой точкой
+                            val mono = org.nyao.music.ui.theme.Look.current.mono
+                            Box(Modifier.size(72.dp).clip(st.shape).background(if (mono) NyaoColors.S3 else st.bg), contentAlignment = Alignment.Center) {
+                                Box(Modifier.size(20.dp).clip(CircleShape).background(if (mono) NyaoColors.Text else st.fg))
                             }
                             Text(title, style = MaterialTheme.typography.labelSmall, color = NyaoColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
@@ -213,7 +215,7 @@ private fun SocialRow(model: AppModel, modifier: Modifier = Modifier) {
                 Modifier.weight(1f).bouncy().clip(RoundedCornerShape(24.dp)).background(if (label == "В комнате") NyaoColors.Tonal else NyaoColors.S2).clickable(onClick = open).padding(vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Icon(icon, null, tint = NyaoColors.Lavender, modifier = Modifier.size(24.dp))
+                Icon(icon, null, tint = if (org.nyao.music.ui.theme.Look.current.mono) NyaoColors.Text else NyaoColors.Lavender, modifier = Modifier.size(24.dp))
                 Text(label, style = MaterialTheme.typography.labelLarge)
             }
         }
