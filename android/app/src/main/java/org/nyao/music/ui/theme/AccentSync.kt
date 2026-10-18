@@ -17,7 +17,7 @@ fun AccentSync() {
     val settings by Repo.prefs.settings.collectAsState()
     val current by PlayerConnection.current.collectAsState()
     val fromCover = settings.accent == "cover"
-    val cp = rememberCoverPalette(if (fromCover) current?.cover else null)
+    val cp = rememberCoverPalette(if (fromCover) current?.cover else null, respectLook = false)
     val target = if (fromCover && current?.cover != null) {
         AccentPalette(cp.accent, cp.onAccent, cp.container, cp.onContainer, hero = cp.container, tonal = cp.surface)
     } else {
@@ -31,5 +31,15 @@ fun AccentSync() {
     val hero by animateColorAsState(target.hero, spec, label = "acc-hero")
     val tonal by animateColorAsState(target.tonal, spec, label = "acc-tonal")
     val next = AccentPalette(a, onA, c, onC, hero, tonal)
-    SideEffect { if (Accent.palette != next) Accent.palette = next }
+    val look = UiLook(settings.theme, settings.buttons, settings.grid, settings.covers, settings.navLabels)
+    SideEffect {
+        if (Accent.palette != next) Accent.palette = next
+        if (Look.current != look) Look.current = look
+    }
+}
+
+/** Сразу выставляет тему и готовый акцент из настроек (без анимации) — вызывается до setContent */
+fun applyLookNow(settings: org.nyao.music.data.Settings) {
+    Look.current = UiLook(settings.theme, settings.buttons, settings.grid, settings.covers, settings.navLabels)
+    if (settings.accent != "cover") Accent.palette = AccentPalette.preset(settings.accent)
 }

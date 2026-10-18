@@ -19,6 +19,7 @@ import { NyaoCloud, API_BASE } from './cloud.js';
 import { LastFm } from './lastfm.js';
 import { Radio } from './radio.js';
 import { LiveEvents } from './live.js';
+import { Popups, popupFor } from './popup.js';
 import { transferPlaylist, TARGETS } from './transfer.js';
 import { findMatch } from './match.js';
 import { mergeArtists } from '../renderer/search.js';
@@ -169,7 +170,31 @@ function initProviders() {
     log: (m) => console.log(m)
   });
   // команды с других устройств, «сейчас играет» на них и «Слушать вместе» — в окно
-  live = new LiveEvents({ cloud, onEvent: (e) => send('live:event', e), log: (m) => console.log(m) });
+  // окошки друзей в углу экрана, когда Nyao свёрнут или не в фокусе
+  const ACCENT_HEX = { lavender: '#C6B8FF', coral: '#FFB4A2', mint: '#7CE0C3', sun: '#FFD60A' };
+  const popups = new Popups({
+    getAccent: () => ACCENT_HEX[(settings.get() || {}).accent] || ACCENT_HEX.lavender,
+    onOpen: (payload) => {
+      if (win && !win.isDestroyed()) {
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+      }
+      send('social:open', payload);
+    }
+  });
+  live = new LiveEvents({
+    cloud,
+    onEvent: (e) => {
+      send('live:event', e);
+      if (e.type === 'social' && e.kind !== 'now' && (settings.get() || {}).friendPopups !== false) {
+        const away = !win || win.isDestroyed() || !win.isVisible() || win.isMinimized() || !win.isFocused();
+        const item = away && popupFor(e);
+        if (item) popups.show(item);
+      }
+    },
+    log: (m) => console.log(m)
+  });
   live.start();
   const waveMemFile = path.join(app.getPath('userData'), 'wave-memory.json');
   const lk = lastfmKeys();
@@ -401,6 +426,12 @@ function registerIpc() {
   handle('cloud:cancel', () => cloud.cancelLogin());
   handle('cloud:logout', () => cloud.logout());
   handle('cloud:me', () => cloud.me());
+  // мини-соцсеть: профиль, друзья, приглашения, входящие — только эти адреса сервера
+  const SOCIAL_PATH = /^\/(profile|nick\/check|users\/|friends|invites|share|inbox|blocks)/;
+  handle('social:api', (method, p, body) => {
+    if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method) || typeof p !== 'string' || !SOCIAL_PATH.test(p)) throw new Error('Нельзя');
+    return cloud.request(method, p, body);
+  });
   handle('cloud:removeDevice', (id) => cloud.removeDevice(id));
   handle('cloud:play', (play) => {
     lastfm.scrobble({ track: play && play.track, listened: (play && play.listened) || 0 });

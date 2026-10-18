@@ -32,6 +32,8 @@ object Live {
     private val _events = MutableSharedFlow<JSONObject>(extraBufferCapacity = 64)
     val events: SharedFlow<JSONObject> = _events
     private val holders = HashSet<String>()
+    /** Приложение на экране: всплывашки друзей показываем внутри, иначе — уведомлением */
+    val uiVisible: Boolean get() = synchronized(this) { "ui" in holders }
     private var job: Job? = null
     private var cursor = 0L
     private lateinit var app: Context
@@ -70,6 +72,7 @@ object Live {
                     when (e.optString("type")) {
                         "room", "room-closed" -> runCatching { Together.onEvent(e) }
                         "react" -> Together.onReact(e)
+                        "social" -> withContext(Dispatchers.Main) { runCatching { Friends.onEvent(e) } }
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {

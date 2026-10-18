@@ -87,6 +87,9 @@ object Repo {
 
     fun track(id: String): Track? = tracks[id]
 
+    /** Все треки, которые приложение уже видело (медиатека, ленты, очередь) — для мгновенного поиска */
+    fun knownTracks(): Collection<Track> = tracks.values
+
     // ---------- Синхронизация через аккаунт Nyao (тот же формат, что у десктопа) ----------
 
     private fun stateData(key: String): Any {

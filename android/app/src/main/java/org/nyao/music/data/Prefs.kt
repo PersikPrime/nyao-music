@@ -30,6 +30,12 @@ data class Settings(
     val searchPlay: String = "similar",
     /** Акцентный цвет: lavender | coral | mint | sun | cover */
     val accent: String = "lavender",
+    /** Оформление: тема и то, что собрано поверх неё */
+    val theme: String = "expressive",
+    val buttons: String = "cookie",
+    val grid: String = "carousels",
+    val covers: String = "rounded",
+    val navLabels: Boolean = true,
 ) {
     val isWaveLayout: Boolean get() = layout == "wave"
 }
@@ -60,6 +66,11 @@ class Prefs(context: Context) {
         continueSimilar = sp.getBoolean("continueSimilar", true),
         searchPlay = sp.getString("searchPlay", "similar") ?: "similar",
         accent = sp.getString("accent", "lavender") ?: "lavender",
+        theme = sp.getString("theme", "expressive") ?: "expressive",
+        buttons = sp.getString("lookButtons", "cookie") ?: "cookie",
+        grid = sp.getString("lookGrid", "carousels") ?: "carousels",
+        covers = sp.getString("lookCovers", "rounded") ?: "rounded",
+        navLabels = sp.getBoolean("lookNavLabels", true),
     )
 
     /** Вызывается, когда меняется то, что синхронизируется через аккаунт Nyao: "wave" или "prefs" */
@@ -87,6 +98,21 @@ class Prefs(context: Context) {
     fun setContinueSimilar(v: Boolean) = update { putBoolean("continueSimilar", v) }
     fun setSearchPlay(v: String) = update { putString("searchPlay", v) }
     fun setAccent(v: String) = update { putString("accent", v) }
+    /** Готовая тема сбрасывает собранное поверх неё к своим значениям */
+    fun setTheme(v: String) {
+        val p = org.nyao.music.ui.theme.UiLook.preset(v)
+        update {
+            putString("theme", p.theme)
+            putString("lookButtons", p.buttons)
+            putString("lookGrid", p.grid)
+            putString("lookCovers", p.covers)
+            putBoolean("lookNavLabels", p.navLabels)
+        }
+    }
+    fun setLookButtons(v: String) = update { putString("lookButtons", v) }
+    fun setLookGrid(v: String) = update { putString("lookGrid", v) }
+    fun setLookCovers(v: String) = update { putString("lookCovers", v) }
+    fun setLookNavLabels(v: Boolean) = update { putBoolean("lookNavLabels", v) }
     fun setWaveTab(v: Boolean) = update { putBoolean("waveTab", v) }.also { onSyncChange?.invoke("prefs") }
 
     /** Когда ключ синхронизации («wave», «prefs», «mixes») последний раз менялся на этом устройстве */

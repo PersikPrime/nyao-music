@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.nyao.music.data.Repo
@@ -61,7 +62,6 @@ import org.nyao.music.ui.components.ConnectedGroup
 import org.nyao.music.ui.components.DropShape
 import org.nyao.music.ui.components.PolarShape
 import org.nyao.music.ui.components.SourceTag
-import org.nyao.music.ui.components.rememberPlayShape
 import org.nyao.music.ui.theme.NyaoColors
 
 val DIVERSITY = listOf(
@@ -81,7 +81,23 @@ private val MOODS = listOf(
 )
 
 /** Фон волны — почти чёрный с оттенком акцента */
-val WaveBg: Color get() = androidx.compose.ui.graphics.lerp(NyaoColors.Bg, NyaoColors.Hero, 0.2f)
+val WaveBg: Color get() = if (org.nyao.music.ui.theme.Look.current.glass) Color.Transparent
+    else androidx.compose.ui.graphics.lerp(NyaoColors.Bg, NyaoColors.Hero, 0.2f)
+
+/** Цвет фигуры: в Mono — оттенки серого и одна акцентная, в остальных темах — палитра акцента */
+private fun shapeTone(tone: Int): Color = if (org.nyao.music.ui.theme.Look.current.mono) {
+    when (tone) {
+        0 -> Color(0xFF2C2C30)
+        1 -> Color(0xFF4A4A50)
+        2 -> NyaoColors.Lavender
+        else -> Color(0xFF8A8A92)
+    }
+} else when (tone) {
+    0 -> NyaoColors.Hero
+    1 -> NyaoColors.Primary
+    2 -> NyaoColors.Lavender
+    else -> NyaoColors.OnPrimary
+}
 
 /**
  * Фигуры Material 3 Expressive по краям — как на ПК: плотные, в цветах акцента,
@@ -110,8 +126,8 @@ private val EDGE_SHAPES = listOf(
 )
 
 @Composable
-private fun EdgeShapes(modifier: Modifier = Modifier) {
-    val anims = remember { List(EDGE_SHAPES.size) { androidx.compose.animation.core.Animatable(0f) } }
+private fun EdgeShapes(modifier: Modifier = Modifier, shapes: List<EdgeShape> = EDGE_SHAPES, fadeTo: Color = WaveBg) {
+    val anims = remember { List(shapes.size) { androidx.compose.animation.core.Animatable(0f) } }
     androidx.compose.runtime.LaunchedEffect(Unit) {
         anims.forEachIndexed { i, a ->
             launch {
@@ -121,13 +137,8 @@ private fun EdgeShapes(modifier: Modifier = Modifier) {
         }
     }
     Box(modifier.clipToBounds()) {
-        EDGE_SHAPES.forEachIndexed { i, sh ->
-            val color = when (sh.tone) {
-                0 -> NyaoColors.Hero
-                1 -> NyaoColors.Primary
-                2 -> NyaoColors.Lavender
-                else -> NyaoColors.OnPrimary
-            }
+        shapes.forEachIndexed { i, sh ->
+            val color = shapeTone(sh.tone)
             val dir = if (sh.left) -1f else 1f
             Box(
                 Modifier.align(if (sh.left) Alignment.TopStart else Alignment.TopEnd)
@@ -146,8 +157,59 @@ private fun EdgeShapes(modifier: Modifier = Modifier) {
         // низ не режется, а плавно уходит в фон
         Box(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(130.dp)
-                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, WaveBg.copy(alpha = 0.75f), WaveBg))),
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, fadeTo.copy(alpha = 0.75f * fadeTo.alpha), fadeTo))),
         )
+    }
+}
+
+/** Фигуры справа в шапке главной темы Mono */
+private val MONO_SHAPES = listOf(
+    EdgeShape(false, -56, 24, 210, 210, PolarShape(9, 0.07f), 0),
+    EdgeShape(false, 150, 18, 72, 72, PolarShape(5, 0.14f, 0.2f), 1),
+    EdgeShape(false, 118, 150, 112, 112, PolarShape(4, 0.2f, 0.4f), 2),
+    EdgeShape(false, 8, 214, 92, 92, PolarShape(6, 0.11f), 3),
+    EdgeShape(false, 176, 272, 88, 34, RoundedCornerShape(50), 1, -18f),
+)
+
+/**
+ * Шапка главной в теме Mono: огромное «Моя волна», фигуры Material 3 справа (вместо чужого зигзага),
+ * капсула с настройкой волны и крупная кнопка запуска.
+ */
+@Composable
+fun MonoWaveHero(model: AppModel, modifier: Modifier = Modifier, trailing: @Composable () -> Unit = {}) {
+    val settings by Repo.prefs.settings.collectAsState()
+    val mode by Repo.mode.collectAsState()
+    val playing by PlayerConnection.playing.collectAsState()
+    val current by PlayerConnection.current.collectAsState()
+    val active = mode == Repo.Mode.WAVE && current != null && playing
+    val bg = NyaoColors.Bg
+    Box(modifier.fillMaxWidth().height(440.dp).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF2B2B2E), Color(0xFF161618), bg)))) {
+        EdgeShapes(Modifier.fillMaxSize(), MONO_SHAPES, fadeTo = bg)
+        Text(
+            "Моя\nволна",
+            style = MaterialTheme.typography.displayLarge.copy(fontSize = 66.sp, lineHeight = 62.sp),
+            color = Color.White,
+            modifier = Modifier.statusBarsPadding().padding(start = 22.dp, top = 30.dp),
+        )
+        Box(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 16.dp, end = 16.dp)) { trailing() }
+        val first = settings.mood?.let { m -> MOODS.firstOrNull { it.key == m }?.title } ?: DIVERSITY.firstOrNull { it.first == settings.diversity }?.second ?: "Всё"
+        Row(
+            Modifier.align(Alignment.BottomStart).padding(start = 22.dp, bottom = 40.dp).height(42.dp).bouncy().clip(RoundedCornerShape(21.dp))
+                .background(Color.White.copy(alpha = 0.08f)).clickable { model.go(Route.Wave) }.padding(start = 12.dp, end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(NyaoIcons.Tune, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(18.dp))
+            Text(first, style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.9f))
+        }
+        Box(
+            Modifier.align(Alignment.BottomEnd).padding(end = 22.dp, bottom = 22.dp).size(96.dp).bouncy()
+                .clip(org.nyao.music.ui.theme.playButtonShape(active)).background(Color.White).clickable { model.waveButton() },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (model.waveStarting) CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(32.dp), strokeWidth = 3.dp)
+            else Icon(if (active) NyaoIcons.Pause else NyaoIcons.PlayArrow, if (active) "Пауза" else "Запустить волну", tint = Color.Black, modifier = Modifier.size(44.dp))
+        }
     }
 }
 
@@ -177,14 +239,18 @@ fun WaveScreen(model: AppModel) {
             val breath by inf.animateFloat(1f, 1.05f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "breath")
             val k = if (active) 1f else 0f
             val b = if (active) breath else 1f
+            // Mono: кнопка белая, как в шапке главной
+            val mono = org.nyao.music.ui.theme.Look.current.mono
+            val btnBg = if (mono) Color.White else NyaoColors.Lavender
+            val btnFg = if (mono) Color.Black else NyaoColors.OnLavender
             Box(Modifier.size(264.dp).graphicsLayer { scaleX = b; scaleY = b }.clip(PolarShape(12, 0.045f, spin / 12f * k)).background(NyaoColors.Tonal))
             Box(Modifier.size(226.dp).clip(PolarShape(12, 0.03f, (Math.PI / 12).toFloat() - spin / 12f * k)).background(androidx.compose.ui.graphics.lerp(NyaoColors.Tonal, NyaoColors.Hero, 0.45f)))
             Box(
-                Modifier.size(180.dp).bouncy().clip(rememberPlayShape(active, 9, 0.075f)).background(NyaoColors.Lavender).clickable { model.waveButton() },
+                Modifier.size(180.dp).bouncy().clip(org.nyao.music.ui.theme.playButtonShape(active)).background(btnBg).clickable { model.waveButton() },
                 contentAlignment = Alignment.Center,
             ) {
-                if (model.waveStarting) CircularProgressIndicator(color = NyaoColors.OnLavender, modifier = Modifier.size(44.dp))
-                else Icon(if (active) NyaoIcons.Pause else NyaoIcons.PlayArrow, if (active) "Пауза" else "Слушать", tint = NyaoColors.OnLavender, modifier = Modifier.size(76.dp))
+                if (model.waveStarting) CircularProgressIndicator(color = btnFg, modifier = Modifier.size(44.dp))
+                else Icon(if (active) NyaoIcons.Pause else NyaoIcons.PlayArrow, if (active) "Пауза" else "Слушать", tint = btnFg, modifier = Modifier.size(76.dp))
             }
         }
         Text("Моя волна", style = MaterialTheme.typography.displaySmall)

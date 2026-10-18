@@ -24,6 +24,7 @@ services:
       TG_CLIENT_SECRET: ${TG_CLIENT_SECRET}
       TG_RELAY: ${TG_RELAY:-}
       MIN_BUILD: ${MIN_BUILD:-0}
+      FCM_SERVICE_ACCOUNT: ${FCM_SERVICE_ACCOUNT:-}
       MIRROR_DIR: /data/releases
       STATUS_FILE: /data/status/status.json
     volumes:

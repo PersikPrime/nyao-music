@@ -21,11 +21,16 @@ sealed interface Route {
     data object Wave : Route
     data object Search : Route
     data object Library : Route
+    /** Профиль: аккаунт и все настройки (раньше — вкладка «Настройки») */
     data object Settings : Route
+    /** Раздел настроек, открытый из профиля: "sound", "svc:ya", "lastfm"… */
+    data class SettingsPage(val section: String) : Route
     data class PlaylistPage(val playlist: Playlist) : Route
     data class ArtistPage(val source: String, val id: String?, val name: String) : Route
     data object Together : Route
     data object Stats : Route
+    /** Профиль пользователя: ник или id. "" — свой */
+    data class UserPage(val key: String) : Route
 }
 
 /** Состояние экранов: живёт, пока живёт окно, чтобы вкладки не грузились заново при каждом переходе. */
@@ -38,6 +43,8 @@ class AppModel(private val scope: CoroutineScope) {
     var loginFor by mutableStateOf<String?>(null)
     /** Шторка Nyao Connect и перенос плейлиста */
     var connectOpen by mutableStateOf(false)
+    /** Спотлайт-поиск: открывается свайпом вниз от верха списка */
+    var spotlightOpen by mutableStateOf(false)
     var transferFor by mutableStateOf<Pair<Playlist, List<Track>>?>(null)
 
     fun invalidatePlaylists() {
@@ -56,9 +63,14 @@ class AppModel(private val scope: CoroutineScope) {
         else -> null
     }
 
+    /** Запустить фоновую работу экрана (сеть и т. п.) в области модели */
+    fun launch(block: suspend CoroutineScope.() -> Unit): Job = scope.launch(block = block)
+
     fun go(r: Route) {
-        if (r is Route.PlaylistPage || r is Route.ArtistPage || r == Route.Together || r == Route.Stats) {
-            nowPlayingOpen = false
+        // любой переход закрывает плеер и спотлайт — иначе новый экран остаётся под ними
+        nowPlayingOpen = false
+        spotlightOpen = false
+        if (r is Route.PlaylistPage || r is Route.ArtistPage || r is Route.SettingsPage || r is Route.UserPage || r == Route.Stats) {
             stack.add(r)
         }
         else {
