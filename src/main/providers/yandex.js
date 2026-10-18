@@ -418,6 +418,27 @@ export class YandexProvider {
     return ((r.albums && r.albums.results) || []).map((x) => this.mapAlbumCard(x));
   }
 
+  /** Похожие треки Яндекса (без радио-сессии — волна и «радио по треку» не сбиваются) */
+  async similarTracks(trackId) {
+    const id = String(trackId).split(':')[0];
+    const r = await this.request('GET', `/tracks/${id}/similar`);
+    return ((r && r.similarTracks) || []).map(mapTrack).filter(Boolean);
+  }
+
+  /** Лайкнутые исполнители Яндекса → [{ ref, name, cover }] */
+  async likedArtists() {
+    const { uid } = await this.getAccount();
+    const list = await this.request('GET', `/users/${uid}/likes/artists`);
+    return (Array.isArray(list) ? list : []).map((x) => this.mapArtistCard(x.artist || x)).filter((x) => x && x.ref);
+  }
+
+  /** Лайк исполнителю в Яндексе («Мои исполнители») */
+  async likeArtist(artistId, on = true) {
+    const { uid } = await this.getAccount();
+    const id = String(artistId).replace(/^ya:/, '');
+    await this.request('POST', `/users/${uid}/likes/artists/${on ? 'add-multiple' : 'remove'}`, { form: { 'artist-ids': id } });
+  }
+
   async like(track, on = true) {
     const { uid } = await this.getAccount();
     const action = on ? 'add-multiple' : 'remove';

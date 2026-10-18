@@ -146,6 +146,8 @@ fun NyaoRoot() {
 
     LaunchedEffect(Unit) {
         Repo.refreshAccounts()
+        // «Мои исполнители» из Яндекса — один раз в любимые (для подмеса волны)
+        launch { runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.importYaArtists() } } }
         // Тихая проверка обновлений при запуске (после того, как начали слушать сообщения)
         launch {
             delay(60_000)

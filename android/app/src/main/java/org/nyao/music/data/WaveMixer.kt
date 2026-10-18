@@ -23,6 +23,8 @@ class WaveMixer(
     private val recentProvider: suspend () -> Set<String> = { emptySet() },
     /** Сервис временно лежит (статус с сервера Nyao) — пропускаем его */
     private val isDown: (String) -> Boolean = { false },
+    /** Любимые исполнители (сердечко на странице исполнителя) */
+    private val favorites: () -> List<FavArtist> = { emptyList() },
 ) {
 
     companion object {
@@ -53,6 +55,10 @@ class WaveMixer(
     private val seen = HashSet<String>()
     @Volatile private var recent: Set<String> = emptySet()
     private var refill: Job? = null
+    /** Подмес: треки любимых исполнителей и похожее на свежие лайки — чтобы волна была про «сейчас» */
+    private val boost = ArrayList<Track>()
+    private var boosting: Job? = null
+    private val likedCache = HashMap<String, List<Track>>()
 
     /** Есть ли что подмешивать: YouTube Music и/или SoundCloud */
     private val ytOn get() = yt.loggedIn && !isDown(SOURCE_YT)
@@ -65,13 +71,72 @@ class WaveMixer(
         if (!hasExtras) return
         val s = prefs.settings.value
         val exclude = lock.withLock { HashSet(seen).apply { addAll(recent) } }
-        val a = if (ytOn) runCatching { yt.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
-        val b = if (scOn) runCatching { sc.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
-        val c = if (vkOn) runCatching { vk.wavePool(s.diversity, exclude) }.getOrDefault(emptyList()) else emptyList()
+        val a = if (ytOn) runCatching { yt.wavePool(s.diversity, exclude, fresh = s.waveFresh) }.getOrDefault(emptyList()) else emptyList()
+        val b = if (scOn) runCatching { sc.wavePool(s.diversity, exclude, fresh = s.waveFresh) }.getOrDefault(emptyList()) else emptyList()
+        val c = if (vkOn) runCatching { vk.wavePool(s.diversity, exclude, fresh = s.waveFresh) }.getOrDefault(emptyList()) else emptyList()
         // сервис дал только недавно звучавшее — лучше пара повторов, чем пропасть из волны
         val lists = listOf(a, b, c).map { l -> l.filter { it.id !in exclude }.ifEmpty { l.filter { it.id !in seen }.take(2) } }
         val tracks = alternateAll(*lists.toTypedArray())
         lock.withLock { tracks.forEach { t -> if (t.id !in seen && pool.none { it.id == t.id }) pool += t } }
+    }
+
+    private suspend fun likedOf(id: String, load: suspend () -> List<Track>): List<Track> =
+        lock.withLock { likedCache[id] } ?: runCatching { load() }.getOrDefault(emptyList()).also { l -> lock.withLock { likedCache[id] = l } }
+
+    private suspend fun artistTop(ref: String): List<Track> {
+        val id = ref.substringAfter(':')
+        return when {
+            ref.startsWith("ya:") && yaOn -> ya.artistTracks(id).take(30)
+            ref.startsWith("yt:") && ytOn -> yt.artist(id).popular
+            else -> emptyList()
+        }
+    }
+
+    /** Подмес: 1) любимые исполнители; 2) свежий лайк и похожее на него (Яндекс и YouTube Music) */
+    private suspend fun refillBoost() {
+        val s = prefs.settings.value
+        val exclude = lock.withLock { HashSet(seen).apply { addAll(recent) } }
+        fun ok(t: Track) = t.available && t.id !in exclude
+        val found = ArrayList<Track>()
+        for (a in Freshness.recencyPick(favorites(), 2, 40)) {
+            found += runCatching { artistTop(a.refYa ?: a.refYt ?: a.ref) }.getOrDefault(emptyList()).take(25).filter { ok(it) }.shuffled().take(3)
+        }
+        if (s.waveFresh > 0) {
+            if (yaOn) {
+                val liked = likedOf(SOURCE_YA) { ya.likedTracks(80) }
+                for (seed in Freshness.recencyPick(liked, 1, s.waveFresh)) {
+                    if (ok(seed) && s.waveFresh >= 50) found += seed
+                    found += runCatching { ya.similarTracks(seed.srcId) }.getOrDefault(emptyList()).filter { ok(it) }.shuffled().take(3)
+                }
+            }
+            if (ytOn) {
+                val liked = likedOf(SOURCE_YT) { yt.likedTracksForWave() }
+                for (seed in Freshness.recencyPick(liked, 1, s.waveFresh)) {
+                    if (ok(seed) && s.waveFresh >= 50) found += seed
+                    found += runCatching { yt.radio(seed.srcId) }.getOrDefault(emptyList()).filter { ok(it) }.shuffled().take(3)
+                }
+            }
+        }
+        lock.withLock { found.shuffled().forEach { t -> if (t.id !in seen && boost.none { it.id == t.id }) boost += t } }
+    }
+
+    private fun boostInBackground() {
+        if (boosting?.isActive == true) return
+        boosting = scope.launch { runCatching { refillBoost() } }
+    }
+
+    /** Подмешать подмес в готовую пачку (под замком) */
+    private fun withBoost(out: List<Track>): List<Track> {
+        val s = prefs.settings.value
+        val share = Freshness.boostShare(s.waveFresh, favorites().size)
+        if (boost.isEmpty() || share <= 0 || out.isEmpty()) return out
+        val ids = out.map { it.id }.toSet()
+        val src = boost.filter { it.id !in seen && it.id !in ids }
+        val (mixed, used) = interleave(out, src, share)
+        val usedTracks = src.take(used)
+        boost.removeAll(usedTracks.toSet())
+        usedTracks.forEach { seen += it.id; remember(it.id) }
+        return mixed
     }
 
     private fun refillInBackground() {
@@ -129,9 +194,10 @@ class WaveMixer(
             val usedTracks = extraSource.take(used)
             pool.removeAll(usedTracks.toSet())
             usedTracks.forEach { seen += it.id; remember(it.id) }
-            out
+            withBoost(out)
         }
         if (useYt) refillInBackground()
+        if (lock.withLock { boost.size } < 4) boostInBackground()
         if (result.isEmpty()) throw ApiException(
             if (yaOn || hasExtras) (if (gotAny) "Сервисы прислали только уже сыгранное — нажми ещё раз, попробую снова" else "Сервисы не прислали треков — проверь интернет и попробуй ещё раз")
             else "Волна пустая: войди хотя бы в один сервис в настройках",
@@ -152,8 +218,13 @@ class WaveMixer(
             pool.clear()
             seen.clear()
             lastPlayed.clear()
+            boost.clear()
+            likedCache.clear()
         }
         recent = runCatching { recentProvider() }.getOrDefault(emptySet())
+        // подмес готовим, но ждём не дольше пары секунд — первый трек важнее
+        boostInBackground()
+        kotlinx.coroutines.withTimeoutOrNull(2500) { boosting?.join() }
         val s = prefs.settings.value
         val tracks = freshStart(batch({ ya.waveStart(s.diversity, s.mood) }, { ya.waveMore(seen.toList(), s.diversity, s.mood) }))
         if (ya.loggedIn) ya.waveFeedback("radioStarted", null)

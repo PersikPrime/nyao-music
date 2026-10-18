@@ -46,6 +46,7 @@ const state = {
   room: null, // «Слушать вместе»: снимок комнаты + isHost
   roomSync: { hostTrackId: null },
   stats: { period: 'month', data: null, error: null, loading: false },
+  favArtists: [], // любимые исполнители (сердечко на странице исполнителя)
   version: ''
 };
 let friendsBadge = 0; // заявки + непрочитанные входящие — цифра на вкладке «Друзья»
@@ -199,6 +200,13 @@ function shareLabel(share) {
   if (share === 100) return `только ${extra}`;
   return share >= 50 ? `каждый ${Math.round(100 / (100 - share))}-й трек — Яндекс` : `каждый ${Math.round(100 / share)}-й трек — ${extra}`;
 }
+function freshLabel(v) {
+  v = Number(v);
+  if (v >= 80) return 'Почти только недавние лайки';
+  if (v >= 50) return 'Недавнее чаще';
+  if (v >= 20) return 'Немного свежее';
+  return 'Все лайки поровну';
+}
 function waveControlsHtml(compact = false) {
   const s = state.settings || {};
   const share = s.ytmShare ?? 30;
@@ -212,6 +220,11 @@ function waveControlsHtml(compact = false) {
   <div class="card">
     <span class="eyebrow">Настроение</span>
     <div class="moods">${MOODS.map(([v, l, c, g]) => `<button class="drop ${s.waveMood === v ? 'on' : ''}" style="--c:${c}" aria-pressed="${s.waveMood === v}" data-action="wave-mood" data-v="${v}"><span class="ball"><svg viewBox="0 0 44 44" fill="none"><path d="${g}" stroke="#000" stroke-width="2.6" stroke-linecap="round"/></svg></span>${l}</button>`).join('')}</div>
+  </div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="eyebrow">Свежесть</span><span style="font-size:12px;color:var(--accent)" id="fresh-label">${freshLabel(s.waveFresh ?? 60)}</span></div>
+    <input type="range" min="0" max="100" step="10" value="${s.waveFresh ?? 60}" data-input="fresh" aria-label="Свежесть волны">
+    <div class="balance-legend"><span class="hint">Всё время</span><span class="hint">Что слушаю сейчас</span></div>
   </div>
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="eyebrow">Баланс источников</span><span style="font-size:12px;color:var(--accent)" id="share-label">${shareLabel(share)}</span></div>
@@ -616,7 +629,7 @@ function renderWave() {
     </section>
   </div>
   <div class="wave-tune-layer ${state.waveTune ? 'open' : ''}">${waveTuneHtml()}</div>`;
-  $$('input[data-input="share"]', view).forEach(setRangeFill);
+  $$('input[data-input="share"], input[data-input="fresh"]', view).forEach(setRangeFill);
 }
 
 // ---------- Выезжающая панель справа: «Об исполнителе / Далее / Об этом треке» и очередь ----------
@@ -757,8 +770,10 @@ function renderLibrary() {
           <button class="btn" data-action="mix-builder">${ICONS.plus}Новый микс</button>
         </div>
       </div>
-      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${state.status.vk ? f('vk', 'VK', 'var(--vk)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}</div>
-      ${shown ? `<div class="tiles">${shown.map((p) => `<button class="tile ${p.id === lib.selected ? 'sel' : ''}" data-action="lib-select" data-id="${esc(p.id)}">
+      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${state.status.vk ? f('vk', 'VK', 'var(--vk)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}${f('artists', `Исполнители${state.favArtists.length ? ' · ' + state.favArtists.length : ''}`)}</div>
+      ${lib.filter === 'artists' ? (state.favArtists.length ? `<div class="tiles">${state.favArtists.map((x) => `<button class="tile fav-tile" data-action="open-artist" data-ref="${esc((x.refs && (x.refs.ya || x.refs.yt)) || x.ref)}">
+          ${coverHtml({ cover: x.cover, source: String(x.ref).slice(0, 2) }, 'round')}<div class="t">${esc(x.name)}</div><div class="s">${x.at ? 'любимый исполнитель' : 'из Яндекса'}</div></button>`).join('')}</div>`
+        : '<div class="empty">Здесь будут любимые исполнители. Открой исполнителя и нажми ♥ рядом с «Слушать» — его треки станут чаще попадать в «Мою волну».</div>') : shown ? `<div class="tiles">${shown.map((p) => `<button class="tile ${p.id === lib.selected ? 'sel' : ''}" data-action="lib-select" data-id="${esc(p.id)}">
           ${isLiked(p) ? heart('40%', p.source) : coverHtml(p, '', true)}
           <div class="t">${esc(p.title)}</div><div class="s">${isLiked(p) ? esc(p.sub) : esc(p.source === 'ya' ? 'Яндекс' : srcName(p.source)) + (p.count ? ' · ' + p.count : '')}</div>
         </button>`).join('')}</div>` : '<div class="tiles">' + '<div class="skeleton" style="aspect-ratio:1"></div>'.repeat(8) + '</div>'}
@@ -835,6 +850,7 @@ function renderArtist() {
     <section class="act-row">
       <button class="bigplay" data-action="artist-play" aria-label="Слушать исполнителя">${ICONS.play}</button>
       <button class="icbtn" data-action="artist-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
+      <button class="icbtn fav-artist ${favOf(a) ? 'on' : ''}" data-action="artist-like" aria-pressed="${!!favOf(a)}" aria-label="${favOf(a) ? 'Убрать из любимых исполнителей' : 'В любимые исполнители'}" title="${favOf(a) ? 'В любимых — чаще в «Моей волне»' : 'Любимый исполнитель — чаще в «Моей волне»'}">${favOf(a) ? ICONS.heartOn : ICONS.heart}</button>
       <span class="grow"></span>
       <div class="pill-seg" role="radiogroup" aria-label="Источник">${[['auto', 'Вместе', ''], ['ya', 'Яндекс', 'ya'], ['yt', 'YouTube Music', 'yt']].map(([v, l, d]) => `<button role="radio" aria-checked="${pref === v}" class="${pref === v ? 'on' : ''}" data-action="set-pref" data-v="${v}">${d ? `<span class="dotsrc ${d}"></span>` : ''}${l}</button>`).join('')}</div>
     </section>
@@ -1257,7 +1273,7 @@ function renderSettingsSection(sec) {
     <div class="psec-head"><button class="icon-btn" data-action="set-sec" data-sec="" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button><h1 class="page">${esc(sectionTitle(sec))}</h1></div>
     ${body}
   </div>`;
-  $$('input[data-input="share"]', view).forEach(setRangeFill);
+  $$('input[data-input="share"], input[data-input="fresh"]', view).forEach(setRangeFill);
   if (sec === 'discord') refreshRpcStatus();
   if (sec === 'lastfm') refreshLastfm();
   if (sec === 'account' && state.cloud.loggedIn && !state.cloud.devices) loadCloudDevices();
@@ -1610,6 +1626,23 @@ async function setWave(patch) {
     toast('Перенастраиваю волну…');
     player.refreshWave().catch((e) => toast(e.message, true));
   }
+}
+
+// ---------- Любимые исполнители ----------
+async function loadFavArtists() {
+  if (!api.artists) return;
+  try {
+    state.favArtists = (await api.artists.list()) || [];
+  } catch {
+    return;
+  }
+  if (state.route === 'artist') renderArtist();
+  if (state.route === 'library' && state.lib.filter === 'artists') renderLibrary();
+}
+function favOf(a) {
+  if (!a) return null;
+  const refs = a.refs || {};
+  return (state.favArtists || []).find((x) => x.ref === state.artist.ref || (refs.ya && (x.ref === refs.ya || (x.refs && x.refs.ya === refs.ya))) || (refs.yt && (x.ref === refs.yt || (x.refs && x.refs.yt === refs.yt)))) || null;
 }
 
 // ---------- Меню «⋯» ----------
@@ -2331,6 +2364,16 @@ async function handleAction(el, e) {
       e.stopPropagation();
       go('album', { ref: el.dataset.ref });
       break;
+    case 'artist-like': {
+      const a2 = state.artist.data;
+      if (!a2) break;
+      const on = !favOf(a2);
+      const cover = a2.cover || null;
+      state.favArtists = await api.artists.like({ ref: state.artist.ref, refs: a2.refs || {}, name: a2.name, cover }, on);
+      toast(on ? `${a2.name} — в любимых: будет чаще в «Моей волне»` : 'Убрано из любимых исполнителей');
+      renderArtist();
+      break;
+    }
     case 'artist-play':
     case 'artist-shuffle': {
       const rows = state.artist.data ? state.artist.data.popular : [];
@@ -2660,6 +2703,12 @@ view.addEventListener('input', (e) => {
     saveEq({ ...cur, preset: 'custom', gains }, !wasCustom);
     return;
   }
+  if (e.target.dataset.input === 'fresh') {
+    setRangeFill(e.target);
+    const l = $('#fresh-label');
+    if (l) l.textContent = freshLabel(e.target.value);
+    return;
+  }
   if (e.target.dataset.input === 'share') {
     const v = Number(e.target.value);
     setRangeFill(e.target);
@@ -2675,6 +2724,7 @@ view.addEventListener('input', (e) => {
   }
 });
 view.addEventListener('change', (e) => {
+  if (e.target.dataset.input === 'fresh') setWave({ waveFresh: Number(e.target.value) });
   if (e.target.dataset.input === 'share') setWave({ ytmShare: Number(e.target.value) });
 });
 
@@ -3250,8 +3300,10 @@ function openMixBuilder() {
     loadLibrary();
   }
   loadCloud();
+  loadFavArtists();
   if (api.cloud) {
     api.cloud.onChanged(async (keys) => {
+      if (keys.includes('artists')) loadFavArtists();
       // другое устройство поменяло миксы или настройки волны
       if (keys.includes('wave') || keys.includes('prefs')) state.settings = await api.settings.get();
       if (keys.includes('prefs')) {

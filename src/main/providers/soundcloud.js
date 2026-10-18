@@ -2,6 +2,8 @@
 // client_id достаём из скриптов сайта (он публичный и иногда меняется), вход — OAuth-токен из cookie oauth_token.
 // Звук: progressive mp3 (прямая ссылка) или HLS (список кусков), см. streamUrl.
 
+import { recencyPick } from '../freshness.js';
+
 const API = 'https://api-v2.soundcloud.com';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
@@ -191,7 +193,7 @@ export class SoundCloudProvider {
   }
 
   /** Пул для «Моей волны»: «похожие» на случайные лайки */
-  async wavePool({ diversity = 'favorite', exclude = new Set(), size = 20 } = {}) {
+  async wavePool({ diversity = 'favorite', exclude = new Set(), size = 20, fresh = 60 } = {}) {
     let liked = [];
     try {
       liked = await this.likedTracks(200);
@@ -199,7 +201,7 @@ export class SoundCloudProvider {
       liked = [];
     }
     const likedIds = new Set(liked.map((t) => t.id));
-    const seeds = [...liked].sort(() => Math.random() - 0.5).slice(0, 3);
+    const seeds = recencyPick(liked, 3, fresh);
     const pool = new Map();
     for (const s of seeds) {
       try {
@@ -214,7 +216,7 @@ export class SoundCloudProvider {
       if (pool.size >= size) break;
     }
     if (diversity === 'favorite') {
-      for (const t of liked.filter((x) => !exclude.has(x.id) && !x.preview).sort(() => Math.random() - 0.5).slice(0, Math.ceil(size / 3))) pool.set(t.id, t);
+      for (const t of recencyPick(liked.filter((x) => !exclude.has(x.id) && !x.preview), Math.ceil(size / 3), fresh)) pool.set(t.id, t);
     }
     return [...pool.values()].sort(() => Math.random() - 0.5).slice(0, size);
   }

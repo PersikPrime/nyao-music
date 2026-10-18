@@ -430,10 +430,10 @@ class VkApi(private val prefs: Prefs) {
     }
 
     /** Пул для «Моей волны»: рекомендации VK + свои треки; VK не пропадает из волны, даже если всё недавно звучало */
-    suspend fun wavePool(diversity: String, exclude: Set<String>, size: Int = 20): List<Track> {
+    suspend fun wavePool(diversity: String, exclude: Set<String>, size: Int = 20, fresh: Int = 60): List<Track> {
         val pool = LinkedHashMap<String, Track>()
         runCatching { recommendations() }.getOrDefault(emptyList()).forEach { if (it.id !in exclude) pool[it.id] = it }
-        val liked = runCatching { likedTracks(200) }.onFailure { debug("wavePool liked: ${it.message}") }.getOrDefault(emptyList()).shuffled()
+        val liked = runCatching { likedTracks(200) }.onFailure { debug("wavePool liked: ${it.message}") }.getOrDefault(emptyList()).let { Freshness.recencyPick(it, it.size, fresh) }
         if (diversity != "discover" || pool.isEmpty()) {
             liked.filter { it.id !in exclude }.take(if (pool.isEmpty()) size else (size + 2) / 3).forEach { pool.putIfAbsent(it.id, it) }
         }

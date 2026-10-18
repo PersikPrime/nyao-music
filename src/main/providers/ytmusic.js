@@ -1,3 +1,4 @@
+import { recencyPick } from '../freshness.js';
 // Провайдер YouTube Music через youtubei.js (внутреннее API InnerTube).
 // Метаданные (главная, лайки, плейлисты, поиск, радио) идут через сессию с cookies аккаунта,
 // а прямую ссылку на аудио берём отдельной анонимной сессией, перебирая клиентов:
@@ -330,7 +331,7 @@ export class YTMusicProvider {
 
   // Пул треков для подмешивания в «Мою волну».
   // favorite: часть пула — сами лайки; discover: только радио, без уже лайкнутого.
-  async wavePool({ diversity = 'favorite', exclude = new Set(), size = 25 } = {}) {
+  async wavePool({ diversity = 'favorite', exclude = new Set(), size = 25, fresh = 60 } = {}) {
     let liked = [];
     try {
       liked = await this.likedTracks();
@@ -339,7 +340,8 @@ export class YTMusicProvider {
     }
     const likedIds = new Set(liked.map((t) => t.id));
     const pool = [];
-    const seeds = shuffle(liked).slice(0, 3);
+    // сиды — из свежих лайков чаще, чем из старых (лайки идут от новых к старым)
+    const seeds = recencyPick(liked, 3, fresh);
     if (!seeds.length) {
       // Нет лайков — берём «быстрый выбор» с главной
       const home = await this.home().catch(() => []);
@@ -359,7 +361,7 @@ export class YTMusicProvider {
       if (pool.length >= size) break;
     }
     if (diversity === 'favorite') {
-      const fav = shuffle(liked.filter((t) => !exclude.has(t.id))).slice(0, Math.ceil(size / 3));
+      const fav = recencyPick(liked.filter((t) => !exclude.has(t.id)), Math.ceil(size / 3), fresh);
       pool.push(...fav);
     }
     return shuffle(pool).slice(0, size);

@@ -20,6 +20,7 @@ import { LastFm } from './lastfm.js';
 import { Radio } from './radio.js';
 import { LiveEvents } from './live.js';
 import { Popups, popupFor } from './popup.js';
+import { mergeArtists as mergeFavArtists } from './freshness.js';
 import { transferPlaylist, TARGETS } from './transfer.js';
 import { findMatch } from './match.js';
 import { mergeArtists } from '../renderer/search.js';
@@ -77,7 +78,7 @@ function configureRpc() {
 }
 
 // Что из настроек едет на другие устройства (остальное — своё у каждого компьютера)
-const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood'];
+const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood', 'waveFresh'];
 // вид приложения и «Мне нравится» по сервисам — тоже общие для всех устройств
 const PREF_KEYS = ['layout', 'splitLiked', 'waveTab', 'accent'];
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
@@ -104,6 +105,11 @@ async function syncCloud() {
           }
           return [...byId.values()];
         }
+      },
+      artists: {
+        get: () => readFav(),
+        set: (data) => Array.isArray(data) && writeFav(data, false),
+        merge: (local, remote) => mergeFavArtists(local, remote)
       },
       wave: {
         get: () => pick(settings.get(), WAVE_KEYS),
@@ -220,6 +226,7 @@ function initProviders() {
     isDown: (id) => svcStatus.outages.includes(id),
     getSettings: () => settings.get(),
     getRecent: () => cloud.recentIds(),
+    getFavorites: async () => readFav(),
     memory: {
       get: () => {
         try {
@@ -294,6 +301,34 @@ function writeMixes(list, push = true) {
   // изменения миксов уезжают на другие устройства
   if (push && cloud) cloud.pushState('mixes', list).catch((e) => console.warn('[cloud] mixes', e.message));
 }
+// ---------- Любимые исполнители (лайк на странице исполнителя) ----------
+const favFile = () => path.join(app.getPath('userData'), 'fav-artists.json');
+function readFav() {
+  try {
+    const l = JSON.parse(fs.readFileSync(favFile(), 'utf8'));
+    return Array.isArray(l) ? l : [];
+  } catch {
+    return [];
+  }
+}
+function writeFav(list, push = true) {
+  fs.writeFileSync(favFile(), JSON.stringify(list, null, 2));
+  if (push && cloud) cloud.pushState('artists', list).catch((e) => console.warn('[cloud] artists', e.message));
+}
+/** Один раз подтягиваем «Моих исполнителей» из Яндекса — чтобы не лайкать всех заново */
+async function importYaArtists() {
+  if (!ya || !ya.loggedIn || settings.get().favImportedYa) return;
+  try {
+    const list = await ya.likedArtists();
+    const cur = readFav();
+    const add = list.filter((a) => !cur.some((x) => x.ref === a.ref || (x.refs && x.refs.ya === a.ref))).map((a) => ({ ref: a.ref, refs: { ya: a.ref }, name: a.name, cover: a.cover || null, at: 0 }));
+    if (add.length) writeFav(mergeFavArtists(cur, add));
+    settings.set({ favImportedYa: true });
+  } catch (e) {
+    console.warn('[fav] импорт из Яндекса', e.message);
+  }
+}
+
 function mixSummary(m) {
   return { id: m.id, source: 'mix', title: m.title, count: m.tracks.length, cover: (m.tracks.find((t) => t.cover) || {}).cover || null, ya: m.tracks.filter((t) => t.source === 'ya').length, yt: m.tracks.filter((t) => t.source === 'yt').length, sc: m.tracks.filter((t) => t.source === 'sc').length };
 }
@@ -656,6 +691,21 @@ function registerIpc() {
     throw new Error('Неизвестный плейлист');
   });
 
+  handle('artists:list', async () => {
+    await importYaArtists();
+    return readFav();
+  });
+  handle('artists:like', async (artist, on) => {
+    if (!artist || !artist.ref) throw new Error('Нет исполнителя');
+    const refs = artist.refs && typeof artist.refs === 'object' ? artist.refs : {};
+    const same = (x) => x.ref === artist.ref || (refs.ya && (x.ref === refs.ya || (x.refs && x.refs.ya === refs.ya))) || (refs.yt && (x.ref === refs.yt || (x.refs && x.refs.yt === refs.yt)));
+    let list = readFav().filter((x) => !same(x));
+    if (on) list = [{ ref: refs.ya || artist.ref, refs: { ya: refs.ya || null, yt: refs.yt || null }, name: String(artist.name || '').slice(0, 200), cover: artist.cover || null, at: Date.now() }, ...list];
+    writeFav(list);
+    // в Яндексе — «Мои исполнители», чтобы и его рекомендации учитывали
+    if (refs.ya && ya && ya.loggedIn) ya.likeArtist(refs.ya, !!on).catch((e) => console.warn('[fav] Яндекс', e.message));
+    return list;
+  });
   handle('mix:create', (title) => {
     const list = readMixes();
     const mix = { id: `mix:${crypto.randomUUID()}`, title: String(title || 'Новый микс').slice(0, 80), tracks: [] };

@@ -1042,3 +1042,5 @@ body.fs-on .toast { z-index: 1000; }
 .phub > .pcard { max-width: 760px; width: 100%; }
 .pcard-svcs .dot { width: 24px; height: 24px; margin: 0 !important; border-radius: 8px; font-size: 10px; font-weight: 800; display: grid; place-items: center; box-shadow: none; }
 .up-acts .tag { padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-light); font-size: 12px; font-weight: 600; }
+.icbtn.fav-artist.on { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+.fav-tile .cover.round { border-radius: 50%; }

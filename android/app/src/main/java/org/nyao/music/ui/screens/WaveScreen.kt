@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import org.nyao.music.ui.components.bouncy
@@ -308,6 +309,36 @@ fun WaveSettings(onChanged: () -> Unit, modifier: Modifier = Modifier, showMood:
                         Text(m.title, style = MaterialTheme.typography.labelMedium, color = if (on) Color.White else NyaoColors.Muted, maxLines = 1)
                     }
                 }
+            }
+        }
+        // Свежесть: насколько волна тянется к недавним лайкам
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            var liveFresh by remember { mutableStateOf<Float?>(null) }
+            val fresh = liveFresh ?: settings.waveFresh.toFloat()
+            Row(Modifier.padding(horizontal = 4.dp)) {
+                Label("Свежесть")
+                Spacer(Modifier.weight(1f))
+                Text(
+                    when {
+                        fresh >= 80 -> "Почти только недавние лайки"
+                        fresh >= 50 -> "Недавнее чаще"
+                        fresh >= 20 -> "Немного свежее"
+                        else -> "Все лайки поровну"
+                    },
+                    style = MaterialTheme.typography.labelMedium, color = NyaoColors.Lavender,
+                )
+            }
+            androidx.compose.material3.Slider(
+                value = fresh, onValueChange = { liveFresh = it }, valueRange = 0f..100f, steps = 9,
+                onValueChangeFinished = {
+                    Repo.prefs.setFresh((liveFresh ?: fresh).toInt())
+                    liveFresh = null
+                    onChanged()
+                },
+            )
+            Row(Modifier.padding(horizontal = 4.dp)) {
+                Text("Всё время", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = Modifier.weight(1f))
+                Text("Что слушаю сейчас", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {

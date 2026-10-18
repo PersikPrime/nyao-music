@@ -82,10 +82,45 @@ object Repo {
         prefs.onSyncChange = { key -> bg.launch { runCatching { cloud.pushState(key, stateData(key)) } } }
         mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
         radio = Radio(ya, yt, sc, vk) { !up(it) }
-        wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) })
+        _favArtists.value = FavArtist.listFromJson(runCatching { org.json.JSONArray(prefs.favArtists) }.getOrNull())
+        wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) }, favorites = { _favArtists.value })
     }
 
     fun track(id: String): Track? = tracks[id]
+
+    // ---------- Любимые исполнители ----------
+
+    private val _favArtists = MutableStateFlow<List<FavArtist>>(emptyList())
+    val favArtists: StateFlow<List<FavArtist>> = _favArtists
+
+    private fun saveFav(list: List<FavArtist>, push: Boolean = true) {
+        _favArtists.value = list
+        prefs.favArtists = FavArtist.listToJson(list).toString()
+        if (push && cloud.loggedIn) bg.launch { runCatching { cloud.pushState("artists", FavArtist.listToJson(list)) } }
+    }
+
+    fun isFavArtist(source: String, id: String?): Boolean = _favArtists.value.any { it.matches(source, id) }
+
+    /** Сердечко на странице исполнителя. В Яндексе — ещё и «Мои исполнители» */
+    suspend fun likeArtist(source: String, id: String?, name: String, cover: String?, on: Boolean) {
+        if (id.isNullOrBlank()) throw ApiException("У этого исполнителя нет ссылки в сервисе")
+        val ref = "$source:$id"
+        var list = _favArtists.value.filterNot { it.matches(source, id) }
+        if (on) list = listOf(FavArtist(ref, ref.takeIf { source == SOURCE_YA }, ref.takeIf { source == SOURCE_YT }, name, cover, System.currentTimeMillis())) + list
+        saveFav(list)
+        if (source == SOURCE_YA && ya.loggedIn) bg.launch { runCatching { ya.likeArtist(id, on) } }
+    }
+
+    /** Один раз подтягиваем «Моих исполнителей» из Яндекса */
+    suspend fun importYaArtists() {
+        if (!ya.loggedIn || prefs.favImportedYa) return
+        runCatching { ya.likedArtists() }.onSuccess { l ->
+            val cur = _favArtists.value
+            val add = l.filter { a -> cur.none { it.ref == a.ref || it.refYa == a.ref } }
+            if (add.isNotEmpty()) saveFav(FavArtist.merge(cur, add))
+            prefs.favImportedYa = true
+        }
+    }
 
     /** Все треки, которые приложение уже видело (медиатека, ленты, очередь) — для мгновенного поиска */
     fun knownTracks(): Collection<Track> = tracks.values
@@ -95,7 +130,7 @@ object Repo {
     private fun stateData(key: String): Any {
         val s = prefs.settings.value
         return when (key) {
-            "wave" -> org.json.JSONObject().put("ytmShare", s.ytmShare).put("waveDiversity", s.diversity).put("waveMood", s.mood ?: org.json.JSONObject.NULL)
+            "wave" -> org.json.JSONObject().put("ytmShare", s.ytmShare).put("waveDiversity", s.diversity).put("waveMood", s.mood ?: org.json.JSONObject.NULL).put("waveFresh", s.waveFresh)
             "prefs" -> org.json.JSONObject().put("layout", s.layout ?: org.json.JSONObject.NULL).put("splitLiked", s.splitLiked).put("waveTab", s.waveTab)
             else -> mixStore.toJson()
         }
@@ -112,6 +147,7 @@ object Repo {
                     if (o.has("ytmShare")) putInt("ytmShare", o.optInt("ytmShare", 30).coerceIn(0, 100))
                     o.str("waveDiversity")?.let { putString("diversity", it) }
                     if (o.has("waveMood")) { val m = o.str("waveMood"); if (m == null) remove("mood") else putString("mood", m) }
+                    if (o.has("waveFresh")) putInt("waveFresh", o.optInt("waveFresh", 60).coerceIn(0, 100))
                 }
             }),
             "prefs" to NyaoCloud.StateHandler({ stateData("prefs") }, { d ->
@@ -122,6 +158,11 @@ object Repo {
                     if (o.has("waveTab")) putBoolean("waveTab", o.optBoolean("waveTab"))
                 }
             }),
+            "artists" to NyaoCloud.StateHandler(
+                { FavArtist.listToJson(_favArtists.value) },
+                { d -> (d as? org.json.JSONArray)?.let { saveFav(FavArtist.listFromJson(it), push = false) } },
+                { local, remote -> FavArtist.listToJson(FavArtist.merge(FavArtist.listFromJson(local as? org.json.JSONArray), FavArtist.listFromJson(remote as? org.json.JSONArray))) },
+            ),
             "mixes" to NyaoCloud.StateHandler(
                 { mixStore.toJson() },
                 { d -> (d as? org.json.JSONArray)?.let { mixStore.set(mixStore.fromJson(it), push = false) } },

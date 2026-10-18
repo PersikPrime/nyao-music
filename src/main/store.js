@@ -7,6 +7,7 @@ import path from 'node:path';
 const DEFAULT_SETTINGS = {
   volume: 0.8,
   ytmShare: 30,          // доля треков YouTube Music в «Моей волне», %
+  waveFresh: 60,         // свежесть волны: 0 — всё время одинаково, 100 — почти только недавние лайки
   waveDiversity: 'any', // any | favorite | discover | popular
   waveMood: null,        // null | active | fun | calm | sad
   autoplay: true,

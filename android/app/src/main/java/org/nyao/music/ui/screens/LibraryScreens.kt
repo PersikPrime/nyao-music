@@ -71,6 +71,7 @@ import org.nyao.music.data.Playlist
 import org.nyao.music.data.Repo
 import org.nyao.music.data.SOURCE_YA
 import org.nyao.music.data.SOURCE_YT
+import kotlinx.coroutines.launch
 import org.nyao.music.data.Track
 import org.nyao.music.data.alternate
 import org.nyao.music.playback.PlayerConnection
@@ -163,7 +164,7 @@ private fun PlayButtons(tracks: List<Track>, label: String, modifier: Modifier =
 fun LibraryScreen(model: AppModel, wide: Boolean) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var filter by rememberSaveable { mutableStateOf("all") }
-    LaunchedEffect(tab) { if (tab == 0) model.loadLiked() else model.loadPlaylists() }
+    LaunchedEffect(tab) { if (tab == 0) model.loadLiked() else if (tab == 1) model.loadPlaylists() else Repo.importYaArtists() }
     val current by PlayerConnection.current.collectAsState()
     val likedIds by Repo.liked.collectAsState()
 
@@ -177,11 +178,36 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
                     CircleButton({ model.go(Route.Search) }) { Icon(NyaoIcons.Search, "Поиск", tint = NyaoColors.Text) }
                 }
             } else ScreenHeader("Медиатека", action = { CircleButton({ model.go(Route.Search) }) { Icon(NyaoIcons.Search, "Поиск", tint = NyaoColors.Text) } })
-            ConnectedGroup(listOf("Мне нравится", "Плейлисты"), tab, { tab = it }, Modifier.padding(horizontal = 16.dp), height = 48.dp)
+            ConnectedGroup(listOf("Мне нравится", "Плейлисты", "Исполнители"), tab, { tab = it }, Modifier.padding(horizontal = 16.dp), height = 48.dp)
             Spacer(Modifier.height(14.dp))
         }
     }
 
+    if (tab == 2) {
+        // любимые исполнители: сердечко на странице исполнителя (и «Мои исполнители» из Яндекса)
+        val favs by Repo.favArtists.collectAsState()
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
+            item { header() }
+            if (favs.isEmpty()) item { Hint("Здесь будут любимые исполнители. Открой исполнителя и нажми ♥ — его треки станут чаще попадать в «Мою волну».") }
+            items(favs.size) { i ->
+                val a = favs[i]
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 2.dp).fillMaxWidth().bouncy().clip(RoundedCornerShape(20.dp)).background(NyaoColors.S2)
+                        .clickable { model.go(Route.ArtistPage(a.ref.substringBefore(':'), a.ref.substringAfter(':'), a.name)) }.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Cover(a.cover, Modifier.size(52.dp), androidx.compose.foundation.shape.CircleShape)
+                    Column(Modifier.weight(1f)) {
+                        Text(a.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (a.at > 0) "Любимый исполнитель" else "Из «Моих исполнителей» Яндекса", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+                    }
+                    Icon(NyaoIcons.Favorite, null, tint = NyaoColors.Lavender, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+        return
+    }
     if (tab == 0) {
         val liked = model.liked
         LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
@@ -611,6 +637,27 @@ fun ArtistScreen(model: AppModel, r: Route.ArtistPage) {
                     modifier = Modifier.padding(top = 4.dp),
                 )
                 if (p != null && p.popular.isNotEmpty()) PlayButtons(p.popular, p.name, Modifier.padding(top = 18.dp, bottom = 8.dp))
+                // ♥ исполнителю: его треки чаще в «Моей волне», в Яндексе — «Мои исполнители»
+                if (p != null && p.id != null && (p.source == SOURCE_YA || p.source == SOURCE_YT)) {
+                    val favs by Repo.favArtists.collectAsState()
+                    val fav = favs.any { it.matches(p.source, p.id) }
+                    val scope = androidx.compose.runtime.rememberCoroutineScope()
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = {
+                            scope.launch {
+                                runCatching { Repo.likeArtist(p.source, p.id, p.name, p.cover, !fav) }
+                                    .onSuccess { model.message(if (!fav) "${p.name} — в любимых: будет чаще в «Моей волне»" else "Убрано из любимых исполнителей") }
+                                    .onFailure { model.message(it.message ?: "Не получилось") }
+                            }
+                        },
+                        modifier = Modifier.padding(bottom = 8.dp).bouncy(),
+                        colors = if (fav) androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(containerColor = NyaoColors.Lavender, contentColor = NyaoColors.OnLavender) else androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(),
+                    ) {
+                        Icon(if (fav) NyaoIcons.Favorite else NyaoIcons.FavoriteBorder, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (fav) "Любимый исполнитель" else "В любимые")
+                    }
+                }
             }
         }
         when {

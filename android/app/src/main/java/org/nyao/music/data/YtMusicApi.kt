@@ -451,6 +451,8 @@ class YtMusicApi(private val prefs: Prefs, private val diagDir: java.io.File? = 
     }
 
     suspend fun likedTracks(): List<Track> = browseTracks("VLLM")
+    /** Начало лайков (новые сверху) — для подмеса волны хватает 300 */
+    suspend fun likedTracksForWave(): List<Track> = browseTracks("VLLM", 300)
 
     suspend fun playlistTracks(id: String): List<Track> {
         val raw = id.removePrefix("yt:")
@@ -535,14 +537,15 @@ class YtMusicApi(private val prefs: Prefs, private val diagDir: java.io.File? = 
     }
 
     /** Пул YT-треков для волны: радио по случайным лайкам (как wavePool в десктопе) */
-    suspend fun wavePool(diversity: String, exclude: Set<String>, size: Int = 25): List<Track> {
+    suspend fun wavePool(diversity: String, exclude: Set<String>, size: Int = 25, fresh: Int = 60): List<Track> {
         val liked = try {
             browseTracks("VLLM", 300) // для подбора волны хватает части лайков
         } catch (_: Exception) {
             emptyList()
         }
         val likedIds = liked.map { it.id }.toSet()
-        val seeds = liked.shuffled().take(3).toMutableList()
+        // сиды из свежих лайков чаще, чем из старых (лайки идут от новых к старым)
+        val seeds = Freshness.recencyPick(liked, 3, fresh).toMutableList()
         if (seeds.isEmpty()) {
             val h = try {
                 home()
@@ -564,7 +567,7 @@ class YtMusicApi(private val prefs: Prefs, private val diagDir: java.io.File? = 
             if (pool.size >= size) break
         }
         if (diversity == "favorite") {
-            liked.filter { it.id !in exclude }.shuffled().take((size + 2) / 3).forEach { pool.putIfAbsent(it.id, it) }
+            Freshness.recencyPick(liked.filter { it.id !in exclude }, (size + 2) / 3, fresh).forEach { pool.putIfAbsent(it.id, it) }
         }
         return pool.values.shuffled().take(size)
     }

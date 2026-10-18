@@ -178,11 +178,11 @@ class ScApi(private val prefs: Prefs) {
     }
 
     /** Пул для «Моей волны»: «похожие» на случайные лайки */
-    suspend fun wavePool(diversity: String, exclude: Set<String>, size: Int = 20): List<Track> {
+    suspend fun wavePool(diversity: String, exclude: Set<String>, size: Int = 20, fresh: Int = 60): List<Track> {
         val liked = runCatching { likedTracks(200) }.getOrDefault(emptyList()).filter { it.available }
         val likedIds = liked.map { it.id }.toSet()
         val pool = LinkedHashMap<String, Track>()
-        for (seed in liked.shuffled().take(3)) {
+        for (seed in Freshness.recencyPick(liked, 3, fresh)) {
             runCatching { related(seed.srcId) }.getOrDefault(emptyList()).forEach { t ->
                 if (!t.available || t.id in exclude) return@forEach
                 if (diversity == "discover" && t.id in likedIds) return@forEach
@@ -190,7 +190,7 @@ class ScApi(private val prefs: Prefs) {
             }
             if (pool.size >= size) break
         }
-        if (diversity == "favorite") liked.filter { it.id !in exclude }.shuffled().take((size + 2) / 3).forEach { pool.putIfAbsent(it.id, it) }
+        if (diversity == "favorite") Freshness.recencyPick(liked.filter { it.id !in exclude }, (size + 2) / 3, fresh).forEach { pool.putIfAbsent(it.id, it) }
         return pool.values.shuffled().take(size)
     }
 

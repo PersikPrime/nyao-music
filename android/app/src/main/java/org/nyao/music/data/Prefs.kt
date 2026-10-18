@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 data class Settings(
     val ytmShare: Int = 30,
+    /** Свежесть волны: 0 — все лайки поровну, 100 — почти только недавние */
+    val waveFresh: Int = 60,
     val diversity: String = "any",
     val mood: String? = null,
     val onboarded: Boolean = false,
@@ -51,6 +53,7 @@ class Prefs(context: Context) {
 
     private fun read() = Settings(
         ytmShare = sp.getInt("ytmShare", 30),
+        waveFresh = sp.getInt("waveFresh", 60).coerceIn(0, 100),
         diversity = sp.getString("diversity", "any") ?: "any",
         mood = sp.getString("mood", null),
         onboarded = sp.getBoolean("onboarded", false),
@@ -83,6 +86,7 @@ class Prefs(context: Context) {
         _settings.value = read()
     }
 
+    fun setFresh(v: Int) = update { putInt("waveFresh", v.coerceIn(0, 100)) }.also { onSyncChange?.invoke("wave") }
     fun setShare(v: Int) = update { putInt("ytmShare", v.coerceIn(0, 100)) }.also { onSyncChange?.invoke("wave") }
     fun setDiversity(v: String) = update { putString("diversity", v) }.also { onSyncChange?.invoke("wave") }
     fun setMood(v: String?) = update { if (v == null) remove("mood") else putString("mood", v) }.also { onSyncChange?.invoke("wave") }
@@ -163,6 +167,16 @@ class Prefs(context: Context) {
     var waveFirsts: List<String>
         get() = sp.getString("waveFirsts", "")!!.split(",").filter { it.isNotEmpty() }
         set(v) = sp.edit().putString("waveFirsts", v.joinToString(",")).apply()
+
+    /** Любимые исполнители (JSON-массив FavArtist) */
+    var favArtists: String
+        get() = sp.getString("favArtists", "[]") ?: "[]"
+        set(v) = sp.edit().putString("favArtists", v).apply()
+
+    /** «Мои исполнители» из Яндекса уже подтянуты */
+    var favImportedYa: Boolean
+        get() = sp.getBoolean("favImportedYa", false)
+        set(v) = sp.edit().putBoolean("favImportedYa", v).apply()
 
     /** Отложенные лайки SoundCloud: "id:1" (поставить) или "id:0" (снять) */
     var scPendingLikes: Set<String>

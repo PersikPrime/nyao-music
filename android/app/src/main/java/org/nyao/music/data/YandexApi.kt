@@ -452,6 +452,21 @@ class YandexApi(private val prefs: Prefs) {
         return res.path("tracks")?.arr("results").objects().mapNotNull { mapTrack(it) }
     }
 
+    /** Похожие треки (без радио-сессии: волна и «радио по треку» не сбиваются) */
+    suspend fun similarTracks(trackId: String): List<Track> =
+        obj("GET", "/tracks/${trackId.substringBefore(':')}/similar").arr("similarTracks").objects().mapNotNull { mapTrack(it) }
+
+    /** «Мои исполнители» в Яндексе */
+    suspend fun likedArtists(): List<FavArtist> = arr("GET", "/users/${uid()}/likes/artists").objects().mapNotNull { x ->
+        val a = x.optJSONObject("artist") ?: x
+        val id = a.opt("id")?.toString() ?: return@mapNotNull null
+        FavArtist("ya:$id", "ya:$id", null, a.optString("name"), cover(a.obj("cover")?.str("uri"), 300), 0L)
+    }
+
+    suspend fun likeArtist(id: String, on: Boolean) {
+        raw("POST", "/users/${uid()}/likes/artists/${if (on) "add-multiple" else "remove"}", form = mapOf("artist-ids" to id.removePrefix("ya:")))
+    }
+
     suspend fun like(track: Track, on: Boolean) {
         val action = if (on) "add-multiple" else "remove"
         raw("POST", "/users/${uid()}/likes/tracks/$action", form = mapOf("track-ids" to track.srcId))

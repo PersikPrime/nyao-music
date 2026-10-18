@@ -2,6 +2,8 @@
 // Доля YTM задаётся в процентах; если войти только в один сервис, волна строится из него одного.
 // Недавно звучавшие треки (история всех устройств) волна пропускает, а начало каждый раз новое.
 
+import { recencyPick, boostShare } from './freshness.js';
+
 export function interleave(base, extra, sharePercent) {
   const share = Math.max(0, Math.min(100, sharePercent)) / 100;
   if (!base.length || share >= 1) return { out: [...extra], usedExtra: extra.length };
@@ -35,7 +37,12 @@ export class WaveMixer {
    * getRecent — async () => Set id треков, звучавших недавно (на всех устройствах), чтобы волна не повторялась.
    * memory — { get(), set(v) }: что волна помнит между запусками (какими треками она начиналась).
    */
-  constructor({ ya, yt, sc, vk = null, getSettings, getRecent = async () => new Set(), memory = null, isDown = () => false }) {
+  constructor({ ya, yt, sc, vk = null, getSettings, getRecent = async () => new Set(), getFavorites = async () => [], memory = null, isDown = () => false }) {
+    this.getFavorites = getFavorites; // любимые исполнители (лайк на странице исполнителя)
+    this.boost = []; // подмес: треки любимых исполнителей и похожее на свежие лайки
+    this.boosting = null;
+    this.favCount = 0;
+    this.likedCache = {};
     this.isDown = isDown; // сервис временно лежит (статус с сервера Nyao) — его пропускаем
     this.ya = ya;
     this.yt = yt;
@@ -58,7 +65,7 @@ export class WaveMixer {
 
   opts() {
     const s = this.getSettings();
-    return { diversity: s.waveDiversity, mood: s.waveMood, share: s.ytmShare };
+    return { diversity: s.waveDiversity, mood: s.waveMood, share: s.ytmShare, fresh: s.waveFresh == null ? 60 : Number(s.waveFresh) };
   }
 
   /** «Дополнительные» сервисы волны: YouTube Music и SoundCloud — что подключено */
@@ -70,9 +77,9 @@ export class WaveMixer {
     const extras = this.extras;
     if (!extras.length) return;
     if (this.refilling) return this.refilling;
-    const { diversity } = this.opts();
+    const { diversity, fresh } = this.opts();
     const exclude = new Set([...this.seen, ...this.recent]);
-    this.refilling = Promise.all(extras.map((p) => p.wavePool({ diversity, exclude }).catch(() => [])))
+    this.refilling = Promise.all(extras.map((p) => p.wavePool({ diversity, exclude, fresh }).catch(() => [])))
       .then((raw) => {
         // сервис дал только недавно звучавшее — лучше пара повторов, чем пропасть из волны
         const lists = raw.map((l) => {
@@ -89,6 +96,75 @@ export class WaveMixer {
         this.refilling = null;
       });
     return this.refilling;
+  }
+
+  /** Лайки сервиса за эту волну — один раз (они тяжёлые), новые сверху */
+  liked(id, provider, limit) {
+    if (!this.likedCache[id]) this.likedCache[id] = Promise.resolve(provider.likedTracks(limit)).catch(() => []);
+    return this.likedCache[id];
+  }
+
+  /** Популярное исполнителя по ссылке ya:/yt: */
+  async artistTop(ref) {
+    const [src, id] = [String(ref).slice(0, 2), String(ref).slice(3)];
+    if (src === 'ya' && this.yaUp) return this.ya.artistTracks(id, 30);
+    if (src === 'yt' && this.yt && !this.isDown('yt')) return ((await this.yt.artist(id)) || {}).popular || [];
+    return [];
+  }
+
+  /**
+   * Подмес волны: 1) треки любимых исполнителей; 2) свежие лайки и похожее на них —
+   * чтобы волна была про то, что слушаешь сейчас, а не про прошлогоднее.
+   */
+  refillBoost() {
+    if (this.boosting) return this.boosting;
+    this.boosting = (async () => {
+      const { fresh } = this.opts();
+      const favs = await Promise.resolve(this.getFavorites()).catch(() => []);
+      this.favCount = (favs || []).length;
+      const exclude = new Set([...this.seen, ...this.recent]);
+      const ok = (t) => t && t.available !== false && !t.preview && !exclude.has(t.id);
+      const found = [];
+      for (const a of recencyPick(favs || [], 2, 40)) {
+        const list = await this.artistTop((a.refs && (a.refs.ya || a.refs.yt)) || a.ref).catch(() => []);
+        found.push(...shuffle(list.slice(0, 25).filter(ok)).slice(0, 3));
+      }
+      if (fresh > 0) {
+        const sources = [];
+        if (this.yaUp) sources.push(['ya', this.ya, 80, (t) => this.ya.similarTracks(t.srcId)]);
+        if (this.yt && this.yt.loggedIn && !this.isDown('yt')) sources.push(['yt', this.yt, undefined, (t) => this.yt.radio(t.srcId)]);
+        for (const [id, p, limit, similar] of sources) {
+          const liked = await this.liked(id, p, limit);
+          for (const seed of recencyPick(liked, 1, fresh)) {
+            if (ok(seed) && fresh >= 50) found.push(seed); // сам свежий лайк тоже к месту
+            found.push(...shuffle(((await similar(seed).catch(() => [])) || []).filter(ok)).slice(0, 3));
+          }
+        }
+      }
+      for (const t of shuffle(found)) if (!this.seen.has(t.id) && !this.boost.some((b) => b.id === t.id)) this.boost.push(t);
+    })()
+      .catch(() => {})
+      .finally(() => {
+        this.boosting = null;
+      });
+    return this.boosting;
+  }
+
+  /** Подмешать подмес в готовую пачку */
+  withBoost(out) {
+    const { fresh } = this.opts();
+    const share = boostShare(fresh, this.favCount);
+    if (!this.boost.length || share <= 0 || !out.length) return out;
+    const fresh2 = this.boost.filter((t) => !this.seen.has(t.id) && !out.some((x) => x.id === t.id));
+    const mixed = interleave(out, fresh2, share);
+    const used = fresh2.slice(0, mixed.usedExtra);
+    this.boost = this.boost.filter((t) => !used.includes(t));
+    used.forEach((t) => {
+      this.seen.add(t.id);
+      this.remember(t.id);
+    });
+    if (this.boost.length < 4) this.refillBoost();
+    return mixed.out;
   }
 
   /**
@@ -150,7 +226,8 @@ export class WaveMixer {
       this.remember(t.id);
     });
     if (useYt && this.pool.length < 6) this.refillPool();
-    if (!out.length) {
+    if (out.length) return this.withBoost(out);
+    {
       if (this.yaUp || this.extras.length) throw new Error(gotAny ? 'Сервисы прислали только уже сыгранное — нажми ещё раз, попробую снова' : 'Сервисы не прислали треков — проверь интернет и попробуй ещё раз');
       throw new Error('Волна пустая: войди хотя бы в один сервис в настройках');
     }
@@ -161,12 +238,16 @@ export class WaveMixer {
     this.pool = [];
     this.seen = new Set();
     this.last = [];
+    this.boost = [];
+    this.likedCache = {};
     try {
       this.recent = await this.getRecent();
     } catch {
       this.recent = new Set();
     }
     const { diversity, mood } = this.opts();
+    // подмес готовим параллельно, но ждём не дольше пары секунд — первый трек важнее
+    await Promise.race([this.refillBoost(), new Promise((r) => setTimeout(r, 2500))]);
     const tracks = this.freshStart(await this.batch(() => this.ya.waveStart({ diversity, mood }), () => this.ya.waveMore([...this.seen])));
     if (this.ya.loggedIn) this.ya.waveFeedback('radioStarted', { source: 'ya' });
     return tracks;

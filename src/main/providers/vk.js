@@ -7,6 +7,7 @@
 // • ссылка «замаскирована» (audio_api_unavailable) — снимаем маску тем же алгоритмом, что yt-dlp;
 // • звук — HLS (.m3u8), куски иногда зашифрованы AES-128 (это расшифровывает stream.js).
 // VK время от времени всё это меняет — тогда смотрим vk-debug.log.
+import { recencyPick } from '../freshness.js';
 
 const BASE = 'https://vk.com';
 const B64 = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN0PQRSTUVWXYZO123456789+/=';
@@ -462,12 +463,14 @@ export class VKProvider {
   }
 
   /** Пул для «Моей волны»: рекомендации VK + немного своих лайков (для «Любимого») */
-  async wavePool({ diversity = 'favorite', exclude = new Set(), size = 20 } = {}) {
+  async wavePool({ diversity = 'favorite', exclude = new Set(), size = 20, fresh: freshness = 60 } = {}) {
     const pool = new Map();
     for (const t of await this.recommendations().catch(() => [])) if (!exclude.has(t.id)) pool.set(t.id, t);
     let liked = [];
     try {
-      liked = (await this.likedTracks(200)).sort(() => Math.random() - 0.5);
+      // свежие лайки чаще старых
+      const all = await this.likedTracks(200);
+      liked = recencyPick(all, all.length, freshness);
     } catch (e) {
       this.debug(`wavePool liked: ${e.message}`);
     }

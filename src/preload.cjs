@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   onLive: (fn) => on('live:event', fn),
   social: (method, path, body) => call('social:api', method, path, body),
+  artists: { list: () => call('artists:list'), like: (a, on) => call('artists:like', a, on) },
   onSocialOpen: (fn) => on('social:open', fn),
   library: {
     playlists: () => call('library:playlists'),
