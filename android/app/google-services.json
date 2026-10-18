@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "841484491732",
+    "project_id": "nyao-music",
+    "storage_bucket": "nyao-music.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:841484491732:android:08262ae99c7d7ac51a5441",
+        "android_client_info": {
+          "package_name": "org.nyao.music"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBydgtyBzqVoAlyis6EWYsBsvyIwtELkjQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

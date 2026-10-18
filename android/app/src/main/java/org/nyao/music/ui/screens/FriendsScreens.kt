@@ -583,6 +583,24 @@ fun UserScreen(model: AppModel, key: String) {
                     }
                 }
                 if (!pp.private && live != null) item { NowCard(model, pp, live) }
+                if (pp.relation == "friends") item { DuoCard(model, pp) }
+                if (!pp.private && pp.badges.isNotEmpty()) item {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Значки", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(pp.badges, key = { it.id }) { b ->
+                                Column(
+                                    Modifier.width(108.dp).clip(RoundedCornerShape(22.dp)).background(NyaoColors.S2).padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Text(b.emoji, fontSize = 30.sp)
+                                    Text(b.title, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 3, color = NyaoColors.Muted)
+                                }
+                            }
+                        }
+                    }
+                }
                 val st = pp.stats
                 if (!pp.private && st != null && st.plays > 0) {
                     item {
@@ -627,6 +645,59 @@ fun UserScreen(model: AppModel, key: String) {
         }
     }
     if (share) AddFriendSheet(model) { share = false }
+}
+
+/** Совпадение вкусов и «Микс на двоих» */
+@Composable
+private fun DuoCard(model: AppModel, pp: PublicProfile) {
+    var m by remember(pp.user.id) { mutableStateOf<org.nyao.music.data.TasteMatch?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    LaunchedEffect(pp.user.id) { m = runCatching { Repo.cloud.tasteMatch(pp.user.id) }.getOrNull() }
+    val mm = m ?: return
+    Column(
+        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(30.dp)).background(NyaoColors.S2).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+                val color = NyaoColors.Lavender
+                val track = NyaoColors.S3
+                Canvas(Modifier.fillMaxSize()) {
+                    val stroke = 8.dp.toPx()
+                    val arc = Size(size.width - stroke, size.height - stroke)
+                    val tl = Offset(stroke / 2, stroke / 2)
+                    drawArc(track, 0f, 360f, false, tl, arc, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+                    drawArc(color, -90f, 360f * mm.percent / 100f, false, tl, arc, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                }
+                Text("${mm.percent}%", style = MaterialTheme.typography.titleMedium)
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Совпадение вкусов", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (!mm.enough) "Пока мало прослушиваний — точнее будет через пару дней"
+                    else if (mm.commonArtists.isEmpty()) "Общих исполнителей пока нет"
+                    else "Общие: " + mm.commonArtists.take(4).joinToString(", "),
+                    style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Button(onClick = {
+            loading = true
+            model.launch {
+                runCatching { Repo.cloud.duoMix(pp.user.id) }
+                    .onSuccess { (title, tracks) ->
+                        if (tracks.isEmpty()) model.message("Пока не из чего собрать микс — послушайте ещё")
+                        else PlayerConnection.playList(tracks, 0, title)
+                    }
+                    .onFailure { model.message(it.message ?: "Не получилось") }
+                loading = false
+            }
+        }, enabled = !loading, modifier = Modifier.fillMaxWidth()) {
+            Icon(NyaoIcons.Waves, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Микс на двоих")
+        }
+    }
 }
 
 @Composable

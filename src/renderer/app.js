@@ -7,6 +7,7 @@ import { FullScreen } from './fullscreen.js';
 import { ACCENTS, paletteFor, applyAccent } from './accent.js';
 import { releaseAgo } from './releases.js';
 import { arrangeSearch } from './search.js';
+import { createFriends } from './friends.js';
 import { handoffPlan, queueSnapshot, REACTIONS, JOIN_BASE, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
 
 const api = window.nyao;
@@ -47,6 +48,7 @@ const state = {
   stats: { period: 'month', data: null, error: null, loading: false },
   version: ''
 };
+let friendsBadge = 0; // заявки + непрочитанные входящие — цифра на вкладке «Друзья»
 const lists = {}; // списки на экране: клики по строкам берут трек отсюда
 const artistCache = new Map();
 
@@ -177,8 +179,9 @@ const NAV = [
   ['search', 'Поиск', 'M11 4.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13M20 20l-4.2-4.2'],
   ['wave', 'Моя волна', 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0'],
   ['library', 'Медиатека', 'M5 4v16M10 4v16M15 5l4 15'],
+  ['friends', 'Друзья', 'M10 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M3.5 20c.8-3.5 3.4-5.5 6.5-5.5 1.6 0 3 .5 4.1 1.4M18.5 14v6M15.5 17h6'],
   ['together', 'Вместе', 'M9 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.6a3.4 3.4 0 0 1 0 6.3M18 14.8c1.8.7 3 2.4 3.5 5.2'],
-  ['stats', 'Итоги', 'M5 20V11M12 20V5M19 20v-6']
+  ['stats', 'Статистика', 'M5 20V11M12 20V5M19 20v-6']
 ];
 const SETTINGS_ICON = 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1';
 
@@ -257,7 +260,7 @@ function navItems() {
 
 // ---------- Навигация ----------
 function renderRail() {
-  const btn = (route, label, d) => `<button class="nav-btn ${state.route === route ? 'active' : ''}" data-route="${route}" aria-label="${label}" title="${label}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg><span class="lbl">${label}</span></button>`;
+  const btn = (route, label, d) => `<button class="nav-btn ${state.route === route ? 'active' : ''}" data-route="${route}" aria-label="${label}" title="${label}"${route === 'friends' && friendsBadge ? ` data-badge="${friendsBadge > 9 ? '9+' : friendsBadge}"` : ''}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg><span class="lbl">${label}</span></button>`;
   let extra = '';
   if (IS_MAC) {
     const pls = (state.lib.lists || []).slice(0, 7);
@@ -380,6 +383,7 @@ function go(route, params = {}, push = true) {
   if (route === 'settings' && state.cloud.loggedIn) loadCloudDevices();
   if (route === 'together') loadRoom();
   if (route === 'stats') loadStats();
+  if (route === 'friends') friends.load();
 }
 function back() {
   const prev = state.stack.pop();
@@ -1021,6 +1025,7 @@ function nyaoCardHtml() {
   return `<section class="card nyao-card">
     <div class="svc">${nyaoAvatar('logo')}
       <div class="info"><div class="name">${esc(u.name || 'Аккаунт Nyao')}</div><div class="st">${u.username ? '@' + esc(u.username) + ' · ' : ''}синхронизация включена</div></div>
+      <button class="btn" data-action="go" data-route="profile">Мой профиль</button>
       <button class="btn danger" data-action="cloud-logout">Выйти</button>
     </div>
     <div class="devices">
@@ -1042,6 +1047,11 @@ async function loadCloud() {
   if (st.loggedIn) {
     loadOthers();
     if (state.route === 'settings') loadCloudDevices();
+    friends.load().then(() => {
+      friendsBadge = friends.unread();
+      renderRail();
+      friends.askNick();
+    });
   }
 }
 async function loadCloudDevices() {
@@ -1079,6 +1089,7 @@ async function cloudLogin() {
     toast(`Привет, ${user.name}! Синхронизация включена`);
     loadOthers();
     loadCloudDevices();
+    friends.load().then(() => friends.askNick());
   } catch (e) {
     if (!/отмен/i.test(e.message)) toast(e.message, true);
   }
@@ -1364,7 +1375,23 @@ function pushRpc() {
   }, 400);
 }
 
-const RENDER = { home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList };
+const friends = createFriends({
+  api, state, esc, coverHtml, badge, toast, go, player, copyText, ago,
+  get view() { return view; },
+  joinRoom: (code) => { go('together'); joinRoom(code); },
+  createRoom: async () => {
+    state.room = await api.room.create();
+    state.roomSync = { hostTrackId: null };
+    roomPush(true);
+    renderBar();
+  },
+  askText: (label, value, btn) => askText(label, value, btn),
+  updateBadge: (n) => {
+    friendsBadge = n;
+    renderRail();
+  }
+});
+const RENDER = { friends: () => friends.renderFriends(), user: () => friends.renderUser(), profile: () => friends.renderProfile(), home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList };
 
 // ---------- Загрузка данных ----------
 async function loadStatus() {
@@ -1517,6 +1544,7 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
     <button data-m="last">В конец очереди</button>
     ${inQueue ? '<button data-m="remove">Убрать из очереди</button>' : ''}
     <button data-m="radio">Похожее · радио по треку</button>
+    ${state.cloud.loggedIn ? '<button data-m="share">Отправить другу</button>' : ''}
     <button data-m="like">${player.liked.has(track.id) ? 'Убрать из «Мне нравится»' : 'В «Мне нравится»'}</button>
     ${track.artistRef ? '<button data-m="artist">Открыть исполнителя</button>' : ''}
     ${track.albumRef ? '<button data-m="album">Открыть альбом</button>' : ''}
@@ -1543,6 +1571,9 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
         player.removeAt(queueIndex);
       } else if (b.dataset.m === 'radio') {
         await player.startRadio(track);
+      } else if (b.dataset.m === 'share') {
+        if (!state.social || !state.social.loaded) await friends.load();
+        friends.sharePicker(track, x, y);
       } else if (b.dataset.m === 'like') {
         await player.toggleLike(track);
       } else if (b.dataset.m === 'artist') {
@@ -1572,12 +1603,12 @@ document.addEventListener('mousedown', (e) => {
 });
 
 // Простое окно ввода (prompt() в Electron не работает)
-function askText(label, value = '') {
+function askText(label, value = '', btnLabel = 'Создать') {
   return new Promise((resolve) => {
     const menu = $('#menu');
     menu.innerHTML = `<form style="padding:8px;display:flex;flex-direction:column;gap:8px"><div class="lbl" style="padding:0">${esc(label)}</div>
       <input name="v" value="${esc(value)}" style="height:38px;border-radius:8px;border:1px solid var(--line2);background:var(--s2);color:var(--text);padding:0 10px;font:inherit">
-      <button class="btn primary" style="height:38px;justify-content:center">Создать</button></form>`;
+      <button class="btn primary" style="height:38px;justify-content:center">${esc(btnLabel)}</button></form>`;
     menu.hidden = false;
     menu.style.left = `${innerWidth / 2 - 130}px`;
     menu.style.top = `${innerHeight / 2 - 80}px`;
@@ -1944,7 +1975,7 @@ function renderStats() {
           ${s.first ? `<span class="hint">Первый трек периода: «${esc(s.first.title)}» — ${esc(s.first.artist)}</span>` : ''}</section>
       </div>`;
   }
-  view.innerHTML = `<div class="scroll stats"><div class="st-head"><h1 class="page">Итоги</h1>${seg}</div>${body}</div>`;
+  view.innerHTML = `<div class="scroll stats"><div class="st-head"><h1 class="page">Статистика</h1>${seg}</div>${body}</div>`;
   if ($('#st-ribbon')) new Ribbon($('#st-ribbon'), { lines: 14, cy: 0.55, amp: 1, accent: accentColor() });
 }
 
@@ -2019,6 +2050,7 @@ if (api.transfer) {
 // ---------- Обработчики экрана ----------
 async function handleAction(el, e) {
   const a = el.dataset.action;
+  if (a && a.startsWith('fr-') && (await friends.action(el))) return;
   switch (a) {
     case 'go':
       $('#connect').hidden = true;
@@ -2084,7 +2116,7 @@ async function handleAction(el, e) {
       // сначала дошлём накопленные прослушивания, потом пересчитаем
       if (api.cloud && api.cloud.sync) await api.cloud.sync().catch(() => {});
       await loadStats();
-      toast('Итоги обновлены');
+      toast('Статистика обновлена');
       break;
     case 'stats-period':
       state.stats.period = el.dataset.v;
@@ -2093,7 +2125,7 @@ async function handleAction(el, e) {
       break;
     case 'stats-play': {
       const tracks = lists['stats-top'] || [];
-      if (tracks.length) player.playList(tracks, 0, 'Итоги: любимое');
+      if (tracks.length) player.playList(tracks, 0, 'Статистика: любимое');
       break;
     }
     case 'pl-transfer': {
@@ -2494,6 +2526,14 @@ view.addEventListener('submit', async (e) => {
     joinRoom(new FormData(form).get('code').toString());
     return;
   }
+  if (form.dataset.form.startsWith('fr-')) {
+    try {
+      await friends.submit(form);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
   const q = new FormData(form).get('q').toString().trim();
   if (!q) return;
   state.search = { q, res: null, filter: 'all', loading: true };
@@ -2755,6 +2795,7 @@ api.onControl((cmd) => {
 if (api.onLive) {
   api.onLive((e) => {
     if (e.type === 'cmd') return remoteCommand(e);
+    if (e.type === 'social') return friends.onEvent(e);
     if (e.type === 'now') {
       const list = state.connect.devices;
       if (list) {
@@ -2769,6 +2810,7 @@ if (api.onLive) {
     onRoomEvent(e);
   });
 }
+if (api.onSocialOpen) api.onSocialOpen((p) => friends.onOpen(p));
 $('#pb-connect').onclick = toggleConnect;
 $('#connect').addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');

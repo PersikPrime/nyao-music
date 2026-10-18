@@ -217,3 +217,32 @@ test('трек другу, приглашение в комнату, реакц�
     t.close();
   }
 });
+
+test('совпадение вкусов, микс на двоих и значки', async () => {
+  const t = await setup();
+  try {
+    const a = await t.user('Takko');
+    const b = await t.user('Persik');
+    const inv = (await t.call('POST', '/invites', { token: a.token })).json;
+    await t.call('POST', `/invites/${inv.code}/use`, { token: b.token });
+    const plays = (prefix, artists) => artists.flatMap((ar, i) => Array.from({ length: 6 }, (_, k) => ({ trackId: `ya:${prefix}${i}${k % 3}`, source: 'ya', title: `${ar} ${k % 3}`, artist: ar, listened: 3000, playedAt: Date.now() - (i * 6 + k) * 60_000 })));
+    await t.call('POST', '/history', { token: a.token, body: { plays: plays('a', ['Кино', 'Сплин', 'Земфира', 'Ария']) } });
+    await t.call('POST', '/history', { token: b.token, body: { plays: [...plays('a', ['Кино']), ...plays('b', ['Сплин', 'Би-2', 'Ленинград'])] } });
+    const mt = (await t.call('GET', `/friends/${b.id}/match`, { token: a.token })).json;
+    assert.ok(mt.percent > 0 && mt.percent <= 100);
+    assert.ok(mt.commonArtists.includes('Кино') && mt.commonArtists.includes('Сплин'));
+    assert.equal(mt.enough, true);
+    const mix = (await t.call('GET', `/friends/${b.id}/mix`, { token: a.token })).json;
+    assert.match(mix.title, /Persik/);
+    assert.ok(mix.tracks.length >= 10);
+    assert.ok(mix.tracks[0].id.startsWith('ya:a0'), 'сначала общие треки');
+    assert.equal(new Set(mix.tracks.map((x) => x.id)).size, mix.tracks.length, 'без повторов');
+    assert.equal(mix.tracks[0].srcId, mix.tracks[0].id.slice(3));
+    const prof = (await t.call('GET', `/users/${a.id}`, { token: b.token })).json;
+    assert.ok(prof.badges.some((x) => x.id === 'h10'), 'больше 10 часов');
+    const stranger = await t.user('X');
+    assert.equal((await t.call('GET', `/friends/${a.id}/match`, { token: stranger.token })).status, 403);
+  } finally {
+    t.close();
+  }
+});

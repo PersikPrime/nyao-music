@@ -40,7 +40,13 @@ data class PublicProfile(
     val friends: Int = 0,
     val now: FriendNow? = null,
     val stats: UserStats? = null,
+    val badges: List<Badge> = emptyList(),
 )
+
+data class Badge(val id: String, val emoji: String, val title: String)
+
+/** Совпадение вкусов с другом */
+data class TasteMatch(val percent: Int, val commonArtists: List<String>, val enough: Boolean)
 
 /** Входящие: track | room | react */
 data class InboxItem(

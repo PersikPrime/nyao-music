@@ -104,6 +104,73 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
     };
   }
 
+  /** Прослушивания за N дней (для совпадения вкусов, микса на двоих и значков) */
+  async function playsOf(uid, days) {
+    const { rows } = await q(
+      `SELECT track_id, source, title, artist, cover, duration, listened, skipped, played_at FROM plays WHERE user_id = $1 AND played_at >= $2 ORDER BY played_at DESC LIMIT 20000`,
+      [uid, new Date(Date.now() - days * 86_400_000)]
+    );
+    return rows;
+  }
+
+  const mainArtist = (a) => String(a || '').split(/,|&| feat\.? | ft\.? /i)[0].trim().toLowerCase();
+
+  /** Вес исполнителей и треков (пропуски не считаем) */
+  function weights(rows) {
+    const artists = new Map();
+    const tracks = new Map();
+    for (const r of rows) {
+      if (r.skipped) continue;
+      const a = mainArtist(r.artist);
+      if (a) artists.set(a, (artists.get(a) || 0) + 1);
+      const t = tracks.get(r.track_id) || { id: r.track_id, source: r.source, srcId: String(r.track_id).split(':').slice(1).join(':'), title: r.title, artist: r.artist, cover: r.cover, duration: r.duration, n: 0 };
+      t.n++;
+      tracks.set(r.track_id, t);
+    }
+    return { artists, tracks };
+  }
+
+  /** Совпадение вкусов: косинус по исполнителям, растянутый в «человеческие» проценты */
+  function match(a, b) {
+    let dot = 0;
+    let na = 0;
+    let nb = 0;
+    for (const v of a.artists.values()) na += v * v;
+    for (const v of b.artists.values()) nb += v * v;
+    for (const [k, v] of a.artists) if (b.artists.has(k)) dot += v * b.artists.get(k);
+    const cos = na && nb ? dot / Math.sqrt(na * nb) : 0;
+    const percent = Math.round(Math.min(1, Math.sqrt(cos)) * 100);
+    const common = [...a.artists.keys()].filter((k) => b.artists.has(k)).sort((x, y) => a.artists.get(y) + b.artists.get(y) - (a.artists.get(x) + b.artists.get(x)));
+    return { percent, common };
+  }
+
+  /** Значки: считаются на лету из истории, ничего лишнего не храним */
+  async function badgesOf(uid, rows) {
+    const out = [];
+    const hours = rows.reduce((s, r) => s + (Number(r.listened) || 0), 0) / 3600;
+    if (hours >= 100) out.push({ id: 'h100', emoji: '🎧', title: '100 часов музыки' });
+    else if (hours >= 10) out.push({ id: 'h10', emoji: '🎵', title: '10 часов музыки' });
+    const night = rows.filter((r) => {
+      const h = new Date(r.played_at).getUTCHours();
+      return h >= 20 || h < 2; // примерно 00:00–05:00 по Москве/Баку — без точного пояса
+    }).length;
+    if (night >= 50) out.push({ id: 'night', emoji: '🌙', title: 'Ночной слушатель' });
+    const artists = new Set(rows.map((r) => mainArtist(r.artist)).filter(Boolean));
+    if (artists.size >= 100) out.push({ id: 'explorer', emoji: '🧭', title: 'Исследователь — 100+ исполнителей' });
+    const days = new Set(rows.map((r) => new Date(r.played_at).toISOString().slice(0, 10)));
+    let streak = 0;
+    for (let d = new Date(); ; d = new Date(d.getTime() - 86_400_000)) {
+      if (!days.has(d.toISOString().slice(0, 10))) break;
+      streak++;
+    }
+    if (streak >= 7) out.push({ id: 'streak', emoji: '🔥', title: `${streak} дней подряд с музыкой` });
+    const sources = new Set(rows.map((r) => r.source).filter(Boolean));
+    if (sources.size >= 3) out.push({ id: 'multi', emoji: '🌈', title: 'Слушает в трёх сервисах' });
+    const friends = (await friendIds(uid)).length;
+    if (friends >= 5) out.push({ id: 'social', emoji: '🫂', title: 'Душа компании — 5+ друзей' });
+    return out;
+  }
+
   /** Событие другу: сразу на устройства, которые на связи, и push на остальные */
   async function notify(uid, event, pushMsg) {
     hub.pushUser(uid, { type: 'social', ...event });
@@ -275,7 +342,8 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
         statusTrack: asObj(p.status_track),
         pinned: asObj(p.pinned) || [],
         now: rel === 'friends' || rel === 'self' ? await nowOf(uid, p) : null,
-        stats: p.show_stats ? await topOf(uid) : null
+        stats: p.show_stats ? await topOf(uid) : null,
+        badges: p.show_stats ? await badgesOf(uid, await playsOf(uid, 90)) : []
       };
     }, true],
 
@@ -304,6 +372,48 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       // сначала те, кто слушает прямо сейчас
       friends.sort((x, y) => (y.now ? y.now.updatedAt : 0) - (x.now ? x.now.updatedAt : 0) || x.nick.localeCompare(y.nick));
       return { friends, incoming, outgoing };
+    }, true],
+    // совпадение вкусов с другом и общие исполнители (за 90 дней)
+    ['GET', /^\/friends\/(\d+)\/match$/, async ({ s, m }) => {
+      const other = Number(m[1]);
+      await needFriend(s.uid, other);
+      const [mine, theirs] = await Promise.all([playsOf(s.uid, 90), playsOf(other, 90)]);
+      const a = weights(mine);
+      const b = weights(theirs);
+      const { percent, common } = match(a, b);
+      const names = new Map();
+      for (const r of [...mine, ...theirs]) {
+        const k = mainArtist(r.artist);
+        if (k && !names.has(k)) names.set(k, String(r.artist).split(/,|&| feat\.? | ft\.? /i)[0].trim());
+      }
+      return { percent, commonArtists: common.slice(0, 10).map((k) => names.get(k) || k), enough: mine.length >= 20 && theirs.length >= 20 };
+    }, true],
+    // «Микс на двоих»: общие треки, потом по очереди любимое каждого у общих исполнителей и просто любимое
+    ['GET', /^\/friends\/(\d+)\/mix$/, async ({ s, m }) => {
+      const other = Number(m[1]);
+      await needFriend(s.uid, other);
+      const [mine, theirs] = await Promise.all([playsOf(s.uid, 120), playsOf(other, 120)]);
+      const a = weights(mine);
+      const b = weights(theirs);
+      const { common } = match(a, b);
+      const commonSet = new Set(common);
+      const byScore = (map) => [...map.values()].sort((x, y) => y.n - x.n);
+      const both = byScore(a.tracks).filter((t) => b.tracks.has(t.id));
+      const pick = (map, shared) => byScore(map).filter((t) => !both.some((x) => x.id === t.id) && commonSet.has(mainArtist(t.artist)) === shared);
+      const lists = [pick(a.tracks, true), pick(b.tracks, true), pick(a.tracks, false), pick(b.tracks, false)];
+      const out = [...both.slice(0, 15)];
+      const seen = new Set(out.map((t) => t.id));
+      for (let i = 0; out.length < 60 && lists.some((l) => l.length > i); i++) {
+        for (const l of lists) {
+          const t = l[i];
+          if (t && !seen.has(t.id)) {
+            seen.add(t.id);
+            out.push(t);
+          }
+        }
+      }
+      const me = await userCard(other);
+      return { title: `Микс: ты и ${me.name || '@' + me.nick}`, tracks: out.map(({ n, ...t }) => ({ ...t, album: '' })) };
     }, true],
     ['POST', /^\/friends\/request$/, async ({ s, req }) => {
       const body = await readJson(req);

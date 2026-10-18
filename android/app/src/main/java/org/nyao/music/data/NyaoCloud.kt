@@ -432,6 +432,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
             bio = o.optString("bio"),
             friends = o.optInt("friends"),
             now = parseNow(o.obj("now")),
+            badges = o.arr("badges").objects().map { Badge(it.optString("id"), it.optString("emoji"), it.optString("title")) },
             stats = st?.let { s ->
                 UserStats(
                     minutes = s.optInt("minutes"), plays = s.optInt("plays"),
@@ -471,6 +472,17 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
     suspend fun useInvite(code: String): Pair<String, UserCard?> {
         val o = request("POST", "/invites/$code/use")
         return o.optString("relation") to parseCard(o.obj("user"))
+    }
+
+    suspend fun tasteMatch(friendId: String): TasteMatch {
+        val o = request("GET", "/friends/$friendId/match")
+        return TasteMatch(o.optInt("percent"), o.arr("commonArtists").let { a -> (0 until (a?.length() ?: 0)).map { a!!.optString(it) } }, o.optBoolean("enough"))
+    }
+
+    /** «Микс на двоих»: (название, треки) */
+    suspend fun duoMix(friendId: String): Pair<String, List<Track>> {
+        val o = request("GET", "/friends/$friendId/mix")
+        return o.optString("title") to o.arr("tracks").objects().mapNotNull { parseTrack(it) }
     }
 
     suspend fun shareTrack(to: String, t: Track, emoji: String? = null) {

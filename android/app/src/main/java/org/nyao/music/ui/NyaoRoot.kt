@@ -254,6 +254,7 @@ fun NyaoRoot() {
         LaunchedEffect(cloudUser) {
             if (cloudUser == null) return@LaunchedEffect
             runCatching { org.nyao.music.playback.Friends.refresh() }
+            org.nyao.music.playback.NyaoPush.register()
             // вошёл после того, как открыл приглашение — добавляем друга сейчас
             org.nyao.music.playback.Friends.pendingInvite?.let { org.nyao.music.ui.screens.openInvite(model, it) }
         }

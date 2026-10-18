@@ -54,6 +54,14 @@
         </activity>
 
         <service
+            android:name=".playback.NyaoPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <service
             android:name=".playback.NfcShareService"
             android:exported="true"
             android:permission="android.permission.BIND_NFC_SERVICE">
