@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>nyao-spotify</title>
+</head>
+<body>
+<script>
+// Мост между Spotify Web Playback SDK и Nyao (из spotify-web-playback-engine).
+// Kotlin -> JS: window.__engine.*  (evaluateJavascript)
+// JS -> Kotlin: window.AndroidBridge.* (@JavascriptInterface)
+(function () {
+  'use strict';
+
+  var player = null;
+  var tokenSeq = 0;
+  var pendingTokens = {};
+
+  var ALLOWED = [
+    'connect', 'disconnect', 'getCurrentState', 'setName', 'getVolume', 'setVolume',
+    'pause', 'resume', 'togglePlay', 'seek', 'previousTrack', 'nextTrack', 'activateElement'
+  ];
+
+  function emit(type, payload) {
+    AndroidBridge.onEvent(type, JSON.stringify(payload === undefined ? null : payload));
+  }
+
+  function errMessage(e) {
+    return (e && e.message) ? e.message : String(e);
+  }
+
+  window.__engine = {
+    init: function (name, volume) {
+      if (player) return;
+      player = new Spotify.Player({
+        name: name,
+        volume: volume,
+        // уведомление и шторку ведёт сам Nyao (MediaSession плеера) — второе не нужно
+        enableMediaSession: false,
+        getOAuthToken: function (cb) {
+          var id = ++tokenSeq;
+          pendingTokens[id] = cb;
+          AndroidBridge.requestToken(id);
+        }
+      });
+
+      player.addListener('ready', function (p) { emit('ready', { device_id: p.device_id }); });
+      player.addListener('not_ready', function (p) { emit('not_ready', { device_id: p.device_id }); });
+      player.addListener('player_state_changed', function (s) {
+        // в Kotlin нужна только малая часть состояния
+        if (!s) { emit('player_state_changed', null); return; }
+        var t = s.track_window && s.track_window.current_track;
+        emit('player_state_changed', {
+          paused: s.paused, position: s.position, duration: s.duration,
+          uri: t ? t.uri : null, id: t ? t.id : null, linked: t && t.linked_from ? t.linked_from.uri : null
+        });
+      });
+      player.addListener('autoplay_failed', function () { emit('autoplay_failed', null); });
+      player.addListener('initialization_error', function (e) { emit('initialization_error', { message: e.message }); });
+      player.addListener('authentication_error', function (e) { emit('authentication_error', { message: e.message }); });
+      player.addListener('account_error', function (e) { emit('account_error', { message: e.message }); });
+      player.addListener('playback_error', function (e) { emit('playback_error', { message: e.message }); });
+
+      player.connect().then(function (ok) { emit('connect_result', { ok: ok }); });
+    },
+
+    resolveToken: function (id, token) {
+      var cb = pendingTokens[id];
+      delete pendingTokens[id];
+      if (cb) cb(token);
+    },
+
+    call: function (callId, method, argsJson) {
+      if (!player) {
+        AndroidBridge.onCallResult(callId, false, 'player not initialized');
+        return;
+      }
+      if (ALLOWED.indexOf(method) < 0) {
+        AndroidBridge.onCallResult(callId, false, 'method not allowed: ' + method);
+        return;
+      }
+      var args = JSON.parse(argsJson || '[]');
+      Promise.resolve()
+        .then(function () { return player[method].apply(player, args); })
+        .then(function (r) {
+          AndroidBridge.onCallResult(callId, true, JSON.stringify(r === undefined ? null : r));
+        }, function (e) {
+          AndroidBridge.onCallResult(callId, false, errMessage(e));
+        });
+    }
+  };
+
+  window.onSpotifyWebPlaybackSDKReady = function () { emit('sdk_ready', null); };
+  window.addEventListener('error', function (e) {
+    emit('page_error', { message: e.message || 'script error' });
+  });
+})();
+</script>
+<script src="https://sdk.scdn.co/spotify-player.js"
+        onerror="AndroidBridge.onEvent('page_error', JSON.stringify({message: 'cannot load spotify-player.js'}))"></script>
+</body>
+</html>

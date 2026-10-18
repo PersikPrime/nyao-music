@@ -50,7 +50,7 @@ object Repo {
     private val tracks = ConcurrentHashMap<String, Track>()
     private val yaStreamCache = ConcurrentHashMap<String, Pair<String, Long>>()
 
-    private val _accounts = MutableStateFlow<Map<String, Account?>>(mapOf(SOURCE_YA to null, SOURCE_YT to null, SOURCE_SC to null, SOURCE_VK to null))
+    private val _accounts = MutableStateFlow<Map<String, Account?>>(mapOf(SOURCE_YA to null, SOURCE_YT to null, SOURCE_SC to null, SOURCE_VK to null, SOURCE_SP to null))
     val accounts: StateFlow<Map<String, Account?>> = _accounts
 
     /** Техработы и сбои сервисов — опрашивается раз в 2 минуты из NyaoRoot */
@@ -69,6 +69,7 @@ object Repo {
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         prefs = Prefs(context.applicationContext)
+        org.nyao.music.spotify.Spotify.init(context.applicationContext)
         ya = YandexApi(prefs)
         yt = YtMusicApi(prefs, context.applicationContext.filesDir)
         ytStreams = YtStreams(yt)
@@ -188,7 +189,8 @@ object Repo {
         val b = if (yt.loggedIn) runCatching { yt.account() }.getOrElse { Account("YouTube Music") } else null
         val c = if (sc.loggedIn) runCatching { sc.account() }.getOrElse { Account("SoundCloud (токен не принят)") } else null
         val d = if (vk.loggedIn) vk.account() else null
-        _accounts.value = mapOf(SOURCE_YA to a, SOURCE_YT to b, SOURCE_SC to c, SOURCE_VK to d)
+        val e = if (sp.loggedIn) runCatching { sp.account() }.getOrElse { Account("Spotify (вход не принят)") } else null
+        _accounts.value = mapOf(SOURCE_YA to a, SOURCE_YT to b, SOURCE_SC to c, SOURCE_VK to d, SOURCE_SP to e)
     }
 
     /** Удаляет cookie только указанных сайтов (выход из одного сервиса не выкидывает из остальных) */
@@ -210,6 +212,15 @@ object Repo {
         prefs.vkOrigin = origin
         vk.reset()
         if (uid == null) clearCookies("https://vk.com", "https://vk.ru", "https://m.vk.com", "https://login.vk.com", "https://id.vk.com", "https://login.vk.ru", "https://id.vk.ru")
+        refreshAccounts()
+    }
+
+    /** Spotify через Web API (данные) — сам вход и плеер живут в [org.nyao.music.spotify.Spotify] */
+    val sp: org.nyao.music.spotify.SpotifyApi get() = org.nyao.music.spotify.Spotify.api
+
+    suspend fun spotifyLogout() {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { org.nyao.music.spotify.Spotify.engine.release() }
+        org.nyao.music.spotify.Spotify.auth.logout()
         refreshAccounts()
     }
 
@@ -262,7 +273,8 @@ object Repo {
         val b = async { if (yt.loggedIn) runCatching { yt.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (sc.loggedIn) runCatching { sc.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
         val d = async { if (vk.loggedIn) runCatching { vk.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val all = alternateAll(a.await(), b.await(), c.await(), d.await())
+        val e = async { if (sp.loggedIn) runCatching { sp.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
+        val all = alternateAll(a.await(), b.await(), c.await(), d.await(), e.await())
         _liked.value = _liked.value + all.map { it.id }
         remember(all)
     }
@@ -272,7 +284,8 @@ object Repo {
         val b = async { if (yt.loggedIn) runCatching { yt.playlists() }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (sc.loggedIn) runCatching { sc.playlists() }.getOrDefault(emptyList()) else emptyList() }
         val d = async { if (vk.loggedIn) runCatching { vk.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        listOfNotNull(org.nyao.music.playback.Offline.asPlaylist()) + a.await() + b.await() + c.await() + d.await()
+        val e = async { if (sp.loggedIn) runCatching { sp.playlists() }.getOrDefault(emptyList()) else emptyList() }
+        listOfNotNull(org.nyao.music.playback.Offline.asPlaylist()) + a.await() + b.await() + c.await() + d.await() + e.await()
     }
 
     suspend fun playlistTracks(id: String): List<Track> = remember(
@@ -287,6 +300,7 @@ object Repo {
             id.startsWith("ya:") -> ya.playlistTracks(id)
             id.startsWith("sc:") -> sc.playlistTracks(id)
             id.startsWith("vk:") -> vk.playlistTracks(id)
+            id.startsWith("sp:") -> sp.playlistTracks(id)
             else -> yt.playlistTracks(id)
         },
     )
@@ -297,6 +311,7 @@ object Repo {
         val b = async { if (up(SOURCE_YT)) runCatching { yt.search(q) }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (up(SOURCE_SC)) runCatching { sc.search(q) }.getOrDefault(emptyList()) else emptyList() }
         val d = async { if (vk.loggedIn && up(SOURCE_VK)) runCatching { vk.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        val e = async { if (sp.loggedIn) runCatching { sp.search(q) }.getOrDefault(emptyList()) else emptyList() }
         // исполнители и альбомы: Яндекс и YouTube Music
         val arYa = async { if (ya.loggedIn && up(SOURCE_YA)) runCatching { ya.searchArtists(q) }.getOrDefault(emptyList()) else emptyList() }
         val arYt = async { if (up(SOURCE_YT)) runCatching { yt.searchArtists(q) }.getOrDefault(emptyList()) else emptyList() }
@@ -305,7 +320,7 @@ object Repo {
         val nq = Search.norm(q)
         val artists = alternateAll(arYa.await(), arYt.await()).distinctBy { Search.norm(it.name) }.sortedByDescending { Search.norm(it.name) == nq }.take(10)
         val albums = alternateAll(alYa.await(), alYt.await()).take(12)
-        SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()), artists, albums)
+        SearchResult(remember(a.await()), remember(b.await()), remember(c.await()), remember(d.await()), remember(e.await()), artists, albums)
     }
 
     /** «Все треки» исполнителя: id вида artist:<сервис>:<id>:<имя>. SoundCloud и VK — поиском по имени */
@@ -343,6 +358,7 @@ object Repo {
         val found = when (source) {
             SOURCE_SC -> runCatching { sc.search(main) }.getOrDefault(emptyList())
             SOURCE_VK -> if (vk.loggedIn) runCatching { vk.search(main) }.getOrDefault(emptyList()) else emptyList()
+            SOURCE_SP -> if (sp.loggedIn) runCatching { sp.search(main) }.getOrDefault(emptyList()) else emptyList()
             SOURCE_YA -> if (ya.loggedIn) runCatching { ya.search(main) }.getOrDefault(emptyList()) else emptyList()
             else -> runCatching { yt.search(main) }.getOrDefault(emptyList())
         }
@@ -367,6 +383,7 @@ object Repo {
         SOURCE_YT, SOURCE_SC -> true
         SOURCE_YA -> ya.loggedIn
         SOURCE_VK -> vk.loggedIn
+        SOURCE_SP -> sp.loggedIn
         else -> false
     }
 
@@ -375,6 +392,7 @@ object Repo {
         SOURCE_YT -> yt.search(q)
         SOURCE_SC -> sc.search(q)
         SOURCE_VK -> vk.search(q)
+        SOURCE_SP -> sp.search(q)
         else -> emptyList()
     }
 
@@ -434,6 +452,7 @@ object Repo {
         when (track.source) {
             SOURCE_YA -> ya.like(track, on)
             SOURCE_VK -> vk.like(track, on)
+            SOURCE_SP -> sp.like(track.srcId, on)
             SOURCE_SC -> try {
                 sc.like(track.srcId, on)
                 flushScLikes()
@@ -480,11 +499,13 @@ object Repo {
             .build()
         return MediaItem.Builder()
             .setMediaId(t.id)
-            .setUri("nyao://${t.source}/${Uri.encode(t.srcId)}")
+            // Spotify: в ExoPlayer — тишина длиной с трек, звук даёт устройство Spotify (см. SpotifySync)
+            .setUri(if (t.source == SOURCE_SP) org.nyao.music.spotify.SilenceDataSource.uri(t.duration, t.srcId) else "nyao://${t.source}/${Uri.encode(t.srcId)}")
             .setMediaMetadata(meta)
             // SoundCloud играет через HLS: тип нужно знать заранее, до получения ссылки
             // VK тоже отдаёт HLS (.m3u8, куски с AES-128 — ExoPlayer расшифровывает сам)
             .apply { if (t.source == SOURCE_SC || t.source == SOURCE_VK) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            .apply { if (t.source == SOURCE_SP) setMimeType(MimeTypes.AUDIO_WAV) }
             .build()
     }
 
@@ -518,6 +539,7 @@ object Repo {
             SOURCE_YA -> yaStreamCache.remove(id)
             SOURCE_SC -> sc.forget(id)
             SOURCE_VK -> vk.forget(id)
+            SOURCE_SP -> {}
             else -> ytStreams.invalidate(id)
         }
     }

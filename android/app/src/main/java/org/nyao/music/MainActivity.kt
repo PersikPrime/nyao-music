@@ -13,6 +13,8 @@ import org.nyao.music.data.Repo
 import org.nyao.music.playback.PlayerConnection
 import org.nyao.music.ui.NyaoRoot
 import org.nyao.music.ui.theme.NyaoTheme
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,6 +56,19 @@ class MainActivity : ComponentActivity() {
             @Suppress("DEPRECATION")
             val msgs = intent.getParcelableArrayExtra(android.nfc.NfcAdapter.EXTRA_NDEF_MESSAGES)
             uri = msgs?.filterIsInstance<android.nfc.NdefMessage>()?.flatMap { it.records.toList() }?.firstNotNullOfOrNull { runCatching { it.toUri() }.getOrNull() }
+        }
+        // ответ входа в Spotify
+        if (org.nyao.music.spotify.Spotify.auth.isRedirect(uri)) {
+            val u = uri!!
+            intent.data = null
+            lifecycleScope.launch {
+                runCatching {
+                    org.nyao.music.spotify.Spotify.auth.handleRedirect(u)
+                    Repo.refreshAccounts()
+                }.onSuccess { org.nyao.music.playback.PlaybackEvents.emit("Spotify подключён") }
+                    .onFailure { org.nyao.music.playback.PlaybackEvents.emit(it.message ?: "Не удалось войти в Spotify") }
+            }
+            return
         }
         org.nyao.music.ui.screens.inviteCode(uri)?.let { org.nyao.music.playback.Friends.inviteLinks.value = it }
         // вход в комнату — только после подтверждения: такой intent может прислать любое приложение

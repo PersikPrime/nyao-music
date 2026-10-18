@@ -14,6 +14,8 @@ class Radio(private val ya: YandexApi, private val yt: YtMusicApi, private val s
         SOURCE_YT -> yt.radio(t.srcId)
         SOURCE_SC -> sc.related(t.srcId)
         SOURCE_VK -> vk.search(LastFm.mainArtist(t.artist))
+        // у Spotify для своих приложений рекомендаций больше нет — радио того же трека из YouTube Music
+        SOURCE_SP -> Match.find(t) { q -> yt.search(q) }?.let { yt.radio(it.srcId) } ?: emptyList()
         else -> emptyList()
     }
 

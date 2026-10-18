@@ -31,6 +31,10 @@ class RoutingDataSource(private val cached: DataSource, private val direct: Data
     }
 
     override fun open(dataSpec: DataSpec): Long {
+        // трек Spotify: в ExoPlayer — тишина той же длины, звук идёт из устройства Spotify
+        if (dataSpec.uri.scheme == org.nyao.music.spotify.SilenceDataSource.SCHEME) {
+            return org.nyao.music.spotify.SilenceDataSource().also { current = it }.open(dataSpec)
+        }
         val vk = isVk(dataSpec.uri)
         val ds = if (vk || isSoundCloud(dataSpec.uri)) direct else cached
         current = ds

@@ -16,7 +16,8 @@ object Search {
             SOURCE_YT -> res.yt
             SOURCE_SC -> res.sc
             SOURCE_VK -> res.vk
-            else -> alternateAll(res.ya, res.yt, res.sc, res.vk)
+            SOURCE_SP -> res.sp
+            else -> alternateAll(res.sp, res.ya, res.yt, res.sc, res.vk)
         }
         val artists = if (filter == "all") res.artists else res.artists.filter { it.source == filter }
         val albums = if (filter == "all") res.albums else res.albums.filter { it.source == filter }

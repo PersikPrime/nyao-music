@@ -58,6 +58,7 @@ fun sourceColor(source: String): Color = when (source) {
     SOURCE_YA -> NyaoColors.Ya
     org.nyao.music.data.SOURCE_SC -> NyaoColors.Sc
     org.nyao.music.data.SOURCE_VK -> NyaoColors.Vk
+    org.nyao.music.data.SOURCE_SP -> Color(0xFF1ED760)
     "mix" -> NyaoColors.Lavender
     else -> NyaoColors.YtBadge
 }
@@ -67,6 +68,7 @@ fun sourceShort(source: String): String = when (source) {
     SOURCE_YA -> "Я"
     org.nyao.music.data.SOURCE_SC -> "SC"
     org.nyao.music.data.SOURCE_VK -> "VK"
+    org.nyao.music.data.SOURCE_SP -> "SP"
     "mix" -> "Микс"
     else -> "YT"
 }

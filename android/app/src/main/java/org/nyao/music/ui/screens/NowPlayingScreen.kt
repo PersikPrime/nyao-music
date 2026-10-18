@@ -383,6 +383,7 @@ private fun trackLink(t: org.nyao.music.data.Track): String = when (t.source) {
     org.nyao.music.data.SOURCE_YA -> if (t.albumId != null) "https://music.yandex.ru/album/${t.albumId}/track/${t.srcId}" else "https://music.yandex.ru/track/${t.srcId}"
     org.nyao.music.data.SOURCE_SC -> "https://soundcloud.com/search/sounds?q=" + android.net.Uri.encode("${t.artist} ${t.title}")
     org.nyao.music.data.SOURCE_VK -> "https://vk.com/audio${t.srcId}"
+    org.nyao.music.data.SOURCE_SP -> "https://open.spotify.com/track/${t.srcId}"
     else -> "https://music.youtube.com/watch?v=${t.srcId}"
 }
 

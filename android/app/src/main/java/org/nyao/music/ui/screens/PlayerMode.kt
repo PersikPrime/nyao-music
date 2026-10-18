@@ -100,6 +100,7 @@ private fun tint(source: String): Pair<Color, Color> = if (org.nyao.music.ui.the
     SOURCE_YA -> Color(0xFF5C4D00) to NyaoColors.Ya
     org.nyao.music.data.SOURCE_SC -> Color(0xFF6A2A00) to Color(0xFFFFB37A)
     org.nyao.music.data.SOURCE_VK -> Color(0xFF00337A) to Color(0xFFA8CCFF)
+    org.nyao.music.data.SOURCE_SP -> Color(0xFF0B4D27) to Color(0xFF9CF0BC)
     org.nyao.music.data.SOURCE_YT -> Color(0xFF73332A) to Color(0xFFFFB4A8)
     else -> NyaoColors.Primary to NyaoColors.OnPrimary
 }

@@ -1,0 +1,22 @@
+package org.nyao.music.spotify
+
+import android.content.Context
+
+/** Всё про Spotify в одном месте: вход, Web API и устройство-плеер */
+object Spotify {
+    lateinit var auth: SpotifyAuth
+        private set
+    lateinit var api: SpotifyApi
+        private set
+    lateinit var engine: SpotifyEngine
+        private set
+
+    fun init(context: Context) {
+        if (::auth.isInitialized) return
+        auth = SpotifyAuth(context)
+        api = SpotifyApi(auth)
+        engine = SpotifyEngine(context, auth, api)
+    }
+
+    val loggedIn: Boolean get() = ::auth.isInitialized && auth.loggedIn.value
+}

@@ -117,7 +117,7 @@ fun ProfileScreen(model: AppModel) {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Home, "Вид главной", if (s.isWaveLayout) "Моя волна" else "Плеер", last = true) { model.go(Route.SettingsPage("view")) }
         }
         SettingsGroup("Сервисы") {
-            val list = listOf(SOURCE_YA, SOURCE_YT, org.nyao.music.data.SOURCE_SC, org.nyao.music.data.SOURCE_VK)
+            val list = listOf(SOURCE_YA, SOURCE_YT, org.nyao.music.data.SOURCE_SC, org.nyao.music.data.SOURCE_VK, org.nyao.music.data.SOURCE_SP)
             list.forEachIndexed { i, src ->
                 SettingsRow(null, org.nyao.music.data.sourceName(src), if (accounts[src] != null) "подключено" else "войти", leading = { ServiceLogo(src, size = 26) }, valueOk = accounts[src] != null, last = i == list.lastIndex) {
                     model.go(Route.SettingsPage("svc:$src"))
@@ -136,7 +136,7 @@ fun ProfileScreen(model: AppModel) {
             else SettingsRow(org.nyao.music.ui.components.NyaoIcons.Refresh, "Показать приветствие снова", last = true, chevron = false) { Repo.prefs.setOnboarded(false) }
         }
         Text(
-            "Токены Яндекса, YouTube, SoundCloud и VK остаются только на этом телефоне.",
+            "Токены Яндекса, YouTube, SoundCloud, VK и Spotify остаются только на этом телефоне.",
             style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
@@ -222,6 +222,7 @@ fun SettingsPageScreen(model: AppModel, section: String) {
                 section == "lastfm" -> LastFmCard(model)
                 section == "updates" -> UpdateCard(model, showTitle = false)
                 section == "about" -> AboutCard()
+                section == "svc:sp" -> SpotifyCard(model)
                 section.startsWith("svc:") -> ServiceCard(model, section.removePrefix("svc:"))
             }
         }
@@ -388,7 +389,7 @@ private fun ServiceCard(model: AppModel, source: String) {
 fun ServiceLogo(source: String, size: Int = 48) {
     val ya = source == SOURCE_YA
     Box(Modifier.size(size.dp).clip(RoundedCornerShape((size / 3.5f).dp)).background(sourceColor(source)), contentAlignment = Alignment.Center) {
-        Text(org.nyao.music.ui.components.sourceShort(source), color = if (ya) Color.Black else Color.White, fontWeight = FontWeight.Bold)
+        Text(org.nyao.music.ui.components.sourceShort(source), color = if (ya || source == org.nyao.music.data.SOURCE_SP) Color.Black else Color.White, fontWeight = FontWeight.Bold)
     }
 }
 

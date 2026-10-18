@@ -45,7 +45,7 @@ data class HomeData(
 )
 
 data class SearchResult(
-    val ya: List<Track> = emptyList(), val yt: List<Track> = emptyList(), val sc: List<Track> = emptyList(), val vk: List<Track> = emptyList(),
+    val ya: List<Track> = emptyList(), val yt: List<Track> = emptyList(), val sc: List<Track> = emptyList(), val vk: List<Track> = emptyList(), val sp: List<Track> = emptyList(),
     val artists: List<SearchArtist> = emptyList(), val albums: List<Playlist> = emptyList(),
 )
 
@@ -56,6 +56,8 @@ const val SOURCE_YA = "ya"
 const val SOURCE_YT = "yt"
 const val SOURCE_SC = "sc"
 const val SOURCE_VK = "vk"
+/** Spotify: звук из официального Web Playback SDK, нужен Premium и свой Client ID */
+const val SOURCE_SP = "sp"
 
 val ALL_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC, SOURCE_VK)
 
@@ -64,6 +66,7 @@ fun sourceName(source: String, genitive: Boolean = false): String = when (source
     SOURCE_YA -> if (genitive) "Яндекс Музыки" else "Яндекс Музыка"
     SOURCE_SC -> "SoundCloud"
     SOURCE_VK -> if (genitive) "VK Музыки" else "VK Музыка"
+    SOURCE_SP -> "Spotify"
     else -> "YouTube Music"
 }
 

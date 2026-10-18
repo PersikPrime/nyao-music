@@ -71,6 +71,7 @@ class PlaybackService : MediaSessionService() {
     private var lastPos = 0L
     private var retries = 0
     private var errorsInRow = 0
+    private var spotify: org.nyao.music.spotify.SpotifySync? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -109,6 +110,8 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         player.addListener(listener)
+        // треки Spotify: ExoPlayer ведёт очередь, звук — устройство Spotify
+        spotify = org.nyao.music.spotify.SpotifySync(player, scope).also { it.start() }
         // плавные переходы: каждые 200 мс считаем, насколько приглушить начало и конец трека
         scope.launch {
             while (isActive) {
@@ -385,6 +388,8 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         Live.release("service")
         NyaoWidget.push(this, NyaoWidget.Companion.State())
+        spotify?.release()
+        spotify = null
         scope.cancel()
         equalizer.release()
         runCatching { enhancer?.release() }

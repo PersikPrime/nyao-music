@@ -46,6 +46,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="nyao" android:host="add" />
             </intent-filter>
+            <!-- ответ входа в Spotify (OAuth PKCE): Redirect URI в Spotify Dashboard -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nyao" android:host="spotify-callback" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.nfc.action.NDEF_DISCOVERED" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -96,4 +103,11 @@
                 android:resource="@xml/widget_info" />
         </receiver>
     </application>
+
+    <!-- чтобы вход в Spotify нашёл браузер для Custom Tabs на Android 11+ -->
+    <queries>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+    </queries>
 </manifest>

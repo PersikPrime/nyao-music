@@ -63,7 +63,7 @@ object Offline {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobs = HashMap<String, Job>()
 
-    fun canDownload(t: Track): Boolean = t.source != SOURCE_SC && t.source != SOURCE_VK && t.available
+    fun canDownload(t: Track): Boolean = t.source != SOURCE_SC && t.source != SOURCE_VK && t.source != org.nyao.music.data.SOURCE_SP && t.available
 
     fun init(context: Context) {
         if (cache != null) return
