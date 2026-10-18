@@ -26,6 +26,20 @@ class SpotifyApi(private val auth: SpotifyAuth) {
     val loggedIn: Boolean get() = auth.loggedIn.value
 
     /** Последние ошибки — для «Что-то не работает?» в настройках (без токенов) */
+    /**
+     * Spotify отвечает 403 «unavailable in this country», когда запрос идёт из страны, где он не работает
+     * (например, без VPN). Тогда на 5 минут перестаём к нему ходить, чтобы не тормозить поиск и библиотеку.
+     */
+    @Volatile private var blockedUntil = 0L
+    val regionBlocked: Boolean get() = System.currentTimeMillis() < blockedUntil
+
+    /** Свои таймауты короче общих: медленный Spotify не должен держать остальной Nyao */
+    private val http = Net.client.newBuilder()
+        .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+
     private val log = ArrayDeque<String>()
     fun debugText(): String = synchronized(log) { log.joinToString("\n") }
     private fun note(s: String) = synchronized(log) {
@@ -144,6 +158,7 @@ class SpotifyApi(private val auth: SpotifyAuth) {
         query: Map<String, String> = emptyMap(),
         body: JSONObject? = null,
     ): String = withContext(Dispatchers.IO) {
+        if (regionBlocked) throw SpotifyException(REGION_MSG, 451)
         var attempt = 0
         while (true) {
             attempt++
@@ -151,22 +166,40 @@ class SpotifyApi(private val auth: SpotifyAuth) {
             val token = auth.accessToken(force = attempt == 2)
             val rb = if (method == "GET") null else (body?.toString() ?: "").toRequestBody(JSON)
             val req = Request.Builder().url(url).header("Authorization", "Bearer $token").method(method, rb).build()
-            val res = Net.client.newCall(req).execute()
+            // отменяемый запрос: если поиск перестал ждать Spotify, соединение закрывается сразу
+            val res = http.newCall(req).await()
             val (code, text, retry) = res.use { Triple(it.code, it.body?.string().orEmpty(), it.header("Retry-After")?.toLongOrNull()) }
             when {
                 code in 200..299 -> return@withContext text
                 // токен истёк раньше срока — один раз берём новый
                 code == 401 && attempt == 1 -> continue
                 // слишком часто — ждём, сколько просит Spotify (но не дольше 5 секунд)
-                code == 429 && attempt <= 2 -> { Thread.sleep(((retry ?: 1) * 1000).coerceAtMost(5000)); continue }
+                code == 429 && attempt <= 2 -> { kotlinx.coroutines.delay(((retry ?: 1) * 1000).coerceAtMost(5000)); continue }
                 else -> {
                     val msg = runCatching { JSONObject(text).obj("error")?.str("message") }.getOrNull() ?: text.take(160)
                     note("$method /$path → $code $msg")
+                    if (code == 403 && msg.contains("unavailable in this country", true)) {
+                        blockedUntil = System.currentTimeMillis() + 5 * 60_000L
+                        throw SpotifyException(REGION_MSG, 451)
+                    }
                     throw SpotifyException(explain(code, msg), code)
                 }
             }
         }
         ""
+    }
+
+    private suspend fun okhttp3.Call.await(): okhttp3.Response = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        cont.invokeOnCancellation { cancel() }
+        enqueue(object : okhttp3.Callback {
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                if (cont.isActive) cont.resumeWith(Result.success(response)) else response.close()
+            }
+
+            override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                if (cont.isActive) cont.resumeWith(Result.failure(e))
+            }
+        })
     }
 
     private fun explain(code: Int, msg: String): String = when (code) {
@@ -179,6 +212,7 @@ class SpotifyApi(private val auth: SpotifyAuth) {
 
     private companion object {
         const val BASE = "https://api.spotify.com/v1"
+        const val REGION_MSG = "Spotify недоступен из этой страны — без VPN он не отвечает"
         val JSON = "application/json".toMediaType()
     }
 }

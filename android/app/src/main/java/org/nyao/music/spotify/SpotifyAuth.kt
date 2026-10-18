@@ -26,6 +26,7 @@ import java.security.SecureRandom
 class SpotifyAuth(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("nyao_spotify", Context.MODE_PRIVATE)
     private val refreshMutex = Mutex()
+    private val tokenClient = Net.client.newBuilder().callTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build()
 
     private val _loggedIn = MutableStateFlow(prefs.getString(KEY_REFRESH, null) != null)
     val loggedIn: StateFlow<Boolean> = _loggedIn
@@ -108,7 +109,7 @@ class SpotifyAuth(context: Context) {
     }
 
     private suspend fun requestToken(body: FormBody): JSONObject = withContext(Dispatchers.IO) {
-        val (code, text) = Net.execute(Request.Builder().url(TOKEN_URL).post(body).build())
+        val (code, text) = tokenClient.newCall(Request.Builder().url(TOKEN_URL).post(body).build()).execute().use { it.code to (it.body?.string() ?: "") }
         if (code !in 200..299) {
             // invalid_grant — доступ отозван, нужен новый вход
             if (code == 400 && text.contains("invalid_grant")) logout()

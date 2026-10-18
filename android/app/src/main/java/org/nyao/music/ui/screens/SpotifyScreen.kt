@@ -101,6 +101,12 @@ fun SpotifyCard(model: AppModel) {
                     },
                     style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted, textAlign = TextAlign.Center,
                 )
+                if (loggedIn && Repo.sp.regionBlocked) {
+                    Text(
+                        "Spotify сейчас отвечает «недоступен в этой стране». Без VPN Nyao его пропускает, остальные сервисы работают как обычно.",
+                        style = MaterialTheme.typography.bodySmall, color = Color(0xFFFFB37A), textAlign = TextAlign.Center,
+                    )
+                }
                 if (loggedIn) {
                     Text("Плеер: " + statusText(status), style = MaterialTheme.typography.bodySmall, color = if (status is SpotifyEngine.Status.Ready) Color(0xFF8FE3B0) else NyaoColors.Muted)
                     if (status !is SpotifyEngine.Status.Ready) {

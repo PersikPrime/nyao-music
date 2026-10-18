@@ -15,6 +15,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** Всё, что знает приложение о сервисах: один объект на процесс. */
 object Repo {
+    /** Сколько поиск и библиотека ждут Spotify: дольше — показываем остальные сервисы без него */
+    private const val SP_WAIT = 6_000L
     lateinit var prefs: Prefs
         private set
     lateinit var ya: YandexApi
@@ -189,7 +191,7 @@ object Repo {
         val b = if (yt.loggedIn) runCatching { yt.account() }.getOrElse { Account("YouTube Music") } else null
         val c = if (sc.loggedIn) runCatching { sc.account() }.getOrElse { Account("SoundCloud (токен не принят)") } else null
         val d = if (vk.loggedIn) vk.account() else null
-        val e = if (sp.loggedIn) runCatching { sp.account() }.getOrElse { Account("Spotify (вход не принят)") } else null
+        val e = if (sp.loggedIn) runCatching { sp.account() }.getOrElse { Account(if (sp.regionBlocked) "Spotify (нужен VPN)" else "Spotify (вход не принят)") } else null
         _accounts.value = mapOf(SOURCE_YA to a, SOURCE_YT to b, SOURCE_SC to c, SOURCE_VK to d, SOURCE_SP to e)
     }
 
@@ -273,7 +275,7 @@ object Repo {
         val b = async { if (yt.loggedIn) runCatching { yt.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (sc.loggedIn) runCatching { sc.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
         val d = async { if (vk.loggedIn) runCatching { vk.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val e = async { if (sp.loggedIn) runCatching { sp.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
+        val e = async { if (sp.loggedIn && !sp.regionBlocked) (kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.likedTracks() }.getOrDefault(emptyList()) } ?: emptyList()) else emptyList() }
         val all = alternateAll(a.await(), b.await(), c.await(), d.await(), e.await())
         _liked.value = _liked.value + all.map { it.id }
         remember(all)
@@ -284,7 +286,7 @@ object Repo {
         val b = async { if (yt.loggedIn) runCatching { yt.playlists() }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (sc.loggedIn) runCatching { sc.playlists() }.getOrDefault(emptyList()) else emptyList() }
         val d = async { if (vk.loggedIn) runCatching { vk.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        val e = async { if (sp.loggedIn) runCatching { sp.playlists() }.getOrDefault(emptyList()) else emptyList() }
+        val e = async { if (sp.loggedIn && !sp.regionBlocked) (kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.playlists() }.getOrDefault(emptyList()) } ?: emptyList()) else emptyList() }
         listOfNotNull(org.nyao.music.playback.Offline.asPlaylist()) + a.await() + b.await() + c.await() + d.await() + e.await()
     }
 
@@ -311,7 +313,7 @@ object Repo {
         val b = async { if (up(SOURCE_YT)) runCatching { yt.search(q) }.getOrDefault(emptyList()) else emptyList() }
         val c = async { if (up(SOURCE_SC)) runCatching { sc.search(q) }.getOrDefault(emptyList()) else emptyList() }
         val d = async { if (vk.loggedIn && up(SOURCE_VK)) runCatching { vk.search(q) }.getOrDefault(emptyList()) else emptyList() }
-        val e = async { if (sp.loggedIn) runCatching { sp.search(q) }.getOrDefault(emptyList()) else emptyList() }
+        val e = async { if (sp.loggedIn && !sp.regionBlocked) (kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.search(q) }.getOrDefault(emptyList()) } ?: emptyList()) else emptyList() }
         // исполнители и альбомы: Яндекс и YouTube Music
         val arYa = async { if (ya.loggedIn && up(SOURCE_YA)) runCatching { ya.searchArtists(q) }.getOrDefault(emptyList()) else emptyList() }
         val arYt = async { if (up(SOURCE_YT)) runCatching { yt.searchArtists(q) }.getOrDefault(emptyList()) else emptyList() }
@@ -358,7 +360,7 @@ object Repo {
         val found = when (source) {
             SOURCE_SC -> runCatching { sc.search(main) }.getOrDefault(emptyList())
             SOURCE_VK -> if (vk.loggedIn) runCatching { vk.search(main) }.getOrDefault(emptyList()) else emptyList()
-            SOURCE_SP -> if (sp.loggedIn) runCatching { sp.search(main) }.getOrDefault(emptyList()) else emptyList()
+            SOURCE_SP -> if (sp.loggedIn && !sp.regionBlocked) (kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.search(main) }.getOrDefault(emptyList()) } ?: emptyList()) else emptyList()
             SOURCE_YA -> if (ya.loggedIn) runCatching { ya.search(main) }.getOrDefault(emptyList()) else emptyList()
             else -> runCatching { yt.search(main) }.getOrDefault(emptyList())
         }
