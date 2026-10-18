@@ -128,7 +128,8 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
                 // SDK использует Widevine через EME — разрешаем protected media только своей странице
                 override fun onPermissionRequest(request: PermissionRequest) {
                     val wanted = PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID
-                    val ok = request.origin.host == ASSET_DOMAIN && wanted in request.resources
+                    // наша страница и фрейм официального SDK (sdk.scdn.co) — именно в нём SDK запускает Widevine
+                    val ok = request.origin.host in DRM_HOSTS && wanted in request.resources
                     note("разрешение ${request.resources.joinToString()} от ${request.origin.host}: ${if (ok) "дано" else "нет"}")
                     if (ok) request.grant(arrayOf(wanted)) else request.deny()
                 }
@@ -283,6 +284,7 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
         fun chromeUserAgent(ua: String): String = ua.replace("; wv)", ")").replace(Regex(" Version/\\d+(\\.\\d+)*"), "")
 
         const val TAG = "NyaoSpotify"
+        val DRM_HOSTS = setOf(WebViewAssetLoader.DEFAULT_DOMAIN, "sdk.scdn.co")
         const val PLAYER_NAME = "Nyao Music"
         const val ASSET_DOMAIN = WebViewAssetLoader.DEFAULT_DOMAIN
     }
