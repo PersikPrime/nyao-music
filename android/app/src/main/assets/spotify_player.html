@@ -90,6 +90,23 @@
     }
   };
 
+  // диагностика: какой браузер видит Spotify и даёт ли WebView Widevine через EME
+  function diag() {
+    var info = { ua: navigator.userAgent, secure: window.isSecureContext, eme: !!navigator.requestMediaKeySystemAccess };
+    if (!navigator.requestMediaKeySystemAccess) { emit('diag', info); return; }
+    var caps = [{ contentType: 'audio/mp4; codecs="mp4a.40.2"' }];
+    var tryCfg = function (robust) {
+      var c = caps.map(function (x) { return { contentType: x.contentType, robustness: robust }; });
+      return navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{ initDataTypes: ['cenc'], audioCapabilities: c }])
+        .then(function () { return 'ok'; }, function (e) { return 'нет (' + (e && e.name) + ')'; });
+    };
+    Promise.all([tryCfg(''), tryCfg('SW_SECURE_CRYPTO')]).then(function (r) {
+      info.widevine = r[0]; info.widevineSw = r[1];
+      emit('diag', info);
+    });
+  }
+  diag();
+
   window.onSpotifyWebPlaybackSDKReady = function () { emit('sdk_ready', null); };
   window.addEventListener('error', function (e) {
     emit('page_error', { message: e.message || 'script error' });

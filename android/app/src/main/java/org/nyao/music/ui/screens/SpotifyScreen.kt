@@ -161,6 +161,10 @@ fun SpotifyCard(model: AppModel) {
                 appendLine("Вход: " + if (loggedIn) "да" else "нет")
                 appendLine("Плеер: " + statusText(status))
                 appendLine()
+                appendLine("— Плеер —")
+                appendLine(Spotify.engine.debugText().ifBlank { "Плеер ещё не запускался — нажми «Проверить плеер»." })
+                appendLine()
+                appendLine("— Web API —")
                 append(Repo.sp.debugText().ifBlank { "Ошибок Web API пока не было." })
             }
         }) { Text("Что-то не работает?") }

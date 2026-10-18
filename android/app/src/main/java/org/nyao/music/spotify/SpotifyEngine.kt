@@ -87,6 +87,14 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
 
     val started: Boolean get() = webView != null
 
+    /** Журнал движка для «Что-то не работает?»: события SDK, ошибки страницы, диагностика (без токенов) */
+    private val log = ArrayDeque<String>()
+    fun debugText(): String = synchronized(log) { log.joinToString("\n") }
+    private fun note(s: String) = synchronized(log) {
+        log.addLast(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + s.take(400))
+        while (log.size > 80) log.removeFirst()
+    }
+
     @MainThread
     @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
     fun start() {
@@ -103,6 +111,9 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
             settings.mediaPlaybackRequiresUserGesture = false
             settings.allowFileAccess = false
             settings.allowContentAccess = false
+            // Spotify официально поддерживает обычные браузеры, а WebView помечает себя «; wv».
+            // Представляемся тем же Chrome той же версии, без пометки WebView; Widevine — настоящий, системный.
+            settings.userAgentString = chromeUserAgent(settings.userAgentString)
             addJavascriptInterface(Bridge(), "AndroidBridge")
             webViewClient = object : WebViewClient() {
                 // страница отдаётся с https://appassets.androidplatform.net: EME работает только в secure context
@@ -117,11 +128,14 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
                 // SDK использует Widevine через EME — разрешаем protected media только своей странице
                 override fun onPermissionRequest(request: PermissionRequest) {
                     val wanted = PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID
-                    if (request.origin.host == ASSET_DOMAIN && wanted in request.resources) request.grant(arrayOf(wanted)) else request.deny()
+                    val ok = request.origin.host == ASSET_DOMAIN && wanted in request.resources
+                    note("разрешение ${request.resources.joinToString()} от ${request.origin.host}: ${if (ok) "дано" else "нет"}")
+                    if (ok) request.grant(arrayOf(wanted)) else request.deny()
                 }
 
                 override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                     Log.d(TAG, "JS: ${message.message()}")
+                    if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR || message.messageLevel() == ConsoleMessage.MessageLevel.WARNING) note("console: ${message.message()}")
                     return true
                 }
             }
@@ -193,6 +207,7 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
 
     private fun fail(kind: String, message: String) {
         Log.w(TAG, "$kind: $message")
+        note("ошибка $kind: $message")
         _status.value = Status.Failed(kind, message)
         _errors.tryEmit(kind to message)
     }
@@ -200,7 +215,9 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
     private fun handleEvent(type: String, payload: Any?) {
         val o = payload as? JSONObject
         val message = o?.optString("message").orEmpty()
+        if (type != "player_state_changed") note("событие $type" + (if (message.isNotEmpty()) ": $message" else ""))
         when (type) {
+            "diag" -> note("браузер: ${o?.optString("ua")} · secure=${o?.optBoolean("secure")} · EME=${o?.optBoolean("eme")} · Widevine=${o?.optString("widevine")} · SW_SECURE_CRYPTO=${o?.optString("widevineSw")}")
             "sdk_ready" -> {
                 _status.value = Status.Connecting
                 evaluate("window.__engine.init(${JSONObject.quote(PLAYER_NAME)}, 1.0)")
@@ -262,6 +279,9 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
     }
 
     private companion object {
+        /** «…; wv) … Version/4.0 Chrome/…» → обычный Chrome для Android той же версии */
+        fun chromeUserAgent(ua: String): String = ua.replace("; wv)", ")").replace(Regex(" Version/\\d+(\\.\\d+)*"), "")
+
         const val TAG = "NyaoSpotify"
         const val PLAYER_NAME = "Nyao Music"
         const val ASSET_DOMAIN = WebViewAssetLoader.DEFAULT_DOMAIN
