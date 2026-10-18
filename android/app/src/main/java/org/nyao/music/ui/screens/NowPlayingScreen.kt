@@ -310,6 +310,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                 if (queueIndex < queue.size - 1) androidx.compose.material3.DropdownMenuItem(text = { Text("Ниже") }, onClick = { close(); PlayerConnection.move(queueIndex, queueIndex + 1) })
                 androidx.compose.material3.DropdownMenuItem(text = { Text("Убрать из очереди") }, onClick = { close(); PlayerConnection.removeAt(queueIndex) })
                 androidx.compose.material3.DropdownMenuItem(text = { Text("Похожее · радио по треку") }, onClick = { close(); PlayerConnection.startRadio(q) })
+                if (Repo.cloud.loggedIn) androidx.compose.material3.DropdownMenuItem(text = { Text("Отправить другу") }, onClick = { close(); org.nyao.music.playback.Friends.shareRequest.value = q })
             }
         }
         if (played.isNotEmpty()) {
@@ -436,6 +437,10 @@ private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClos
                     onClose()
                     model.openArtist(t)
                 }) { Text("Исполнитель") }
+                if (Repo.cloud.loggedIn) androidx.compose.material3.OutlinedButton(onClick = {
+                    onClose()
+                    org.nyao.music.playback.Friends.shareRequest.value = t
+                }) { Text("Другу") }
                 model.albumOf(t)?.let { al ->
                     androidx.compose.material3.OutlinedButton(onClick = {
                         onClose()

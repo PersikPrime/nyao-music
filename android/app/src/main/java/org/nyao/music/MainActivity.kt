@@ -31,10 +31,33 @@ class MainActivity : ComponentActivity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+        handleLink(intent)
         setContent {
             org.nyao.music.ui.theme.AccentSync()
             NyaoTheme { NyaoRoot() }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleLink(intent)
+    }
+
+    /** Приглашение в друзья (ссылка, QR, NFC) или приглашение в комнату из уведомления */
+    private fun handleLink(intent: android.content.Intent?) {
+        intent ?: return
+        var uri = intent.data
+        if (uri == null && intent.action == android.nfc.NfcAdapter.ACTION_NDEF_DISCOVERED) {
+            @Suppress("DEPRECATION")
+            val msgs = intent.getParcelableArrayExtra(android.nfc.NfcAdapter.EXTRA_NDEF_MESSAGES)
+            uri = msgs?.filterIsInstance<android.nfc.NdefMessage>()?.flatMap { it.records.toList() }?.firstNotNullOfOrNull { runCatching { it.toUri() }.getOrNull() }
+        }
+        org.nyao.music.ui.screens.inviteCode(uri)?.let { org.nyao.music.playback.Friends.inviteLinks.value = it }
+        intent.getStringExtra("room")?.let { org.nyao.music.playback.Friends.roomLinks.value = it }
+        // ссылку обработали — повторный поворот экрана не должен добавлять друга ещё раз
+        intent.data = null
+        intent.removeExtra("room")
     }
 
     // пока приложение на экране, оно на связи для Nyao Connect и «Слушать вместе»

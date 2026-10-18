@@ -82,6 +82,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
     }
 
     private fun forget() {
+        org.nyao.music.playback.Friends.forget()
         prefs.nyaoToken = null
         prefs.nyaoUser = null
         _user.value = null
@@ -381,6 +382,122 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
     suspend fun stats(period: String): JSONObject {
         val tz = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000
         return request("GET", "/stats?period=$period&tz=$tz")
+    }
+
+    // ---------- Мини-соцсеть: профиль, друзья, приглашения, входящие ----------
+
+    fun parseCard(o: JSONObject?): UserCard? {
+        o ?: return null
+        val id = o.optString("id")
+        if (id.isEmpty()) return null
+        return UserCard(id, o.optString("nick"), o.optString("name"), o.str("picture"))
+    }
+
+    private fun parseNow(o: JSONObject?): FriendNow? {
+        o ?: return null
+        val t = parseTrack(o.obj("track") ?: return null) ?: return null
+        return FriendNow(t, o.optBoolean("playing"), o.optLong("updatedAt"))
+    }
+
+    fun parseFriendNow(o: JSONObject?): FriendNow? = parseNow(o)
+
+    private fun parseProfile(o: JSONObject) = MyProfile(
+        nick = o.optString("nick"), nickSet = o.optBoolean("nickSet"), bio = o.optString("bio"),
+        visibility = o.optString("visibility", "friends"), showNow = o.optBoolean("showNow", true),
+        showStats = o.optBoolean("showStats", true), showLikes = o.optBoolean("showLikes"), invisible = o.optBoolean("invisible"),
+    )
+
+    suspend fun profile(): MyProfile = parseProfile(request("GET", "/profile"))
+
+    suspend fun updateProfile(changes: JSONObject): MyProfile = parseProfile(request("PUT", "/profile", changes))
+
+    /** null — ник свободен, иначе текст ошибки */
+    suspend fun checkNick(nick: String): String? {
+        val o = request("GET", "/nick/check?nick=" + java.net.URLEncoder.encode(nick, "UTF-8"))
+        return if (o.optBoolean("ok")) null else o.optString("error", "Ник не подходит")
+    }
+
+    suspend fun searchUsers(q: String): List<SearchUser> =
+        request("GET", "/users/search?q=" + java.net.URLEncoder.encode(q, "UTF-8")).arr("users").objects().mapNotNull { o ->
+            parseCard(o)?.let { SearchUser(it, o.optString("relation", "none")) }
+        }
+
+    suspend fun user(key: String): PublicProfile {
+        val o = request("GET", "/users/" + java.net.URLEncoder.encode(key, "UTF-8"))
+        val st = o.obj("stats")
+        return PublicProfile(
+            user = parseCard(o)!!,
+            relation = o.optString("relation", "none"),
+            private = o.optBoolean("private"),
+            bio = o.optString("bio"),
+            friends = o.optInt("friends"),
+            now = parseNow(o.obj("now")),
+            stats = st?.let { s ->
+                UserStats(
+                    minutes = s.optInt("minutes"), plays = s.optInt("plays"),
+                    topArtists = s.arr("topArtists").objects().map { TopArtist(it.optString("name"), it.optInt("plays")) },
+                    topTracks = s.arr("topTracks").objects().mapNotNull { t ->
+                        val id = t.optString("trackId")
+                        if (id.isBlank()) null
+                        else Track(id = id, source = id.substringBefore(':'), srcId = id.substringAfter(':'), title = t.optString("title"), artist = t.optString("artist"), album = "", duration = 0, cover = t.str("cover")) to t.optInt("plays")
+                    },
+                )
+            },
+        )
+    }
+
+    /** → (друзья, входящие заявки, исходящие) */
+    suspend fun friends(): Triple<List<Friend>, List<UserCard>, List<UserCard>> {
+        val o = request("GET", "/friends")
+        val friends = o.arr("friends").objects().mapNotNull { f -> parseCard(f)?.let { Friend(it, parseNow(f.obj("now")), f.optBoolean("online")) } }
+        return Triple(friends, o.arr("incoming").objects().mapNotNull { parseCard(it) }, o.arr("outgoing").objects().mapNotNull { parseCard(it) })
+    }
+
+    suspend fun requestFriend(nick: String? = null, userId: String? = null): String =
+        request("POST", "/friends/request", JSONObject().apply { nick?.let { put("nick", it) }; userId?.let { put("userId", it) } }).optString("relation")
+
+    suspend fun acceptFriend(id: String): String = request("POST", "/friends/$id/accept").optString("relation")
+    suspend fun removeFriend(id: String) { request("DELETE", "/friends/$id") }
+    suspend fun block(id: String) { request("POST", "/blocks/$id") }
+    suspend fun unblock(id: String) { request("DELETE", "/blocks/$id") }
+    suspend fun blocked(): List<UserCard> = request("GET", "/blocks").arr("users").objects().mapNotNull { parseCard(it) }
+
+    suspend fun invite(): Invite {
+        val o = request("POST", "/invites")
+        return Invite(o.optString("code"), o.optString("url"), o.optLong("expiresAt"))
+    }
+
+    /** Открыть приглашение друга: сразу друзья. → карточка того, кто пригласил */
+    suspend fun useInvite(code: String): Pair<String, UserCard?> {
+        val o = request("POST", "/invites/$code/use")
+        return o.optString("relation") to parseCard(o.obj("user"))
+    }
+
+    suspend fun shareTrack(to: String, t: Track, emoji: String? = null) {
+        request("POST", "/share", JSONObject().put("to", to).put("track", trackJson(t)).apply { emoji?.let { put("emoji", it) } })
+    }
+
+    suspend fun inviteToRoom(friendId: String) { request("POST", "/friends/$friendId/invite") }
+
+    suspend fun reactToFriend(friendId: String, emoji: String, t: Track?) {
+        request("POST", "/friends/$friendId/react", JSONObject().put("emoji", emoji).apply { t?.let { put("track", trackJson(it)) } })
+    }
+
+    fun parseInbox(o: JSONObject): InboxItem? {
+        val from = parseCard(o.obj("from")) ?: return null
+        return InboxItem(
+            id = o.optString("id"), kind = o.optString("kind"), from = from,
+            track = o.obj("track")?.let { parseTrack(it) }, emoji = o.str("emoji"), code = o.str("code"),
+            createdAt = o.optLong("createdAt", System.currentTimeMillis()), read = o.optBoolean("read"),
+        )
+    }
+
+    suspend fun inbox(): List<InboxItem> = request("GET", "/inbox").arr("items").objects().mapNotNull { parseInbox(it) }
+
+    suspend fun readInbox() { request("POST", "/inbox/read", JSONObject().put("all", true)) }
+
+    suspend fun setPushToken(token: String?) {
+        request("PUT", "/push/token", JSONObject().put("token", token ?: "").put("platform", "android"))
     }
 
     suspend fun others(): List<RemoteNow> {

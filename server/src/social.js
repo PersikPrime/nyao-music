@@ -394,7 +394,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
     ['GET', /^\/add\/([a-z0-9]{6,16})$/, async ({ m }) => {
       const { rows } = await q('SELECT u.name, p.nick FROM invites i JOIN users u ON u.id = i.user_id JOIN profiles p ON p.user_id = u.id WHERE i.code = $1 AND i.expires_at > now()', [m[1]]);
       if (!rows.length) return page('Приглашение устарело', 'Попроси друга показать новый QR-код или ссылку.', false);
-      return page(`${rows[0].name || '@' + rows[0].nick} зовёт в Nyao Music`, `Установи Nyao Music и открой эту ссылку ещё раз — вы сразу станете друзьями. Ник: @${rows[0].nick}`);
+      return page(`${rows[0].name || '@' + rows[0].nick} зовёт в Nyao Music`, `Если Nyao Music уже стоит — открой приглашение в приложении, и вы сразу станете друзьями. Ник: @${rows[0].nick}`, true, { href: `nyao://add/${m[1]}`, label: 'Открыть в Nyao Music' });
     }],
 
     // ---------- Музыка друзьям: треки, приглашения в комнату, реакции ----------

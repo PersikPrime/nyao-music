@@ -62,10 +62,12 @@ fun ProfileScreen(model: AppModel) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().padding(horizontal = 16.dp).padding(top = 12.dp).padding(BottomInset),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        // Карточка профиля: пока только отклик на нажатие — потом здесь откроется страница профиля (мини-соцсеть)
+        // Карточка профиля: нажатие открывает свою страницу профиля (её видят друзья)
+        val social by org.nyao.music.playback.Friends.profile.collectAsState()
+        androidx.compose.runtime.LaunchedEffect(user) { if (user != null) runCatching { org.nyao.music.playback.Friends.refresh() } }
         Column(
             Modifier.fillMaxWidth().bouncy(0.97f).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
-                .clickable { }.padding(18.dp),
+                .clickable(enabled = user != null) { model.go(Route.UserPage("")) }.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -74,7 +76,7 @@ fun ProfileScreen(model: AppModel) {
                     Text(user?.name ?: "Аккаунт Nyao", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     Text(
                         when {
-                            user != null -> user?.username?.let { "@$it" } ?: "синхронизация включена"
+                            user != null -> social?.nick?.let { "@$it" } ?: user?.username?.let { "@$it" } ?: "синхронизация включена"
                             model.cloudLogging -> "Подтверди вход в Telegram"
                             else -> "Войди, чтобы история и миксы были везде"
                         },
@@ -102,6 +104,7 @@ fun ProfileScreen(model: AppModel) {
         SettingsGroup("Профиль") {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.BarChart, "Статистика") { model.go(Route.Stats) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Devices, "Устройства") { model.connectOpen = true }
+            if (user != null) SettingsRow(org.nyao.music.ui.components.NyaoIcons.Edit, "Мой профиль и приватность", social?.let { if (it.invisible) "невидимка" else when (it.visibility) { "all" -> "видят все"; "nobody" -> "скрыт"; else -> "только друзья" } }) { model.go(Route.SettingsPage("profile")) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Person, "Аккаунт Nyao", if (user != null) "вход выполнен" else "не выполнен", last = true) { model.go(Route.SettingsPage("account")) }
         }
         SettingsGroup("Приложение") {
@@ -180,6 +183,7 @@ private fun SettingsRow(
 }
 
 private fun sectionTitle(section: String): String = when {
+    section == "profile" -> "Мой профиль"
     section == "account" -> "Аккаунт Nyao"
     section == "sound" -> "Звук и воспроизведение"
     section == "wave" -> "Моя волна"
@@ -208,6 +212,7 @@ fun SettingsPageScreen(model: AppModel, section: String) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             when {
+                section == "profile" -> EditProfileCard(model)
                 section == "account" -> NyaoAccountCard(model)
                 section == "sound" -> EqCard(showTitle = false)
                 section == "wave" -> WaveSettings(onChanged = { model.refreshWave() })

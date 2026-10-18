@@ -115,6 +115,7 @@ private fun routeOrder(r: Route): Int = when (r) {
     is Route.ArtistPage -> 7
     Route.Stats -> 8
     is Route.SettingsPage -> 9
+    is Route.UserPage -> 10
 }
 
 /** icon — обычная (контурная), iconOn — залитая для выбранной вкладки, как в Material 3 Expressive */
@@ -132,7 +133,7 @@ private fun tabsFor(s: org.nyao.music.data.Settings): List<Tab> =
     listOf(HOME_TAB) + (if (s.isWaveLayout || s.waveTab) listOf(WAVE_TAB) else emptyList()) + listOf(LIBRARY_TAB, SEARCH_TAB, PROFILE_TAB)
 
 /** Раздел профиля: панель превращается в «домой» отдельной кнопкой + профиль и «Вместе» */
-private fun isProfileArea(r: Route): Boolean = r == Route.Settings || r == Route.Together || r == Route.Stats || r is Route.SettingsPage
+private fun isProfileArea(r: Route): Boolean = r == Route.Settings || r == Route.Together || r == Route.Stats || r is Route.SettingsPage || r is Route.UserPage
 
 @Composable
 fun NyaoRoot() {
@@ -236,6 +237,44 @@ fun NyaoRoot() {
 
         TopToast(toast, onDismiss = { toast = null }, modifier = Modifier.align(Alignment.TopCenter))
 
+        // ---- друзья: всплывашки, «отправить другу», ник при первом входе, ссылки-приглашения ----
+        org.nyao.music.ui.screens.SocialBannerHost(model, Modifier.align(Alignment.TopCenter))
+        val shareTrack by org.nyao.music.playback.Friends.shareRequest.collectAsState()
+        shareTrack?.let { t -> org.nyao.music.ui.screens.FriendPickerSheet(model, t) { org.nyao.music.playback.Friends.shareRequest.value = null } }
+        val social by org.nyao.music.playback.Friends.profile.collectAsState()
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        val socialPrefs = remember { ctx.getSharedPreferences("nyao_social", android.content.Context.MODE_PRIVATE) }
+        var nickAsked by remember { mutableStateOf(socialPrefs.getBoolean("nickAsked", false)) }
+        val p = social
+        if (settings.onboarded && p != null && !p.nickSet && !nickAsked) org.nyao.music.ui.screens.NickSetupSheet(model) {
+            nickAsked = true
+            socialPrefs.edit().putBoolean("nickAsked", true).apply()
+        }
+        val cloudUser by Repo.cloud.user.collectAsState()
+        LaunchedEffect(cloudUser) {
+            if (cloudUser == null) return@LaunchedEffect
+            runCatching { org.nyao.music.playback.Friends.refresh() }
+            // вошёл после того, как открыл приглашение — добавляем друга сейчас
+            org.nyao.music.playback.Friends.pendingInvite?.let { org.nyao.music.ui.screens.openInvite(model, it) }
+        }
+        LaunchedEffect(Unit) {
+            org.nyao.music.playback.Friends.inviteLinks.collect { code ->
+                if (code != null) {
+                    org.nyao.music.playback.Friends.inviteLinks.value = null
+                    org.nyao.music.ui.screens.openInvite(model, code)
+                }
+            }
+        }
+        LaunchedEffect(Unit) {
+            org.nyao.music.playback.Friends.roomLinks.collect { code ->
+                if (code != null) {
+                    org.nyao.music.playback.Friends.roomLinks.value = null
+                    model.go(Route.Together)
+                    runCatching { org.nyao.music.playback.Together.join(code) }.onFailure { model.message(it.message ?: "Комната уже закрыта") }
+                }
+            }
+        }
+
         // режим «Плеер»: окно нового микса; после обновления с 0.4 — выбор вида; устаревшая сборка — обновиться
         if (model.mixBuilderOpen) org.nyao.music.ui.screens.MixBuilderDialog(model)
         // Nyao Connect и перенос плейлиста
@@ -272,6 +311,7 @@ private fun Content(model: AppModel, wide: Boolean) {
             is Route.ArtistPage -> org.nyao.music.ui.screens.ArtistScreen(model, r)
             Route.Together -> org.nyao.music.ui.screens.TogetherScreen(model)
             Route.Stats -> org.nyao.music.ui.screens.StatsScreen(model)
+            is Route.UserPage -> org.nyao.music.ui.screens.UserScreen(model, r.key)
         }
     }
 }

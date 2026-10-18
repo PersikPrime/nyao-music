@@ -72,7 +72,7 @@ function limiter(limit) {
   };
 }
 
-export function page(title, text, ok = true) {
+export function page(title, text, ok = true, action = null) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · Nyao Music</title>
@@ -82,7 +82,8 @@ export function page(title, text, ok = true) {
 .card{max-width:420px;width:100%;background:var(--card);border:1px solid #ffffff12;border-radius:28px;padding:36px 28px;text-align:center}
 .dot{width:72px;height:72px;margin:0 auto 20px;border-radius:24px;background:var(--acc);display:grid;place-items:center;font-size:36px;color:#0b0b0f}
 h1{margin:0 0 8px;font-size:24px}p{margin:0;color:var(--muted)}
-</style></head><body><div class="card"><div class="dot">${ok ? '✓' : '!'}</div><h1>${esc(title)}</h1><p>${esc(text)}</p></div></body></html>`;
+.btn{display:inline-block;margin-top:22px;padding:14px 26px;border-radius:999px;background:var(--acc);color:#0b0b0f;font-weight:700;text-decoration:none}
+</style></head><body><div class="card"><div class="dot">${ok ? '✓' : '!'}</div><h1>${esc(title)}</h1><p>${esc(text)}</p>${action ? `<a class="btn" href="${esc(action.href)}">${esc(action.label)}</a>` : ''}</div></body></html>`;
 }
 
 /** Первая сборка, которая вообще разговаривает с сервером (0.4 (24)) — её считаем у клиентов без заголовка X-Nyao-Build */

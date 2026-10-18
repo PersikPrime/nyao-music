@@ -181,6 +181,7 @@ fun TrackRow(
                 DropdownMenuItem(text = { Text("Играть следующим") }, onClick = { menu = false; onPlayNext() })
                 DropdownMenuItem(text = { Text("В конец очереди") }, onClick = { menu = false; org.nyao.music.playback.PlayerConnection.addToQueue(track) })
                 DropdownMenuItem(text = { Text("Похожее · радио по треку") }, onClick = { menu = false; org.nyao.music.playback.PlayerConnection.startRadio(track) })
+                if (org.nyao.music.data.Repo.cloud.loggedIn) DropdownMenuItem(text = { Text("Отправить другу") }, onClick = { menu = false; org.nyao.music.playback.Friends.shareRequest.value = track })
                 if (onArtist != null) DropdownMenuItem(text = { Text("Исполнитель") }, onClick = { menu = false; onArtist() })
                 if (onAlbum != null) DropdownMenuItem(text = { Text("Альбом") }, onClick = { menu = false; onAlbum() })
                 DropdownMenuItem(text = { Text(if (liked) "Убрать из «Мне нравится»" else "Мне нравится") }, onClick = { menu = false; onLike(!liked) })

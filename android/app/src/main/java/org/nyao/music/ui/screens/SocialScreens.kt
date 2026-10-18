@@ -285,6 +285,9 @@ fun TogetherScreen(model: AppModel) {
                 // «Вместе» теперь вкладка раздела профиля — без стрелки «назад», домой ведёт кнопка в панели
                 Text("Вместе", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.statusBarsPadding().padding(start = 20.dp, top = 16.dp, bottom = 4.dp))
             }
+            // друзья, заявки и входящие — над комнатами
+            if (Repo.cloud.loggedIn) item { FriendsHub(model) }
+            if (Repo.cloud.loggedIn) item { Text("Комнаты", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 22.dp, bottom = 2.dp)) }
             val r = room
             if (!Repo.cloud.loggedIn) {
                 item {
