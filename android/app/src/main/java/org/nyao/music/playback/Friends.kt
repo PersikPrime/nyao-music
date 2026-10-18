@@ -65,7 +65,8 @@ object Friends {
 
     /** Ссылки, открытые снаружи (браузер, камера, NFC, уведомление) — их подхватывает интерфейс */
     val inviteLinks = MutableStateFlow<String?>(null)
-    val roomLinks = MutableStateFlow<String?>(null)
+    /** (код комнаты, кто позвал) — вход только после подтверждения */
+    val roomLinks = MutableStateFlow<Pair<String, String?>?>(null)
 
     /** «Отправить другу» из любого списка треков — шторку выбора друга рисует интерфейс */
     val shareRequest = MutableStateFlow<Track?>(null)
@@ -102,6 +103,7 @@ object Friends {
         _outgoing.value = emptyList()
         _inbox.value = emptyList()
         _loaded.value = false
+        NyaoPush.reset()
     }
 
     fun markInboxRead() {
@@ -117,13 +119,16 @@ object Friends {
             "now" -> {
                 val id = e.obj("user")?.optString("id") ?: return
                 val now = cloud.parseFriendNow(e.obj("now"))
-                _friends.value = _friends.value.map { if (it.user.id == id) it.copy(now = now, online = true) else it }
+                // now: null — пауза или «невидимка»; online:false — друг спрятался, в сети его не показываем
+                val hidden = e.has("online") && !e.optBoolean("online", true)
+                _friends.value = _friends.value.map { if (it.user.id == id) it.copy(now = now, online = if (hidden) false else now != null || it.online) else it }
                     .sortedByDescending { it.now?.updatedAt ?: 0L }
             }
             "friend-request" -> {
                 val u = cloud.parseCard(e.obj("user")) ?: return
                 if (_incoming.value.none { it.id == u.id }) _incoming.value = listOf(u) + _incoming.value
-                show(SocialBanner("friend-request", "Заявка в друзья", "${u.display} хочет дружить", u))
+                // повторная заявка от того же человека — без всплывашки
+                if (!e.optBoolean("quiet")) show(SocialBanner("friend-request", "Заявка в друзья", "${u.display} хочет дружить", u))
             }
             "friend-accepted" -> {
                 val u = cloud.parseCard(e.obj("user")) ?: return
@@ -131,7 +136,8 @@ object Friends {
                 refreshAsync()
             }
             "track", "room", "react" -> {
-                val item = cloud.parseInbox(e) ?: return
+                // id события — номер в очереди устройства, id записи во «Входящих» — inboxId
+                val item = cloud.parseInbox(JSONObject(e.toString()).put("id", e.optString("inboxId", e.optString("id")))) ?: return
                 _inbox.value = (listOf(item) + _inbox.value.filter { it.id != item.id }).take(100)
                 val u = item.from
                 when (item.kind) {
@@ -161,8 +167,8 @@ object Friends {
             val open = Intent(app, org.nyao.music.MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .putExtra("social", b.kind)
-                .apply { b.code?.let { putExtra("room", it) } }
-            val pi = PendingIntent.getActivity(app, b.kind.hashCode(), open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                .apply { b.code?.let { putExtra("room", it) }; b.user?.let { putExtra("roomFrom", it.display) } }
+            val pi = PendingIntent.getActivity(app, (b.id % Int.MAX_VALUE).toInt(), open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             val n = NotificationCompat.Builder(app, CHANNEL)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(b.title)

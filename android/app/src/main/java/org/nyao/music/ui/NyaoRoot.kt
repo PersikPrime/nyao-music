@@ -255,25 +255,64 @@ fun NyaoRoot() {
             if (cloudUser == null) return@LaunchedEffect
             runCatching { org.nyao.music.playback.Friends.refresh() }
             org.nyao.music.playback.NyaoPush.register()
-            // вошёл после того, как открыл приглашение — добавляем друга сейчас
-            org.nyao.music.playback.Friends.pendingInvite?.let { org.nyao.music.ui.screens.openInvite(model, it) }
+            // вошёл после того, как открыл приглашение — спросим, добавлять ли
+            org.nyao.music.playback.Friends.pendingInvite?.let { code ->
+                org.nyao.music.playback.Friends.pendingInvite = null
+                org.nyao.music.playback.Friends.inviteLinks.value = code
+            }
         }
+        // ссылка-приглашение и вход в комнату снаружи — только после «Добавить» / «Войти»
+        var askInvite by remember { mutableStateOf<Pair<String, org.nyao.music.data.UserCard?>?>(null) }
+        var askRoom by remember { mutableStateOf<Pair<String, String?>?>(null) }
         LaunchedEffect(Unit) {
             org.nyao.music.playback.Friends.inviteLinks.collect { code ->
                 if (code != null) {
                     org.nyao.music.playback.Friends.inviteLinks.value = null
-                    org.nyao.music.ui.screens.openInvite(model, code)
+                    if (!Repo.cloud.loggedIn) org.nyao.music.ui.screens.openInvite(model, code)
+                    else runCatching { Repo.cloud.invitePreview(code) }
+                        .onSuccess { (u, rel) ->
+                            when (rel) {
+                                "self" -> model.message("Это твоё приглашение")
+                                "friends" -> { model.message("${u?.display ?: "Вы"} уже в друзьях"); u?.let { model.go(Route.UserPage(it.id)) } }
+                                else -> askInvite = code to u
+                            }
+                        }
+                        .onFailure { model.message(it.message ?: "Приглашение не открылось") }
                 }
             }
         }
         LaunchedEffect(Unit) {
-            org.nyao.music.playback.Friends.roomLinks.collect { code ->
-                if (code != null) {
+            org.nyao.music.playback.Friends.roomLinks.collect { r ->
+                if (r != null) {
                     org.nyao.music.playback.Friends.roomLinks.value = null
-                    model.go(Route.Together)
-                    runCatching { org.nyao.music.playback.Together.join(code) }.onFailure { model.message(it.message ?: "Комната уже закрыта") }
+                    askRoom = r
                 }
             }
+        }
+        askInvite?.let { (code, u) ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { askInvite = null },
+                icon = { org.nyao.music.ui.screens.UserAvatar(u, 56) },
+                title = { Text("Добавить в друзья?") },
+                text = { Text(if (u != null) "${u.display} (@${u.nick}) зовёт тебя в друзья. Вы будете видеть, что слушаете, и сможете звать друг друга в комнаты." else "Приглашение в друзья") },
+                confirmButton = { androidx.compose.material3.Button(onClick = { askInvite = null; org.nyao.music.ui.screens.openInvite(model, code) }) { Text("Добавить") } },
+                dismissButton = { androidx.compose.material3.TextButton(onClick = { askInvite = null }) { Text("Отмена") } },
+            )
+        }
+        askRoom?.let { (code, from) ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { askRoom = null },
+                title = { Text("Войти в комнату?") },
+                text = { Text((if (from != null) "$from зовёт слушать вместе. " else "") + "Комната $code — музыка у всех будет играть одновременно.") },
+                confirmButton = {
+                    androidx.compose.material3.Button(onClick = {
+                        askRoom = null
+                        model.go(Route.Together)
+                        scope.launch { runCatching { org.nyao.music.playback.Together.join(code) }.onFailure { model.message(it.message ?: "Комната уже закрыта") } }
+                    }) { Text("Войти") }
+                },
+                dismissButton = { androidx.compose.material3.TextButton(onClick = { askRoom = null }) { Text("Отмена") } },
+            )
         }
 
         // режим «Плеер»: окно нового микса; после обновления с 0.4 — выбор вида; устаревшая сборка — обновиться

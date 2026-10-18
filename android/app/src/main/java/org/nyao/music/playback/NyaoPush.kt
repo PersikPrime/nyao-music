@@ -31,6 +31,11 @@ object NyaoPush {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var sent: String? = null
 
+    /** Вышел из аккаунта — после нового входа токен надо отправить заново */
+    fun reset() {
+        sent = null
+    }
+
     /** Отдать токен устройства серверу (после входа и при каждом запуске — вдруг сменился) */
     fun register() {
         if (!Repo.cloud.loggedIn) return

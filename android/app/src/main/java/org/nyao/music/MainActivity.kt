@@ -54,10 +54,12 @@ class MainActivity : ComponentActivity() {
             uri = msgs?.filterIsInstance<android.nfc.NdefMessage>()?.flatMap { it.records.toList() }?.firstNotNullOfOrNull { runCatching { it.toUri() }.getOrNull() }
         }
         org.nyao.music.ui.screens.inviteCode(uri)?.let { org.nyao.music.playback.Friends.inviteLinks.value = it }
-        intent.getStringExtra("room")?.let { org.nyao.music.playback.Friends.roomLinks.value = it }
+        // вход в комнату — только после подтверждения: такой intent может прислать любое приложение
+        intent.getStringExtra("room")?.takeIf { Regex("^[A-Za-z0-9]{6}$").matches(it) }?.let { org.nyao.music.playback.Friends.roomLinks.value = it to intent.getStringExtra("roomFrom") }
         // ссылку обработали — повторный поворот экрана не должен добавлять друга ещё раз
         intent.data = null
         intent.removeExtra("room")
+        intent.removeExtra("roomFrom")
     }
 
     // пока приложение на экране, оно на связи для Nyao Connect и «Слушать вместе»

@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 import { REACTIONS } from './hub.js';
 
 export const NICK_RE = /^[a-z0-9_.]{3,24}$/;
-const RESERVED = new Set(['admin', 'nyao', 'nyaomusic', 'support', 'help', 'root', 'system', 'moderator', 'official', 'takko_official']);
+// search — занято адресом /users/search; ник только из цифр спутался бы с id пользователя
+const RESERVED = new Set(['admin', 'nyao', 'nyaomusic', 'support', 'help', 'root', 'system', 'moderator', 'official', 'takko_official', 'search', 'me', 'self']);
 const VISIBILITY = ['all', 'friends', 'nobody'];
 const NOW_FRESH_MS = 10 * 60_000;
 const INVITE_TTL_MS = 7 * 86_400_000;
@@ -22,6 +23,7 @@ export function nickProblem(nick) {
   if (n.length > 24) return 'Ник — максимум 24 символа';
   if (!NICK_RE.test(n.toLowerCase())) return 'Только латиница, цифры, точка и _';
   if (/^[._]|[._]$/.test(n) || /\.\./.test(n)) return 'Точка и _ не могут стоять в начале, в конце или подряд';
+  if (!/[a-z]/i.test(n)) return 'В нике нужна хотя бы одна буква';
   if (RESERVED.has(n.toLowerCase()) || /^user_[a-z0-9]{6}$/.test(n.toLowerCase())) return 'Этот ник занят';
   return null;
 }
@@ -225,6 +227,21 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
     };
   }
 
+  // защита от спама заявками: не больше 40 новых заявок в час с одного аккаунта
+  const REQUEST_NOTIFY_MS = 6 * 3600_000;
+  const requestNotified = new Map();
+  const requestHits = new Map();
+  setInterval(() => {
+    requestHits.clear();
+    const old = Date.now() - REQUEST_NOTIFY_MS;
+    for (const [k, t] of requestNotified) if (t < old) requestNotified.delete(k);
+  }, 3600_000).unref?.();
+  function requestLimit(uid) {
+    const n = (requestHits.get(uid) || 0) + 1;
+    requestHits.set(uid, n);
+    if (n > 40) throw new HttpError(429, 'Слишком много заявок — попробуй через час');
+  }
+
   // «Друзья сейчас» в реальном времени: при смене трека или паузе друзья на связи получают событие
   const lastNow = new Map(); // uid → 'trackId|playing'
   async function onNow(uid, data) {
@@ -285,7 +302,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       }
       // «невидимка» включилась — друзья сразу перестают видеть, что играет
       if (body.invisible === true || body.showNow === false) {
-        for (const f of await friendIds(s.uid)) hub.pushUser(f, { type: 'social', kind: 'now', user: { id: String(s.uid) }, now: null });
+        for (const f of await friendIds(s.uid)) hub.pushUser(f, { type: 'social', kind: 'now', user: { id: String(s.uid) }, now: null, online: body.invisible === true ? false : undefined });
       }
       return ownProfile(await ensureProfile(s.uid), s);
     }, true],
@@ -321,6 +338,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
     }, true],
     ['GET', /^\/users\/([A-Za-z0-9_.]{1,24})$/, async ({ s, m }) => {
       const key = m[1].toLowerCase();
+      const byId = /^\d+$/.test(key);
       const { rows } = await q(
         `SELECT u.id, u.name, u.picture, p.* FROM profiles p JOIN users u ON u.id = p.user_id WHERE ${/^\d+$/.test(key) ? 'p.user_id = $1' : 'p.nick_lc = $1'}`,
         [/^\d+$/.test(key) ? Number(key) : key]
@@ -330,6 +348,8 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       const uid = Number(p.user_id);
       const rel = await relation(s.uid, uid);
       if (rel === 'blocked_by') throw new HttpError(404, 'Такого пользователя нет');
+      // «никто» открывается только по точному нику — по id (они идут подряд) перебрать всех не получится
+      if (byId && p.visibility === 'nobody' && !['self', 'friends', 'incoming', 'outgoing'].includes(rel)) throw new HttpError(404, 'Такого пользователя нет');
       const base = { ...card(p), relation: rel };
       const open = rel === 'self' || rel === 'friends' ? p.visibility !== 'nobody' || rel === 'self' : p.visibility === 'all';
       if (!open || rel === 'blocked') return { ...base, private: true };
@@ -342,8 +362,9 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
         statusTrack: asObj(p.status_track),
         pinned: asObj(p.pinned) || [],
         now: rel === 'friends' || rel === 'self' ? await nowOf(uid, p) : null,
-        stats: p.show_stats ? await topOf(uid) : null,
-        badges: p.show_stats ? await badgesOf(uid, await playsOf(uid, 90)) : []
+        // «невидимка» прячет и статистику со значками — для всех, кроме себя
+        stats: p.show_stats && (!p.invisible || rel === 'self') ? await topOf(uid) : null,
+        badges: p.show_stats && (!p.invisible || rel === 'self') ? await badgesOf(uid, await playsOf(uid, 90)) : []
       };
     }, true],
 
@@ -432,10 +453,18 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
         return { relation: 'friends' };
       }
       if (rel === 'none') {
+        requestLimit(s.uid);
         const [a, b] = pair(s.uid, other);
         await q(`INSERT INTO friendships (a, b, status, requester) VALUES ($1, $2, 'pending', $3) ON CONFLICT (a, b) DO NOTHING`, [a, b, s.uid]);
-        const me = await userCard(s.uid);
-        await notify(other, { kind: 'friend-request', user: me }, { title: 'Заявка в друзья', body: `${me.name || '@' + me.nick} хочет дружить в Nyao`, data: { kind: 'friend-request', user: me.id } });
+        // «заявка → отмена → заявка» не засыплет уведомлениями: одно на пару раз в 6 часов
+        const key = `${s.uid}>${other}`;
+        if (Date.now() - (requestNotified.get(key) || 0) > REQUEST_NOTIFY_MS) {
+          requestNotified.set(key, Date.now());
+          const me = await userCard(s.uid);
+          await notify(other, { kind: 'friend-request', user: me }, { title: 'Заявка в друзья', body: `${me.name || '@' + me.nick} хочет дружить в Nyao`, data: { kind: 'friend-request', user: me.id } });
+        } else {
+          hub.pushUser(other, { type: 'social', kind: 'friend-request', user: await userCard(s.uid), quiet: true });
+        }
       }
       return { relation: 'outgoing' };
     }, true],
@@ -484,6 +513,13 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       }
       return { code, url: `${publicUrl}/add/${code}`, expiresAt: exp };
     }, true],
+    // кто зовёт — показать перед тем, как добавлять (ссылку могли подсунуть)
+    ['GET', /^\/invites\/([a-z0-9]{6,16})$/, async ({ s, m }) => {
+      const { rows } = await q('SELECT user_id FROM invites WHERE code = $1 AND expires_at > now()', [m[1]]);
+      if (!rows.length) throw new HttpError(404, 'Приглашение устарело — попроси новое');
+      const other = Number(rows[0].user_id);
+      return { user: await userCard(other), relation: await relation(s.uid, other) };
+    }, true],
     ['POST', /^\/invites\/([a-z0-9]{6,16})\/use$/, async ({ s, m }) => {
       const { rows } = await q('SELECT user_id FROM invites WHERE code = $1 AND expires_at > now()', [m[1]]);
       if (!rows.length) throw new HttpError(404, 'Приглашение устарело — попроси новое');
@@ -517,7 +553,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       const emoji = REACTIONS.includes(body.emoji) ? body.emoji : null;
       const me = await userCard(s.uid);
       const item = await addInbox(to, s.uid, 'track', { track, emoji });
-      await notify(to, { kind: 'track', ...item, from: me, track, emoji }, { title: `${me.name || '@' + me.nick} прислал трек${emoji ? ' ' + emoji : ''}`, body: `${track.artist} — ${track.title}`, data: { kind: 'track', inbox: item.id } });
+      await notify(to, { kind: 'track', inboxId: item.id, createdAt: item.createdAt, from: me, track, emoji }, { title: `${me.name || '@' + me.nick} прислал трек${emoji ? ' ' + emoji : ''}`, body: `${track.artist} — ${track.title}`, data: { kind: 'track', inbox: item.id } });
       return { ok: true };
     }, true],
     ['POST', /^\/friends\/(\d+)\/invite$/, async ({ s, m }) => {
@@ -527,7 +563,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       if (!room) throw new HttpError(409, 'Сначала создай комнату «Вместе»');
       const me = await userCard(s.uid);
       const item = await addInbox(to, s.uid, 'room', { code: room.code });
-      await notify(to, { kind: 'room', ...item, from: me, code: room.code }, { title: `${me.name || '@' + me.nick} зовёт слушать вместе`, body: 'Нажми, чтобы присоединиться к комнате', data: { kind: 'room', code: room.code } });
+      await notify(to, { kind: 'room', inboxId: item.id, createdAt: item.createdAt, from: me, code: room.code }, { title: `${me.name || '@' + me.nick} зовёт слушать вместе`, body: 'Нажми, чтобы присоединиться к комнате', data: { kind: 'room', code: room.code } });
       return { ok: true };
     }, true],
     ['POST', /^\/friends\/(\d+)\/react$/, async ({ s, m, req }) => {
@@ -538,7 +574,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       const me = await userCard(s.uid);
       const track = body.track ? cleanTrack(body.track) : null;
       const item = await addInbox(to, s.uid, 'react', { emoji: body.emoji, track });
-      await notify(to, { kind: 'react', ...item, from: me, emoji: body.emoji, track }, { title: `${me.name || '@' + me.nick}: ${body.emoji}`, body: track ? `на «${track.title}»` : 'на то, что ты слушаешь', data: { kind: 'react', inbox: item.id } });
+      await notify(to, { kind: 'react', inboxId: item.id, createdAt: item.createdAt, from: me, emoji: body.emoji, track }, { title: `${me.name || '@' + me.nick}: ${body.emoji}`, body: track ? `на «${track.title}»` : 'на то, что ты слушаешь', data: { kind: 'react', inbox: item.id } });
       return { ok: true };
     }, true],
     ['GET', /^\/inbox$/, async ({ s }) => {

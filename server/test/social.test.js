@@ -246,3 +246,60 @@ test('совпадение вкусов, микс на двоих и значк�
     t.close();
   }
 });
+
+test('проверка кода: id событий, «никто» по id, ники из цифр, спам заявками, невидимка, предпросмотр приглашения', async () => {
+  const t = await setup();
+  try {
+    const a = await t.user('Takko');
+    const b = await t.user('Persik');
+    const c = await t.user('Hidden');
+    await t.call('PUT', '/profile', { token: a.token, body: { nick: 'takko' } });
+    await t.call('PUT', '/profile', { token: c.token, body: { nick: 'hidden', visibility: 'nobody' } });
+
+    // ник из одних цифр и «search» — нельзя (спутаются с id и с поиском)
+    assert.equal((await t.call('PUT', '/profile', { token: b.token, body: { nick: '12345' } })).status, 400);
+    assert.equal((await t.call('PUT', '/profile', { token: b.token, body: { nick: 'search' } })).status, 400);
+
+    // «никто» не открывается по id, только по точному нику
+    assert.equal((await t.call('GET', `/users/${c.id}`, { token: a.token })).status, 404);
+    assert.equal((await t.call('GET', '/users/hidden', { token: a.token })).json.private, true);
+
+    // предпросмотр приглашения ничего не меняет
+    const inv = (await t.call('POST', '/invites', { token: a.token })).json;
+    const pv = (await t.call('GET', `/invites/${inv.code}`, { token: b.token })).json;
+    assert.equal(pv.user.nick, 'takko');
+    assert.equal(pv.relation, 'none');
+    assert.equal((await t.call('GET', '/friends', { token: a.token })).json.friends.length, 0);
+
+    // id живых событий — свои, inbox-id не подменяет курсор
+    await t.call('POST', `/invites/${inv.code}/use`, { token: b.token });
+    const first = await t.call('GET', '/events?wait=0', { token: b.token });
+    await t.call('POST', '/share', { token: a.token, body: { to: b.id, track: { id: 'ya:1', source: 'ya', srcId: '1', title: 'T', artist: 'A' } } });
+    const ev = (await t.call('GET', `/events?cursor=${first.json.cursor}&wait=0`, { token: b.token })).json;
+    const tr = ev.events.find((e) => e.kind === 'track');
+    assert.ok(tr && tr.inboxId, 'у события есть inboxId');
+    assert.equal(tr.id, ev.cursor, 'id события — номер в очереди устройства');
+    const again = (await t.call('GET', `/events?cursor=${ev.cursor}&wait=0`, { token: b.token })).json;
+    assert.equal(again.events.length, 0, 'то же событие второй раз не приходит');
+
+    // заявка → отмена → заявка: одно уведомление
+    t.sent.length = 0;
+    await t.call('PUT', '/push/token', { token: c.token, body: { token: 'fcm-c' } });
+    for (let i = 0; i < 5; i++) {
+      await t.call('POST', '/friends/request', { token: a.token, body: { nick: 'hidden' } });
+      await t.call('DELETE', `/friends/${c.id}`, { token: a.token });
+    }
+    assert.equal(t.sent.filter((x) => x.token === 'fcm-c').length, 1, 'push один раз');
+
+    // невидимка прячет статистику и значки
+    await t.call('POST', '/history', { token: a.token, body: { plays: [{ trackId: 'ya:9', source: 'ya', title: 'X', artist: 'Y', listened: 40000, playedAt: Date.now() }] } });
+    assert.ok((await t.call('GET', `/users/${a.id}`, { token: b.token })).json.stats);
+    await t.call('PUT', '/profile', { token: a.token, body: { invisible: true } });
+    const hid = (await t.call('GET', `/users/${a.id}`, { token: b.token })).json;
+    assert.equal(hid.stats, null);
+    assert.deepEqual(hid.badges, []);
+    assert.ok((await t.call('GET', `/users/${a.id}`, { token: a.token })).json.stats, 'себе — видно');
+  } finally {
+    t.close();
+  }
+});

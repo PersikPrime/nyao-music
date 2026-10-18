@@ -187,7 +187,7 @@ function initProviders() {
     cloud,
     onEvent: (e) => {
       send('live:event', e);
-      if (e.type === 'social' && e.kind !== 'now' && (settings.get() || {}).friendPopups !== false) {
+      if (e.type === 'social' && e.kind !== 'now' && !e.quiet && (settings.get() || {}).friendPopups !== false) {
         const away = !win || win.isDestroyed() || !win.isVisible() || win.isMinimized() || !win.isFocused();
         const item = away && popupFor(e);
         if (item) popups.show(item);
@@ -427,7 +427,8 @@ function registerIpc() {
   handle('cloud:logout', () => cloud.logout());
   handle('cloud:me', () => cloud.me());
   // мини-соцсеть: профиль, друзья, приглашения, входящие — только эти адреса сервера
-  const SOCIAL_PATH = /^\/(profile|nick\/check|users\/|friends|invites|share|inbox|blocks)/;
+  // весь путь целиком: без «..», «//» и чужих адресов вроде /friends/../devices/5
+  const SOCIAL_PATH = /^\/(profile|nick\/check|users\/search|users\/(?!\.)[A-Za-z0-9_.]{1,24}|friends|friends\/request|friends\/\d+(\/(accept|invite|react|match|mix))?|invites|invites\/[a-z0-9]{6,16}(\/use)?|share|inbox|inbox\/read|blocks|blocks\/\d+)(\?[A-Za-z0-9_.~%=&@+-]*)?$/;
   handle('social:api', (method, p, body) => {
     if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method) || typeof p !== 'string' || !SOCIAL_PATH.test(p)) throw new Error('Нельзя');
     return cloud.request(method, p, body);

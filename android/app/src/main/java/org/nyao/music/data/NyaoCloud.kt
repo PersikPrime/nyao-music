@@ -468,6 +468,12 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         return Invite(o.optString("code"), o.optString("url"), o.optLong("expiresAt"))
     }
 
+    /** Кто зовёт по приглашению (ничего не меняет) → (карточка, отношение) */
+    suspend fun invitePreview(code: String): Pair<UserCard?, String> {
+        val o = request("GET", "/invites/$code")
+        return parseCard(o.obj("user")) to o.optString("relation", "none")
+    }
+
     /** Открыть приглашение друга: сразу друзья. → карточка того, кто пригласил */
     suspend fun useInvite(code: String): Pair<String, UserCard?> {
         val o = request("POST", "/invites/$code/use")

@@ -401,7 +401,8 @@ export function createFriends(ctx) {
         const f = s.friends.find((x) => x.id === (e.user && e.user.id));
         if (f) {
           f.now = e.now;
-          f.online = true;
+          // now: null — друг поставил паузу или включил «невидимку»; в сети он только если что-то играет
+          f.online = e.online === false ? false : !!e.now || f.online;
           s.friends.sort((a, b) => ((b.now && b.now.updatedAt) || 0) - ((a.now && a.now.updatedAt) || 0));
         }
         if (state.route === 'friends' || (state.route === 'user' && s.user && s.user.data && f && s.user.data.id === f.id)) rerender();
@@ -409,7 +410,7 @@ export function createFriends(ctx) {
       }
       case 'friend-request':
         if (u && !s.incoming.some((x) => x.id === u.id)) s.incoming.unshift(u);
-        banner(`${display(u)} хочет дружить`, 'Открыть', () => openUser(u.id));
+        if (!e.quiet) banner(`${display(u)} хочет дружить`, 'Открыть', () => openUser(u.id));
         break;
       case 'friend-accepted':
         banner(`${display(u)} теперь в друзьях`, 'Профиль', () => openUser(u.id));
@@ -418,7 +419,7 @@ export function createFriends(ctx) {
       case 'track':
       case 'room':
       case 'react': {
-        const item = { id: e.id, kind: e.kind, from: e.from, track: e.track || null, emoji: e.emoji || null, code: e.code || null, createdAt: e.createdAt || Date.now(), read: false };
+        const item = { id: String(e.inboxId || e.id), kind: e.kind, from: e.from, track: e.track || null, emoji: e.emoji || null, code: e.code || null, createdAt: e.createdAt || Date.now(), read: false };
         s.inbox = [item, ...s.inbox.filter((x) => x.id !== item.id)].slice(0, 100);
         if (e.kind === 'track') banner(`${display(e.from)} прислал трек ${e.emoji || ''}${e.track ? ' · ' + e.track.title : ''}`, 'Слушать', () => player.playList([e.track], 0, `От ${display(e.from)}`));
         if (e.kind === 'room') banner(`${display(e.from)} зовёт слушать вместе`, 'Войти', () => ctx.joinRoom(e.code));

@@ -136,7 +136,7 @@ private fun ago(at: Long): String {
 fun openInvite(model: AppModel, code: String) {
     if (!Repo.cloud.loggedIn) {
         Friends.pendingInvite = code
-        model.message("Войди в аккаунт Nyao — и друг добавится сам")
+        model.message("Войди в аккаунт Nyao — потом подтвердишь, добавлять ли друга")
         model.go(Route.Settings)
         return
     }
