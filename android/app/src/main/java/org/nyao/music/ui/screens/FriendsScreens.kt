@@ -447,21 +447,17 @@ fun QrCode(text: String, modifier: Modifier = Modifier) {
 private fun TapToShareSheet(url: String, nfcOn: Boolean, onClose: () -> Unit) {
     val ctx = LocalContext.current
     var done by remember { mutableStateOf(false) }
+    val stage by NfcShare.stage.collectAsState()
     DisposableEffect(url) {
-        NfcShare.start(url)
+        // Activity может прийти обёрнутой — достаём настоящую
+        var c: android.content.Context? = ctx
+        while (c is android.content.ContextWrapper && c !is Activity) c = c.baseContext
+        val activity = c as? Activity
         NfcShare.onRead = { done = true }
-        // пока делимся, свой телефон не читает чужие метки — иначе два Nyao «читали» бы друг друга
-        val activity = ctx as? Activity
-        val adapter = NfcAdapter.getDefaultAdapter(ctx)
-        runCatching {
-            activity?.let {
-                adapter?.enableReaderMode(it, { }, NfcAdapter.FLAG_READER_NFC_BARCODE or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK or NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS, null)
-            }
-        }
+        activity?.let { NfcShare.begin(it, url) }
         onDispose {
-            NfcShare.stop()
             NfcShare.onRead = null
-            runCatching { activity?.let { adapter?.disableReaderMode(it) } }
+            activity?.let { NfcShare.end(it) } ?: NfcShare.stop()
         }
     }
     LaunchedEffect(done) {
@@ -502,7 +498,8 @@ private fun TapToShareSheet(url: String, nfcOn: Boolean, onClose: () -> Unit) {
                 when {
                     done -> "Друг получил приглашение"
                     !nfcOn -> "NFC выключен — включи его в настройках телефона, или покажи QR-код"
-                    else -> "Спинками друг к другу. У друга должен быть включён NFC и разблокирован экран. @${profile?.nick ?: ""}"
+                    stage == 1 -> "Телефон друга на связи — подержи ещё секунду…"
+                    else -> "Спинками друг к другу, NFC-антеннами (обычно — чуть выше середины). У друга должен быть включён NFC и разблокирован экран. @${profile?.nick ?: ""}"
                 },
                 style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted, textAlign = TextAlign.Center,
             )

@@ -18,6 +18,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Repo.init(this)
+        // служба «Приложи телефон» включается только на время показа экрана (после сбоя могла остаться включённой)
+        org.nyao.music.playback.NfcShare.setEnabled(this, false)
         // тема и акцент — до первого кадра, чтобы Mono и Glass не мигали Expressive при запуске
         org.nyao.music.ui.theme.applyLookNow(Repo.prefs.settings.value)
         enableEdgeToEdge(
