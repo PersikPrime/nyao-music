@@ -121,7 +121,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
     }
     val isLiked = t.id in liked
     val upNext = nextList.take(40)
-    val played = playedList.take(40)
+    val played = playedList.filter { it.id != t.id }.take(40)
     val wave = mode == Repo.Mode.WAVE
     // индекс заголовка очереди: шапка, обложка, название, сервис, прогресс, кнопки, инструменты (+ текст)
     val queueItem = 7 + if (showLyrics) 1 else 0
@@ -321,9 +321,10 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(start = 28.dp, top = 20.dp, bottom = 8.dp),
                 )
             }
-            itemsIndexed(played, key = { _, p -> "p${p.first}" }) { i, (queueIndex, q) ->
-                QueueRow(model, q, q.id in liked, groupShape(i, played.size), pal, past = true, onPlay = { PlayerConnection.playAt(queueIndex) }) { close ->
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("Играть снова") }, onClick = { close(); PlayerConnection.playAt(queueIndex) })
+            itemsIndexed(played, key = { _, p -> "p" + p.id }) { i, q ->
+                QueueRow(model, q, q.id in liked, groupShape(i, played.size), pal, past = true, onPlay = { PlayerConnection.replay(q) }) { close ->
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Играть снова") }, onClick = { close(); PlayerConnection.replay(q) })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Играть следующим") }, onClick = { close(); PlayerConnection.playNext(q) })
                     androidx.compose.material3.DropdownMenuItem(text = { Text("Похожее · радио по треку") }, onClick = { close(); PlayerConnection.startRadio(q) })
                 }
             }

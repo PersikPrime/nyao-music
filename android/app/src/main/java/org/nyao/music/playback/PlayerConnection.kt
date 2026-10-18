@@ -41,9 +41,9 @@ object PlayerConnection {
     private val _upNext = MutableStateFlow<List<Pair<Int, Track>>>(emptyList())
     /** Что заиграет дальше — с учётом перемешивания: пары (индекс в очереди, трек) */
     val upNext: StateFlow<List<Pair<Int, Track>>> = _upNext
-    private val _played = MutableStateFlow<List<Pair<Int, Track>>>(emptyList())
-    /** Что уже играло в этой очереди — от последнего к первому: пары (индекс в очереди, трек) */
-    val played: StateFlow<List<Pair<Int, Track>>> = _played
+    private val _played = MutableStateFlow<List<Track>>(emptyList())
+    /** Настоящая история: треки, с которых плеер действительно ушёл (доиграл или переключили), новые сверху */
+    val played: StateFlow<List<Track>> = _played
     private val _index = MutableStateFlow(-1)
     val index: StateFlow<Int> = _index
 
@@ -81,7 +81,10 @@ object PlayerConnection {
         // смена трека → предыдущий в историю (для волны без повторов и синхронизации)
         val newId = c.currentMediaItem?.mediaId
         if (newId != lastId) {
-            lastId?.let { Repo.track(it) }?.let { reportLeave(it, lastPosMs, lastDurMs) }
+            lastId?.let { Repo.track(it) }?.let {
+                reportLeave(it, lastPosMs, lastDurMs)
+                _played.value = (listOf(it) + _played.value.filter { p -> p.id != it.id }).take(50)
+            }
             lastId = newId
             lastPosMs = 0L
             lastDurMs = 0L
@@ -108,16 +111,6 @@ object PlayerConnection {
             }
         }
         _upNext.value = next
-        val before = ArrayList<Pair<Int, Track>>()
-        var j = c.currentMediaItemIndex
-        if (!tl.isEmpty && j >= 0) {
-            while (before.size < 50) {
-                j = tl.getPreviousWindowIndex(j, Player.REPEAT_MODE_OFF, c.shuffleModeEnabled)
-                if (j == C.INDEX_UNSET) break
-                Repo.track(c.getMediaItemAt(j).mediaId)?.let { before += j to it }
-            }
-        }
-        _played.value = before
         _shuffle.value = c.shuffleModeEnabled
     }
 
@@ -383,6 +376,21 @@ object PlayerConnection {
     fun playAt(index: Int) = withController { c ->
         c.seekTo(index, 0L)
         c.play()
+    }
+
+    /** Сыграть трек из истории: если он ещё в очереди — перейти к нему, иначе вставить следующим и включить */
+    fun replay(t: Track) = withController { c ->
+        val at = (0 until c.mediaItemCount).firstOrNull { c.getMediaItemAt(it).mediaId == t.id }
+        if (at != null) {
+            c.seekToDefaultPosition(at)
+            c.play()
+        } else {
+            val pos = if (c.mediaItemCount == 0) 0 else c.currentMediaItemIndex + 1
+            c.addMediaItem(pos, Repo.mediaItem(t))
+            if (c.mediaItemCount == 1) c.prepare()
+            c.seekToDefaultPosition(pos)
+            c.play()
+        }
     }
 
     fun playNext(t: Track) = withController { c ->

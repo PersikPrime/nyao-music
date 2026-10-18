@@ -31,6 +31,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.animation.animateContentSize
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import org.nyao.music.ui.components.bouncy
@@ -326,16 +329,41 @@ fun HomeSearchButton(model: AppModel) {
  */
 @Composable
 fun TrackShelf(tracks: List<Track>, modifier: Modifier = Modifier, onPlay: (Int) -> Unit) {
-    when (org.nyao.music.ui.theme.Look.current.grid) {
-        "tiles" -> Column(modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            tracks.take(6).chunked(2).forEachIndexed { r, row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEachIndexed { c, t -> CompactTrack(t, Modifier.weight(1f).appear(r * 2 + c)) { onPlay(r * 2 + c) } }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
+    val grid = org.nyao.music.ui.theme.Look.current.grid
+    // плитки и мозаика показывают начало полки, остальное — по «Показать все»
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable(tracks.firstOrNull()?.id, grid) { mutableStateOf(false) }
+    val head = if (grid == "mosaic") 5 else 6
+    @Composable
+    fun Tiles(list: List<Track>, offset: Int) {
+        list.chunked(2).forEachIndexed { r, row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEachIndexed { c, t ->
+                    val i = offset + r * 2 + c
+                    CompactTrack(t, Modifier.weight(1f).appear((r * 2 + c).coerceAtMost(10))) { onPlay(i) }
                 }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
-        "mosaic" -> Row(modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    }
+    @Composable
+    fun MoreButton() {
+        if (tracks.size <= head) return
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp).clip(RoundedCornerShape(18.dp)).clickable { expanded = !expanded }.padding(vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Text(if (expanded) "Свернуть" else "Показать все · ${tracks.size}", style = MaterialTheme.typography.labelLarge, color = NyaoColors.Lavender)
+        }
+    }
+    when (grid) {
+        "tiles" -> Column(modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Tiles(if (expanded) tracks else tracks.take(head), 0)
+            }
+            MoreButton()
+        }
+        "mosaic" -> Column(modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             tracks.firstOrNull()?.let { t ->
                 Box(Modifier.weight(1f).aspectRatio(1f).bouncy().clip(org.nyao.music.ui.theme.coverShape(28.dp)).clickable { onPlay(0) }) {
                     Cover(t.cover, Modifier.fillMaxSize(), RoundedCornerShape(0.dp))
@@ -357,6 +385,13 @@ fun TrackShelf(tracks: List<Track>, modifier: Modifier = Modifier, onPlay: (Int)
                     }
                 }
             }
+        }
+            if (expanded && tracks.size > head) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Tiles(tracks.drop(head), head)
+                }
+            }
+            MoreButton()
         }
         else -> LazyRow(modifier, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             itemsIndexed(tracks) { i, t -> Box(Modifier.appear(i)) { TrackTile(t) { onPlay(i) } } }

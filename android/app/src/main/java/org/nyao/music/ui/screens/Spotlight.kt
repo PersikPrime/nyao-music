@@ -42,6 +42,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,17 +69,6 @@ private fun matches(q: List<String>, vararg fields: String): Boolean {
     return q.all { hay.contains(it) }
 }
 
-/** Выше — где название начинается с запроса, потом — где оно его содержит */
-private fun score(nq: String, t: Track): Int {
-    val title = Search.norm(t.title)
-    return when {
-        title == nq -> 0
-        title.startsWith(nq) -> 1
-        title.contains(nq) -> 2
-        else -> 3
-    }
-}
-
 /**
  * Спотлайт: быстрый поиск поверх размытого экрана. Сразу показывает совпадения по названию
  * из медиатеки, скачанного и уже виденного, а через полсекунды — из сервисов.
@@ -100,13 +90,18 @@ fun SpotlightOverlay(model: AppModel, onClose: () -> Unit) {
 
     val nq = Search.norm(text)
     val words = nq.split(' ').filter { it.isNotBlank() }
-    val local = remember(nq, model.liked, offline.tracks) {
-        if (words.isEmpty()) emptyList()
-        else ((model.liked ?: emptyList()) + offline.tracks + Repo.knownTracks())
-            .asSequence()
+    // нормализуем названия один раз на открытие, а не на каждую букву
+    val index = remember(model.liked, offline.tracks) {
+        ((model.liked ?: emptyList()) + offline.tracks + Repo.knownTracks().toList())
             .distinctBy { it.id }
-            .filter { matches(words, it.title, it.artist) }
-            .sortedBy { score(nq, it) }
+            .map { Triple(it, Search.norm(it.title), Search.norm(it.title + " " + it.artist)) }
+    }
+    val local = remember(nq, index) {
+        if (words.isEmpty()) emptyList()
+        else index.asSequence()
+            .filter { (_, _, hay) -> words.all { hay.contains(it) } }
+            .sortedBy { (_, title, _) -> when { title == nq -> 0; title.startsWith(nq) -> 1; title.contains(nq) -> 2; else -> 3 } }
+            .map { it.first }
             .take(8)
             .toList()
     }
@@ -120,7 +115,14 @@ fun SpotlightOverlay(model: AppModel, onClose: () -> Unit) {
         if (nq.length < 2) { loading = false; return@LaunchedEffect }
         loading = true
         delay(450)
-        val res = runCatching { Repo.search(text) }.getOrNull()
+        // отмену (пришла новая буква) не глотаем — иначе старый поиск гасит индикатор нового
+        val res = try {
+            Repo.search(text)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
         val localIds = local.mapTo(HashSet()) { it.id }
         online = res?.let { Search.arrange(it, "all", text).tracks.filter { t -> t.id !in localIds }.take(10) } ?: emptyList()
         loading = false
@@ -226,8 +228,10 @@ private fun Section(title: String) {
 
 @Composable
 private fun TrackHit(t: Track, playing: Boolean, onClick: () -> Unit) {
+    // недоступные (отрывки, снятые с сервиса) — бледные и не нажимаются, как в обычных списках
     Row(
-        Modifier.fillMaxWidth().bouncy().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().bouncy().clickable(enabled = t.available, onClick = onClick)
+            .graphicsLayer { alpha = if (t.available) 1f else 0.4f }.padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

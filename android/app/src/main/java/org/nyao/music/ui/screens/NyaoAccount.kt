@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import org.nyao.music.ui.components.NyaoIcons
 
 import androidx.compose.animation.AnimatedVisibility
@@ -60,10 +62,12 @@ private val TelegramBlue = Color(0xFF2AABEE)
 
 /** Аватар аккаунта Nyao: фото из Telegram или первая буква */
 @Composable
-fun NyaoAvatar(size: Int = 52, shape: androidx.compose.ui.graphics.Shape = CircleShape) {
+fun NyaoAvatar(size: Int = 52, shape: androidx.compose.ui.graphics.Shape = CircleShape, contentDescription: String? = null) {
     val user by Repo.cloud.user.collectAsState()
     Box(
-        Modifier.size(size.dp).clip(shape).background(Brush.linearGradient(listOf(NyaoColors.Lavender, Color(0xFF7F6BFF)))),
+        Modifier.size(size.dp)
+            .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription } else Modifier)
+            .clip(shape).background(Brush.linearGradient(listOf(NyaoColors.Lavender, Color(0xFF7F6BFF)))),
         contentAlignment = Alignment.Center,
     ) {
         val pic = user?.picture

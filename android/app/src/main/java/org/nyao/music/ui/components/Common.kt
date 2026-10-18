@@ -110,8 +110,7 @@ fun Hint(text: String, modifier: Modifier = Modifier) {
 @Composable
 fun DownloadedMark(track: Track, size: Dp = 16.dp) {
     val st by org.nyao.music.playback.Offline.state.collectAsState()
-    val ids = remember(st.tracks) { st.ids }
-    if (track.id !in ids) return
+    if (track.id !in st.ids) return
     Box(Modifier.size(size).clip(CircleShape).background(NyaoColors.Lavender), contentAlignment = Alignment.Center) {
         Icon(NyaoIcons.DownloadDone, "Скачано", tint = NyaoColors.OnLavender, modifier = Modifier.size(size * 0.72f))
     }

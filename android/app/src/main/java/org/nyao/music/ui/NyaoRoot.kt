@@ -536,7 +536,7 @@ private fun ToolbarItem(tab: Tab, selected: Boolean, onClick: () -> Unit) {
     ) {
         // профиль — твой аватар из аккаунта Nyao (или буква), остальные — иконки
         Box(Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }) {
-            if (tab.route == Route.Settings) org.nyao.music.ui.screens.NyaoAvatar(size = 28)
+            if (tab.route == Route.Settings) org.nyao.music.ui.screens.NyaoAvatar(size = 28, contentDescription = tab.label)
             else androidx.compose.animation.Crossfade(selected, animationSpec = tween(180), label = "tabIcon") { on ->
                 Icon(if (on) tab.iconOn else tab.icon, tab.label, tint = tint, modifier = Modifier.size(22.dp))
             }
@@ -607,7 +607,7 @@ private fun WideLayout(model: AppModel, showPane: Boolean) {
                     (tab.route == Route.Library && (model.route is Route.PlaylistPage || model.route is Route.ArtistPage))
                 Column(Modifier.bouncy().clip(RoundedCornerShape(16.dp)).clickable { model.go(tab.route) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box(Modifier.width(56.dp).height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (selected) NyaoColors.Primary else Color.Transparent), contentAlignment = Alignment.Center) {
-                        if (tab.route == Route.Settings) org.nyao.music.ui.screens.NyaoAvatar(size = 26)
+                        if (tab.route == Route.Settings) org.nyao.music.ui.screens.NyaoAvatar(size = 26, contentDescription = tab.label)
                         else Icon(if (selected) tab.iconOn else tab.icon, null, tint = if (selected) NyaoColors.OnPrimary else NyaoColors.Muted, modifier = Modifier.size(22.dp))
                     }
                     Text(tab.label, style = MaterialTheme.typography.labelMedium, color = if (selected) NyaoColors.Text else NyaoColors.Muted, maxLines = 1)

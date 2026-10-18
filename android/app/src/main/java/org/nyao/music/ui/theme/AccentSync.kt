@@ -37,3 +37,9 @@ fun AccentSync() {
         if (Look.current != look) Look.current = look
     }
 }
+
+/** Сразу выставляет тему и готовый акцент из настроек (без анимации) — вызывается до setContent */
+fun applyLookNow(settings: org.nyao.music.data.Settings) {
+    Look.current = UiLook(settings.theme, settings.buttons, settings.grid, settings.covers, settings.navLabels)
+    if (settings.accent != "cover") Accent.palette = AccentPalette.preset(settings.accent)
+}

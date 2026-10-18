@@ -62,8 +62,10 @@ class AppModel(private val scope: CoroutineScope) {
     }
 
     fun go(r: Route) {
+        // любой переход закрывает плеер и спотлайт — иначе новый экран остаётся под ними
+        nowPlayingOpen = false
+        spotlightOpen = false
         if (r is Route.PlaylistPage || r is Route.ArtistPage || r is Route.SettingsPage || r == Route.Stats) {
-            nowPlayingOpen = false
             stack.add(r)
         }
         else {
