@@ -235,7 +235,18 @@ test('совпадение вкусов, микс на двоих и значк�
     const mix = (await t.call('GET', `/friends/${b.id}/mix`, { token: a.token })).json;
     assert.match(mix.title, /Persik/);
     assert.ok(mix.tracks.length >= 10);
-    assert.ok(mix.tracks[0].id.startsWith('ya:a0'), 'сначала общие треки');
+    assert.ok(mix.tracks.slice(0, 5).some((x) => x.id.startsWith('ya:a0')), 'общие треки в начале');
+    // каждый раз по-новому
+    const firsts = new Set();
+    for (let i = 0; i < 8; i++) firsts.add((await t.call('GET', `/friends/${b.id}/mix`, { token: a.token })).json.tracks.slice(0, 3).map((x) => x.id).join());
+    assert.ok(firsts.size > 1, 'начало микса меняется');
+    // друг закрыл микс — нельзя ни микс, ни совпадение
+    await t.call('PUT', '/profile', { token: b.token, body: { allowDuo: false } });
+    assert.equal((await t.call('GET', `/users/${b.id}`, { token: a.token })).json.duo, false);
+    assert.equal((await t.call('GET', `/friends/${b.id}/mix`, { token: a.token })).status, 403);
+    assert.equal((await t.call('GET', `/friends/${b.id}/match`, { token: a.token })).status, 403);
+    assert.equal((await t.call('GET', '/profile', { token: b.token })).json.allowDuo, false);
+    await t.call('PUT', '/profile', { token: b.token, body: { allowDuo: true } });
     assert.equal(new Set(mix.tracks.map((x) => x.id)).size, mix.tracks.length, 'без повторов');
     assert.equal(mix.tracks[0].srcId, mix.tracks[0].id.slice(3));
     const prof = (await t.call('GET', `/users/${a.id}`, { token: b.token })).json;

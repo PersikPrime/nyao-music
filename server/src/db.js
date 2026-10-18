@@ -98,6 +98,8 @@ export const SCHEMA = [
     read_at TIMESTAMPTZ
   )`,
   `CREATE INDEX IF NOT EXISTS inbox_to_time ON inbox (to_user, created_at)`,
+  // 0.8.x: можно ли друзьям совпадение вкусов и «микс на двоих» с тобой
+  `ALTER TABLE profiles ADD COLUMN IF NOT EXISTS allow_duo BOOLEAN NOT NULL DEFAULT true`,
   // токены push (Firebase) на устройство — для уведомлений, когда приложение закрыто
   `CREATE TABLE IF NOT EXISTS push_tokens (
     session_id BIGINT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,

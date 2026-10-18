@@ -1,5 +1,13 @@
 package org.nyao.music.playback
 
+import android.app.Activity
+import android.content.ComponentName
+import android.content.Context
+import android.content.pm.PackageManager
+import android.nfc.NfcAdapter
+import android.nfc.cardemulation.CardEmulation
+import android.os.Build
+import kotlinx.coroutines.flow.MutableStateFlow
 import android.nfc.NdefMessage
 import android.nfc.NdefRecord
 import android.nfc.cardemulation.HostApduService
@@ -9,12 +17,59 @@ import android.os.Bundle
  * «Приложи телефон»: пока открыт экран «Поделиться профилем», телефон отвечает как NFC-метка
  * (NDEF Type 4) со ссылкой-приглашением. Другой телефон читает её как обычную метку: Android с Nyao
  * открывает профиль сразу, без Nyao — страницу приглашения (iPhone тоже умеет читать такие метки).
- * В остальное время служба молчит — никаких случайных срабатываний.
+ * В остальное время служба выключена совсем (компонент disabled): телефон не отзывается на чужие
+ * телефоны и считыватели, и система не будит Nyao при каждом касании.
  */
 object NfcShare {
     @Volatile private var ndef: ByteArray? = null
     @Volatile private var until = 0L
     @Volatile var onRead: (() -> Unit)? = null
+
+    /** Что видно на экране «Приложи телефон»: 0 — ждём, 1 — телефон друга подключился, 2 — прочитал ссылку */
+    val stage = MutableStateFlow(0)
+
+    private fun component(ctx: Context) = ComponentName(ctx, NfcShareService::class.java)
+
+    /** Включить или выключить службу-метку целиком */
+    fun setEnabled(ctx: Context, on: Boolean) {
+        runCatching {
+            ctx.packageManager.setComponentEnabledSetting(
+                component(ctx),
+                if (on) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP,
+            )
+        }
+    }
+
+    /**
+     * Экран «Приложи телефон» открыт: служба включена и стоит первой (если ещё кто-то отзывается на NDEF —
+     * кошельки, «NFC Tools» — Android не спрашивает «каким приложением»), а свой телефон перестаёт
+     * опрашивать метки — иначе два телефона «читали» бы друг друга и ничего не выходило.
+     */
+    fun begin(activity: Activity, url: String) {
+        start(url)
+        stage.value = 0
+        setEnabled(activity, true)
+        val adapter = NfcAdapter.getDefaultAdapter(activity) ?: return
+        runCatching { CardEmulation.getInstance(adapter).setPreferredService(activity, component(activity)) }
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 35) {
+                adapter.setDiscoveryTechnology(activity, NfcAdapter.FLAG_READER_DISABLE, NfcAdapter.FLAG_LISTEN_KEEP)
+            } else {
+                adapter.enableReaderMode(activity, { }, NfcAdapter.FLAG_READER_NFC_BARCODE or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK or NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS, null)
+            }
+        }
+    }
+
+    fun end(activity: Activity) {
+        stop()
+        val adapter = NfcAdapter.getDefaultAdapter(activity)
+        if (adapter != null) {
+            runCatching { CardEmulation.getInstance(adapter).unsetPreferredService(activity) }
+            runCatching { if (Build.VERSION.SDK_INT >= 35) adapter.resetDiscoveryTechnology(activity) else adapter.disableReaderMode(activity) }
+        }
+        setEnabled(activity, false)
+    }
 
     fun start(url: String, seconds: Int = 120) {
         val msg = NdefMessage(arrayOf(NdefRecord.createUri(url), NdefRecord.createApplicationRecord("org.nyao.music")))
@@ -71,6 +126,7 @@ class NfcShareService : HostApduService() {
             val lc = if (apdu.size > 4) apdu[4].toInt() and 0xFF else 0
             val got = if (apdu.size >= 5 + lc) apdu.copyOfRange(5, 5 + lc) else byteArrayOf()
             appSelected = got.contentEquals(aid) && NfcShare.file() != null
+            if (appSelected && NfcShare.stage.value == 0) NfcShare.stage.value = 1
             selected = Sel.NONE
             return if (appSelected) ok else notFound
         }
@@ -94,7 +150,11 @@ class NfcShareService : HostApduService() {
         val le = if (apdu.size > 4) (apdu[4].toInt() and 0xFF).let { if (it == 0) 256 else it } else 256
         if (offset > data.size) return byteArrayOf(0x6B, 0x00)
         val end = minOf(data.size, offset + le)
-        if (selected == Sel.NDEF && end == data.size && offset > 0) NfcShare.onRead?.invoke()
+        // ссылку дочитали до конца (длину файла читают отдельно, с нулевого смещения)
+        if (selected == Sel.NDEF && end == data.size && end > 2) {
+            NfcShare.stage.value = 2
+            NfcShare.onRead?.invoke()
+        }
         return data.copyOfRange(offset, end) + ok
     }
 

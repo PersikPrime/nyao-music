@@ -25,6 +25,8 @@ data class MyProfile(
     val showStats: Boolean,
     val showLikes: Boolean,
     val invisible: Boolean,
+    /** Друзья могут смотреть совпадение вкусов и включать «Микс на двоих» */
+    val allowDuo: Boolean = true,
 )
 
 data class TopArtist(val name: String, val plays: Int)
@@ -41,6 +43,8 @@ data class PublicProfile(
     val now: FriendNow? = null,
     val stats: UserStats? = null,
     val badges: List<Badge> = emptyList(),
+    /** Он разрешил друзьям совпадение вкусов и «Микс на двоих» */
+    val duo: Boolean = true,
 )
 
 data class Badge(val id: String, val emoji: String, val title: String)

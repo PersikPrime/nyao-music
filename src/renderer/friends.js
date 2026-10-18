@@ -139,7 +139,7 @@ export function createFriends(ctx) {
       const data = await call('GET', `/users/${encodeURIComponent(k || s.profile.nick)}`);
       if (s.user.key !== String(key || '')) return;
       s.user.data = data;
-      if (data.relation === 'friends') s.user.match = await call('GET', `/friends/${data.id}/match`).catch(() => null);
+      if (data.relation === 'friends' && data.duo !== false) s.user.match = await call('GET', `/friends/${data.id}/match`).catch(() => null);
     } catch (e) {
       s.user.error = e.message;
     }
@@ -181,6 +181,7 @@ export function createFriends(ctx) {
           <button class="btn" data-action="fr-play-now">Включить себе</button></div>
         ${d.relation === 'friends' ? `<div class="tg-reacts">${REACTIONS.map((e) => `<button data-action="fr-react" data-e="${e}" aria-label="Реакция ${e}">${e}</button>`).join('')}</div>
           <div><button class="btn primary" data-action="fr-room">${state.room ? 'Позвать в мою комнату' : 'Создать комнату и позвать'}</button></div>` : ''}</section>` : ''}
+      ${d.relation === 'friends' && d.duo === false ? `<span class="hint">${esc(display(d))} не открывал совпадение вкусов и «Микс на двоих»</span>` : ''}
       ${d.relation === 'friends' && m ? `<section class="card up-match"><div class="ring" style="--p:${m.percent}"><b>${m.percent}%</b></div>
         <div class="meta"><b>Совпадение вкусов</b><span class="hint">${!m.enough ? 'Пока мало прослушиваний — точнее будет через пару дней' : m.commonArtists.length ? 'Общие: ' + esc(m.commonArtists.slice(0, 5).join(', ')) : 'Общих исполнителей пока нет'}</span></div>
         <button class="btn primary" data-action="fr-mix">Микс на двоих</button></section>` : ''}
@@ -216,6 +217,7 @@ export function createFriends(ctx) {
         <span class="hint">${p.visibility === 'all' ? 'Профиль и статистику видят все, кто тебя найдёт. Что ты слушаешь сейчас — только друзья.' : p.visibility === 'nobody' ? 'Тебя находят только по точному нику, профиль закрыт даже для друзей.' : 'Профиль открыт только друзьям. Остальные видят ник и аватар.'}</span>
         ${sw('showNow', 'Показывать, что слушаю сейчас', 'Друзья видят трек в реальном времени')}
         ${sw('showStats', 'Показывать статистику', 'Минуты, любимые исполнители и треки за месяц')}
+        ${sw('allowDuo', 'Микс на двоих', 'Друзья видят совпадение вкусов и могут включить общий микс из твоей истории')}
         ${sw('invisible', 'Невидимка', 'Пока включено, никто не видит, что ты слушаешь')}
         ${sw('friendPopups', 'Окошки от друзей', 'Всплывают в углу экрана, когда Nyao свёрнут')}
       </section>

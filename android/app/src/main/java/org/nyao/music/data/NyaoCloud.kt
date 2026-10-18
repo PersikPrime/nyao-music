@@ -405,6 +405,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         nick = o.optString("nick"), nickSet = o.optBoolean("nickSet"), bio = o.optString("bio"),
         visibility = o.optString("visibility", "friends"), showNow = o.optBoolean("showNow", true),
         showStats = o.optBoolean("showStats", true), showLikes = o.optBoolean("showLikes"), invisible = o.optBoolean("invisible"),
+        allowDuo = o.optBoolean("allowDuo", true),
     )
 
     suspend fun profile(): MyProfile = parseProfile(request("GET", "/profile"))
@@ -433,6 +434,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
             friends = o.optInt("friends"),
             now = parseNow(o.obj("now")),
             badges = o.arr("badges").objects().map { Badge(it.optString("id"), it.optString("emoji"), it.optString("title")) },
+            duo = o.optBoolean("duo", true),
             stats = st?.let { s ->
                 UserStats(
                     minutes = s.optInt("minutes"), plays = s.optInt("plays"),

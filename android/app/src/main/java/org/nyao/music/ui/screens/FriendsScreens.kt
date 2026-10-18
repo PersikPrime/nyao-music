@@ -447,21 +447,17 @@ fun QrCode(text: String, modifier: Modifier = Modifier) {
 private fun TapToShareSheet(url: String, nfcOn: Boolean, onClose: () -> Unit) {
     val ctx = LocalContext.current
     var done by remember { mutableStateOf(false) }
+    val stage by NfcShare.stage.collectAsState()
     DisposableEffect(url) {
-        NfcShare.start(url)
+        // Activity может прийти обёрнутой — достаём настоящую
+        var c: android.content.Context? = ctx
+        while (c is android.content.ContextWrapper && c !is Activity) c = c.baseContext
+        val activity = c as? Activity
         NfcShare.onRead = { done = true }
-        // пока делимся, свой телефон не читает чужие метки — иначе два Nyao «читали» бы друг друга
-        val activity = ctx as? Activity
-        val adapter = NfcAdapter.getDefaultAdapter(ctx)
-        runCatching {
-            activity?.let {
-                adapter?.enableReaderMode(it, { }, NfcAdapter.FLAG_READER_NFC_BARCODE or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK or NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS, null)
-            }
-        }
+        activity?.let { NfcShare.begin(it, url) }
         onDispose {
-            NfcShare.stop()
             NfcShare.onRead = null
-            runCatching { activity?.let { adapter?.disableReaderMode(it) } }
+            activity?.let { NfcShare.end(it) } ?: NfcShare.stop()
         }
     }
     LaunchedEffect(done) {
@@ -502,7 +498,8 @@ private fun TapToShareSheet(url: String, nfcOn: Boolean, onClose: () -> Unit) {
                 when {
                     done -> "Друг получил приглашение"
                     !nfcOn -> "NFC выключен — включи его в настройках телефона, или покажи QR-код"
-                    else -> "Спинками друг к другу. У друга должен быть включён NFC и разблокирован экран. @${profile?.nick ?: ""}"
+                    stage == 1 -> "Телефон друга на связи — подержи ещё секунду…"
+                    else -> "Спинками друг к другу, NFC-антеннами (обычно — чуть выше середины). У друга должен быть включён NFC и разблокирован экран. @${profile?.nick ?: ""}"
                 },
                 style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted, textAlign = TextAlign.Center,
             )
@@ -583,7 +580,14 @@ fun UserScreen(model: AppModel, key: String) {
                     }
                 }
                 if (!pp.private && live != null) item { NowCard(model, pp, live) }
-                if (pp.relation == "friends") item { DuoCard(model, pp) }
+                if (pp.relation == "friends" && pp.duo) item { DuoCard(model, pp) }
+                if (pp.relation == "friends" && !pp.duo) item {
+                    Text(
+                        "${pp.user.display} не открывал совпадение вкусов и «Микс на двоих»",
+                        style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    )
+                }
                 if (!pp.private && pp.badges.isNotEmpty()) item {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Значки", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp))
@@ -854,6 +858,7 @@ fun EditProfileCard(model: AppModel) {
         )
         PrivacySwitch("Показывать, что слушаю сейчас", "Друзья видят трек в реальном времени", p.showNow) { save(JSONObject().put("showNow", it)) }
         PrivacySwitch("Показывать статистику", "Минуты, любимые исполнители и треки за месяц", p.showStats) { save(JSONObject().put("showStats", it)) }
+        PrivacySwitch("Микс на двоих", "Друзья видят совпадение вкусов и могут включить общий микс из твоей истории", p.allowDuo) { save(JSONObject().put("allowDuo", it)) }
         PrivacySwitch("Невидимка", "Пока включено, никто не видит, что ты слушаешь", p.invisible) { save(JSONObject().put("invisible", it), if (it) "Невидимка включена" else null) }
     }
     BlockedList(model)

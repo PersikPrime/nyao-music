@@ -203,6 +203,13 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
     );
   }
 
+  /** Совпадение и микс — только если друг сам разрешил («Микс на двоих» в его приватности) */
+  async function needDuo(me, other) {
+    await needFriend(me, other);
+    const { rows } = await q('SELECT allow_duo FROM profiles WHERE user_id = $1', [other]);
+    if (rows.length && rows[0].allow_duo === false) throw new HttpError(403, 'Друг закрыл совпадение вкусов и «Микс на двоих»');
+  }
+
   async function needFriend(me, other) {
     if ((await relation(me, other)) !== 'friends') throw new HttpError(403, 'Это можно только с друзьями');
   }
@@ -222,7 +229,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
     return {
       ...s.user,
       nick: p.nick, nickSet: !!p.nick_set, bio: p.bio,
-      visibility: p.visibility, showNow: p.show_now, showStats: p.show_stats, showLikes: p.show_likes, invisible: p.invisible,
+      visibility: p.visibility, showNow: p.show_now, showStats: p.show_stats, showLikes: p.show_likes, invisible: p.invisible, allowDuo: p.allow_duo !== false,
       statusTrack: asObj(p.status_track), pinned: asObj(p.pinned) || []
     };
   }
@@ -284,7 +291,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
         if (!VISIBILITY.includes(body.visibility)) throw new HttpError(400, 'Видимость: all, friends или nobody');
         set('visibility', body.visibility);
       }
-      for (const [k, col] of [['showNow', 'show_now'], ['showStats', 'show_stats'], ['showLikes', 'show_likes'], ['invisible', 'invisible']]) {
+      for (const [k, col] of [['showNow', 'show_now'], ['showStats', 'show_stats'], ['showLikes', 'show_likes'], ['invisible', 'invisible'], ['allowDuo', 'allow_duo']]) {
         if (body[k] !== undefined) set(col, !!body[k]);
       }
       if (body.statusTrack !== undefined) set('status_track', body.statusTrack ? JSON.stringify(cleanTrack(body.statusTrack)) : null);
@@ -363,6 +370,8 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
         pinned: asObj(p.pinned) || [],
         now: rel === 'friends' || rel === 'self' ? await nowOf(uid, p) : null,
         // «невидимка» прячет и статистику со значками — для всех, кроме себя
+        // разрешил ли он друзьям совпадение вкусов и «микс на двоих»
+        duo: p.allow_duo !== false,
         stats: p.show_stats && (!p.invisible || rel === 'self') ? await topOf(uid) : null,
         badges: p.show_stats && (!p.invisible || rel === 'self') ? await badgesOf(uid, await playsOf(uid, 90)) : []
       };
@@ -397,7 +406,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
     // совпадение вкусов с другом и общие исполнители (за 90 дней)
     ['GET', /^\/friends\/(\d+)\/match$/, async ({ s, m }) => {
       const other = Number(m[1]);
-      await needFriend(s.uid, other);
+      await needDuo(s.uid, other);
       const [mine, theirs] = await Promise.all([playsOf(s.uid, 90), playsOf(other, 90)]);
       const a = weights(mine);
       const b = weights(theirs);
@@ -412,19 +421,29 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
     // «Микс на двоих»: общие треки, потом по очереди любимое каждого у общих исполнителей и просто любимое
     ['GET', /^\/friends\/(\d+)\/mix$/, async ({ s, m }) => {
       const other = Number(m[1]);
-      await needFriend(s.uid, other);
+      await needDuo(s.uid, other);
       const [mine, theirs] = await Promise.all([playsOf(s.uid, 120), playsOf(other, 120)]);
       const a = weights(mine);
       const b = weights(theirs);
       const { common } = match(a, b);
       const commonSet = new Set(common);
-      const byScore = (map) => [...map.values()].sort((x, y) => y.n - x.n);
-      const both = byScore(a.tracks).filter((t) => b.tracks.has(t.id));
-      const pick = (map, shared) => byScore(map).filter((t) => !both.some((x) => x.id === t.id) && commonSet.has(mainArtist(t.artist)) === shared);
+      // каждый раз по-новому: случайный порядок, но любимое чаще оказывается ближе к началу
+      // (вес = сколько раз слушали; «ключ» Эфраимидиса — Спиракиса: random^(1/вес))
+      const shuffled = (list) => list.map((t) => ({ t, k: Math.pow(Math.random(), 1 / Math.max(1, t.n)) })).sort((x, y) => y.k - x.k).map((x) => x.t);
+      const both = shuffled([...a.tracks.values()].filter((t) => b.tracks.has(t.id)));
+      const bothIds = new Set(both.map((t) => t.id));
+      const pick = (map, shared) => shuffled([...map.values()].filter((t) => !bothIds.has(t.id) && commonSet.has(mainArtist(t.artist)) === shared));
       const lists = [pick(a.tracks, true), pick(b.tracks, true), pick(a.tracks, false), pick(b.tracks, false)];
-      const out = [...both.slice(0, 15)];
-      const seen = new Set(out.map((t) => t.id));
-      for (let i = 0; out.length < 60 && lists.some((l) => l.length > i); i++) {
+      // общие треки не стеной в начале, а через один с любимым каждого
+      const out = [];
+      const commonPart = both.slice(0, 15);
+      const seen = new Set();
+      for (let i = 0; out.length < 60 && (lists.some((l) => l.length > i) || commonPart.length > i); i++) {
+        const t0 = commonPart[i];
+        if (t0 && !seen.has(t0.id)) {
+          seen.add(t0.id);
+          out.push(t0);
+        }
         for (const l of lists) {
           const t = l[i];
           if (t && !seen.has(t.id)) {
