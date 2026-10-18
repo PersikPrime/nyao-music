@@ -179,10 +179,8 @@ const NAV = [
   ['search', 'Поиск', 'M11 4.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13M20 20l-4.2-4.2'],
   ['wave', 'Моя волна', 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0'],
   ['library', 'Медиатека', 'M5 4v16M10 4v16M15 5l4 15'],
-  ['friends', 'Друзья', 'M10 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M3.5 20c.8-3.5 3.4-5.5 6.5-5.5 1.6 0 3 .5 4.1 1.4M18.5 14v6M15.5 17h6'],
-  ['together', 'Вместе', 'M9 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.6a3.4 3.4 0 0 1 0 6.3M18 14.8c1.8.7 3 2.4 3.5 5.2'],
-  ['stats', 'Статистика', 'M5 20V11M12 20V5M19 20v-6']
 ];
+// «Друзья», «Вместе» и «Статистика» живут внутри «Профиля» (как на Android)
 const SETTINGS_ICON = 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1';
 
 const DIVERSITY = [['any', 'Всё', 'Без ограничений: и любимое, и новое, и популярное — как обычная «Моя волна».'], ['favorite', 'Любимое', 'В основном твои лайки и похожее на них. Если лайков немного, треки будут повторяться.'], ['discover', 'Незнакомое', 'Только новое: в поток не попадёт ничего из твоих лайков.'], ['popular', 'Популярное', 'Хиты и то, что сейчас слушают чаще всего.']];
@@ -260,7 +258,8 @@ function navItems() {
 
 // ---------- Навигация ----------
 function renderRail() {
-  const btn = (route, label, d) => `<button class="nav-btn ${state.route === route ? 'active' : ''}" data-route="${route}" aria-label="${label}" title="${label}"${route === 'friends' && friendsBadge ? ` data-badge="${friendsBadge > 9 ? '9+' : friendsBadge}"` : ''}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg><span class="lbl">${label}</span></button>`;
+  const isOn = (route) => state.route === route || (route === 'settings' && PROFILE_ROUTES.includes(state.route));
+  const btn = (route, label, d) => `<button class="nav-btn ${isOn(route) ? 'active' : ''}" data-route="${route}" aria-label="${label}" title="${label}"${route === 'settings' && friendsBadge ? ` data-badge="${friendsBadge > 9 ? '9+' : friendsBadge}"` : ''}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg><span class="lbl">${label}</span></button>`;
   let extra = '';
   if (IS_MAC) {
     const pls = (state.lib.lists || []).slice(0, 7);
@@ -271,7 +270,7 @@ function renderRail() {
     </div>`;
   }
   const accounts = IS_MAC ? `<div class="side-accounts">${accountButton()}</div>` : '';
-  $('#rail').innerHTML = navItems().map((n) => btn(...n)).join('') + extra + '<div class="spacer"></div>' + btn('settings', 'Настройки', SETTINGS_ICON) + accounts;
+  $('#rail').innerHTML = navItems().map((n) => btn(...n)).join('') + extra + '<div class="spacer"></div>' + btn('settings', 'Профиль', 'M12 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M5 20c.9-3.6 3.6-5.5 7-5.5s6.1 1.9 7 5.5') + accounts;
 }
 // Подключаемые сервисы. Новый сервис (VK Музыка, SoundCloud…) добавляется сюда — кнопка аккаунта и меню подхватят его сами
 /** Название сервиса: в родительном падеже («из Яндекс Музыки») или обычное */
@@ -1150,36 +1149,118 @@ function accentPickerHtml() {
   </div>`;
 }
 
+// ---------- Профиль: аккаунт, друзья, комнаты и все настройки (как на Android) ----------
+const PROFILE_ROUTES = ['settings', 'friends', 'together', 'stats', 'user', 'profile'];
+const RI = {
+  stats: 'M5 20V11M12 20V5M19 20v-6',
+  devices: 'M3 5.5h13v9H3zM7 18.5h5M9.5 14.5v4M18.5 9h2.5v10.5h-2.5z',
+  person: 'M12 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M5 20c.9-3.6 3.6-5.5 7-5.5s6.1 1.9 7 5.5',
+  edit: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
+  sound: 'M4 9.5h3.5L12 5v14l-4.5-4.5H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11',
+  keys: 'M3.5 6.5h17v11h-17zM7 10h1M11 10h2M16 10h1M7.5 14h9',
+  palette: 'M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.7-.8 1.7-1.6 0-1-.9-1.5-.9-2.4 0-.9.7-1.5 1.6-1.5h2c2 0 3.6-1.6 3.6-3.6 0-4.4-3.6-7.9-8-7.9M7.5 12a1 1 0 1 0 0 .1M10 8a1 1 0 1 0 0 .1M14.5 8a1 1 0 1 0 0 .1',
+  update: 'M20 12a8 8 0 1 1-2.3-5.7M20 4.5v4h-4',
+  info: 'M12 21a9 9 0 1 0 0-18a9 9 0 1 0 0 18M12 11v5M12 7.8v.2',
+  chevron: 'M9.5 6l6 6-6 6'
+};
+function rowIcon(d) {
+  return `<span class="srow-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg></span>`;
+}
+function srow({ icon, lead, title, value, ok, action = 'set-sec', sec, route, extra = '' }) {
+  const data = route ? `data-action="go" data-route="${route}"` : `data-action="${action}" data-sec="${esc(sec || '')}"`;
+  return `<button class="srow" ${data} ${extra}>${lead || rowIcon(icon)}<span class="srow-t">${title}</span>${value ? `<span class="srow-v ${ok ? 'ok' : ''}">${value}</span>` : ''}<svg class="srow-ch" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="${RI.chevron}"/></svg></button>`;
+}
+function sgroup(title, rows) {
+  return `<section class="sgroup"><div class="sgroup-t">${title}</div><div class="sgroup-b">${rows.join('')}</div></section>`;
+}
+/** Вкладки раздела профиля: Профиль / Друзья / Вместе */
+function profileTabs(active) {
+  const t = (route, label) => `<button class="ptab ${active === route ? 'on' : ''}" data-action="go" data-route="${route}">${label}</button>`;
+  return `<div class="ptabs">${t('settings', 'Профиль')}${t('friends', 'Друзья')}${t('together', 'Вместе')}</div>`;
+}
+const SECTIONS = {
+  account: 'Аккаунт Nyao', sound: 'Звук и воспроизведение', keys: 'Управление и окно', view: 'Вид приложения',
+  lastfm: 'Last.fm', discord: 'Discord', updates: 'Обновления', about: 'О приложении', wave: 'Моя волна'
+};
+function sectionTitle(sec) {
+  if (sec && sec.startsWith('svc:')) return (SERVICES.find((x) => x.id === sec.slice(4)) || {}).name || 'Сервис';
+  return SECTIONS[sec] || 'Настройки';
+}
+
 function renderSettings() {
-  view.innerHTML = `<div class="scroll settings">
-    <h1 class="page">Настройки</h1>
-    ${nyaoCardHtml()}
-    <section class="card">
-      <div><h2 class="sec">Вид приложения</h2><div class="hint">Что главное при запуске. Через аккаунт Nyao едет на все устройства.</div></div>
+  const sec = state.params && state.params.section;
+  if (sec) return renderSettingsSection(sec);
+  const c = state.cloud;
+  const u = c.user || {};
+  const prof = state.social && state.social.profile;
+  const connected = SERVICES.filter((x) => state.status[x.id]);
+  const visLabel = prof ? (prof.invisible ? 'невидимка' : prof.visibility === 'all' ? 'видят все' : prof.visibility === 'nobody' ? 'скрыт' : 'только друзья') : '';
+  view.innerHTML = `<div class="scroll settings phub">
+    ${profileTabs('settings')}
+    <button class="pcard" ${c.loggedIn ? 'data-action="fr-me"' : 'data-action="set-sec" data-sec="account"'}>
+      ${nyaoAvatar('pcard-av')}
+      <span class="pcard-info"><b>${esc(c.loggedIn ? u.name || 'Аккаунт Nyao' : 'Аккаунт Nyao')}</b>
+        <span class="hint">${c.loggedIn ? (prof ? '@' + esc(prof.nick) : u.username ? '@' + esc(u.username) : 'синхронизация включена') : c.logging ? 'Подтверди вход в Telegram' : 'Войди, чтобы история, миксы и друзья были везде'}</span>
+        ${connected.length ? `<span class="pcard-svcs">${connected.map((x) => svcDot(x)).join('')}</span>` : ''}</span>
+      ${c.loggedIn ? '' : c.logging ? '<span class="btn" data-action="cloud-cancel">Отмена</span>' : `<span class="btn primary tg" data-action="cloud-login">${TG_ICON}Войти через Telegram</span>`}
+    </button>
+    ${sgroup('Профиль', [
+      srow({ icon: RI.stats, title: 'Статистика', route: 'stats' }),
+      srow({ icon: RI.devices, title: 'Устройства', action: 'open-connect' }),
+      ...(c.loggedIn ? [srow({ icon: RI.edit, title: 'Мой профиль и приватность', value: visLabel, route: 'profile' })] : []),
+      srow({ icon: RI.person, title: 'Аккаунт Nyao', value: c.loggedIn ? 'вход выполнен' : 'не выполнен', ok: c.loggedIn, sec: 'account' })
+    ])}
+    ${sgroup('Приложение', [
+      srow({ icon: RI.sound, title: 'Звук и воспроизведение', value: normalizeEq(state.settings.eq).on ? 'эквалайзер вкл.' : '', sec: 'sound' }),
+      srow({ icon: RI.keys, title: 'Управление и окно', sec: 'keys' })
+    ])}
+    ${sgroup('Оформление', [
+      srow({ icon: RI.palette, title: 'Вид приложения', value: layout() === 'wave' ? 'Моя волна' : 'Плеер', sec: 'view' })
+    ])}
+    ${sgroup('Сервисы', SERVICES.map((x) => srow({ lead: svcDot(x), title: x.name, value: state.status[x.id] ? 'подключено' : 'войти', ok: !!state.status[x.id], sec: 'svc:' + x.id })))}
+    ${sgroup('Интеграции', [
+      srow({ lead: '<span class="dot" style="background:#D51007;color:#fff">fm</span>', title: 'Last.fm', value: lastfmState.connected ? lastfmState.name || 'подключено' : lastfmState.configured ? 'подключить' : 'выключен', ok: lastfmState.connected, sec: 'lastfm' }),
+      srow({ lead: '<span class="dot" style="background:#5865F2;color:#fff">D</span>', title: 'Статус в Discord', value: state.settings.discordRpc ? 'включён' : 'выключен', ok: !!state.settings.discordRpc, sec: 'discord' })
+    ])}
+    ${sgroup('О приложении', [
+      srow({ icon: RI.update, title: 'Обновления', value: state.update.info && state.update.info.available ? 'есть новая версия' : esc(state.version || ''), ok: !!(state.update.info && state.update.info.available), sec: 'updates' }),
+      srow({ icon: RI.info, title: 'О приложении', sec: 'about' })
+    ])}
+  </div>`;
+  refreshLastfm();
+}
+
+function renderSettingsSection(sec) {
+  let body = '';
+  if (sec === 'account') body = nyaoCardHtml();
+  else if (sec === 'sound') body = soundCardHtml() + eqCardHtml();
+  else if (sec === 'keys') body = controlCardHtml();
+  else if (sec === 'wave') body = waveControlsHtml();
+  else if (sec === 'view') body = `<section class="card">
+      <div class="hint">Что главное при запуске. Через аккаунт Nyao едет на все устройства.</div>
       ${layoutChoiceHtml(layout(), 'data-action="set-layout"')}
       ${accentPickerHtml()}
       <div class="pref-row"><span><b>«Мне нравится» по сервисам</b><span class="hint">Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud — плюс общий.</span></span>
         <button class="switch ${state.settings.splitLiked ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.splitLiked}" aria-label="«Мне нравится» по сервисам" data-action="split-liked" data-v="${state.settings.splitLiked ? 0 : 1}"><span></span></button></div>
       ${layout() === 'player' ? `<div class="pref-row"><span><b>Вкладка «Моя волна» в меню</b><span class="hint">В режиме «Плеер» волна живёт плиткой на главной. Можно вернуть её отдельной вкладкой.</span></span>
         <button class="switch ${state.settings.waveTab ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.waveTab}" aria-label="Вкладка «Моя волна» в меню" data-action="toggle-wavetab"><span></span></button></div>` : ''}
-    </section>
-    <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Аккаунты</h2>${SERVICES.map((x) => svcCard(x.id)).join('')}</section>
-    <section style="display:flex;flex-direction:column;gap:14px"><h2 class="sec">Моя волна</h2>${waveControlsHtml()}</section>
-    ${soundCardHtml()}
-    ${eqCardHtml()}
-    ${discordCardHtml()}
-    <section class="card" id="lastfm-card">${lastfmCardInner()}</section>
-    ${controlCardHtml()}
-    ${updateCardHtml()}
-    <section class="card">
-      <h2 class="sec">О приложении</h2>
+    </section>`;
+  else if (sec.startsWith('svc:')) body = svcCard(sec.slice(4));
+  else if (sec === 'lastfm') body = `<section class="card" id="lastfm-card">${lastfmCardInner()}</section>`;
+  else if (sec === 'discord') body = discordCardHtml();
+  else if (sec === 'updates') body = updateCardHtml();
+  else if (sec === 'about') body = `<section class="card">
       <div class="hint">Nyao Music ${esc(state.version || '0.2')} · тема ${IS_MAC ? 'macOS (Liquid Glass)' : 'Windows'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
-      <button class="btn" data-action="onboarding" style="margin-top:12px">Показать приветствие снова</button>
-    </section>
+      <div><button class="btn" data-action="onboarding">Показать приветствие снова</button></div>
+    </section>`;
+  view.innerHTML = `<div class="scroll settings psec">
+    <div class="psec-head"><button class="icon-btn" data-action="set-sec" data-sec="" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button><h1 class="page">${esc(sectionTitle(sec))}</h1></div>
+    ${body}
   </div>`;
   $$('input[data-input="share"]', view).forEach(setRangeFill);
-  refreshRpcStatus();
-  refreshLastfm();
+  if (sec === 'discord') refreshRpcStatus();
+  if (sec === 'lastfm') refreshLastfm();
+  if (sec === 'account' && state.cloud.loggedIn && !state.cloud.devices) loadCloudDevices();
 }
 
 function eqCardHtml() {
@@ -1386,6 +1467,7 @@ const friends = createFriends({
     renderBar();
   },
   askText: (label, value, btn) => askText(label, value, btn),
+  profileTabs: (a) => profileTabs(a),
   updateBadge: (n) => {
     friendsBadge = n;
     renderRail();
@@ -1844,7 +1926,7 @@ function showReaction(emoji, name) {
 }
 function renderTogether() {
   const r = state.room;
-  const head = '<h1 class="page">Слушать вместе</h1>';
+  const head = profileTabs('together') + '<h1 class="page">Слушать вместе</h1>';
   if (!state.cloud.loggedIn) {
     view.innerHTML = `<div class="scroll together">${head}
       <div class="card"><div class="field"><label>Нужен аккаунт Nyao</label><div class="hint">Комнаты работают через аккаунт Nyao (вход через Telegram). Токены музыкальных сервисов остаются на устройстве.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Войти</button></div></div></div>`;
@@ -1975,7 +2057,7 @@ function renderStats() {
           ${s.first ? `<span class="hint">Первый трек периода: «${esc(s.first.title)}» — ${esc(s.first.artist)}</span>` : ''}</section>
       </div>`;
   }
-  view.innerHTML = `<div class="scroll stats"><div class="st-head"><h1 class="page">Статистика</h1>${seg}</div>${body}</div>`;
+  view.innerHTML = `<div class="scroll stats">${profileTabs('')}<div class="st-head"><h1 class="page">Статистика</h1>${seg}</div>${body}</div>`;
   if ($('#st-ribbon')) new Ribbon($('#st-ribbon'), { lines: 14, cy: 0.55, amp: 1, accent: accentColor() });
 }
 
@@ -2052,6 +2134,12 @@ async function handleAction(el, e) {
   const a = el.dataset.action;
   if (a && a.startsWith('fr-') && (await friends.action(el))) return;
   switch (a) {
+    case 'set-sec':
+      go('settings', el.dataset.sec ? { section: el.dataset.sec } : {});
+      break;
+    case 'open-connect':
+      toggleConnect();
+      break;
     case 'go':
       $('#connect').hidden = true;
       go(el.dataset.route);

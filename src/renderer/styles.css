@@ -1009,3 +1009,36 @@ body.fs-on .toast { z-index: 1000; }
 #fr-banner { position: fixed; left: 50%; top: 16px; transform: translate(-50%, -140%); z-index: 90; display: flex; align-items: center; gap: 14px; padding: 10px 10px 10px 18px; border-radius: 999px; background: var(--s3, #2b2930); border: 1px solid var(--accent-line); box-shadow: 0 10px 30px rgba(0, 0, 0, .45); transition: transform .35s cubic-bezier(.2, 1.4, .4, 1); max-width: min(560px, calc(100vw - 32px)); }
 #fr-banner span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #fr-banner.show { transform: translate(-50%, 0); }
+
+/* ---------- Профиль и настройки — как на Android: карточка и группы строк ---------- */
+.phub, .psec { gap: 18px; }
+.ptabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--s1); align-self: flex-start; width: auto !important; }
+.ptab { height: 36px; padding: 0 18px; border-radius: 999px; border: 0; background: none; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
+.ptab:hover { color: var(--text); }
+.ptab.on { background: var(--accent-soft); color: var(--accent-light); }
+.pcard { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 16px; padding: 18px; border-radius: 28px; background: var(--s1); transition: transform .15s; }
+.pcard:hover { transform: scale(.995); }
+.pcard:active { transform: scale(.98); }
+.pcard-av { width: 72px; height: 72px; border-radius: 26px; flex: none; display: grid; place-items: center; font-size: 30px; font-weight: 700; overflow: hidden; background: linear-gradient(135deg, var(--accent), #7F6BFF); color: #1A1033; }
+.pcard-av img { width: 100%; height: 100%; object-fit: cover; }
+.pcard-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pcard-info b { font-size: 20px; }
+.pcard-svcs { display: flex; gap: 6px; margin-top: 6px; }
+.sgroup { display: flex; flex-direction: column; gap: 8px; }
+.sgroup-t { font-size: 13px; font-weight: 600; color: var(--muted); padding-left: 10px; }
+.sgroup-b { display: flex; flex-direction: column; border-radius: 26px; background: var(--s1); overflow: hidden; }
+.srow { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 14px; min-height: 58px; padding: 10px 16px; position: relative; }
+.srow + .srow::before { content: ''; position: absolute; top: 0; left: 56px; right: 16px; height: 1px; background: var(--line2); opacity: .6; }
+.srow:hover { background: rgba(255, 255, 255, .03); }
+.srow-ic { width: 26px; display: grid; place-items: center; color: var(--muted); flex: none; }
+.srow .dot { width: 26px; height: 26px; border-radius: 8px; font-size: 10px; font-weight: 800; display: grid; place-items: center; flex: none; }
+.srow-t { flex: 1; font-size: 15px; min-width: 0; }
+.srow-v { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.srow-v.ok { color: #8FE3B0; }
+.srow-ch { color: var(--muted); flex: none; }
+.psec-head { display: flex; align-items: center; gap: 8px; }
+.psec-head .page { margin: 0; }
+.psec-head .icon-btn { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--s1); color: var(--text); display: grid; place-items: center; cursor: pointer; }
+.phub > .pcard { max-width: 760px; width: 100%; }
+.pcard-svcs .dot { width: 24px; height: 24px; margin: 0 !important; border-radius: 8px; font-size: 10px; font-weight: 800; display: grid; place-items: center; box-shadow: none; }
+.up-acts .tag { padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-light); font-size: 12px; font-weight: 600; }

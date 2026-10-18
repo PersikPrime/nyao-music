@@ -61,13 +61,13 @@ export function createFriends(ctx) {
   function renderFriends() {
     const view = ctx.view;
     if (!state.cloud.loggedIn) {
-      view.innerHTML = `<div class="scroll friends"><h1 class="page">Друзья</h1>
+      view.innerHTML = `<div class="scroll friends">${ctx.profileTabs ? ctx.profileTabs('friends') : ''}<h1 class="page">Друзья</h1>
         <div class="card"><div class="field"><label>Нужен аккаунт Nyao</label><div class="hint">Друзья работают через аккаунт Nyao (вход через Telegram). Токены музыкальных сервисов остаются на этом компьютере.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Войти</button></div></div></div>`;
       return;
     }
     const sr = s.search;
     const inv = s.invite;
-    view.innerHTML = `<div class="scroll friends">
+    view.innerHTML = `<div class="scroll friends">${ctx.profileTabs ? ctx.profileTabs('friends') : ''}
       <div class="fr-head"><h1 class="page">Друзья</h1>
         <button class="btn" data-action="fr-me">${avatar(state.cloud.user ? { name: state.cloud.user.name, picture: state.cloud.user.picture } : null, 24)}<span>@${esc(s.profile ? s.profile.nick : '…')}</span></button></div>
       ${s.incoming.length ? `<section class="fr-sec"><div class="eyebrow">Заявки · ${s.incoming.length}</div>${s.incoming.map((u) => `
