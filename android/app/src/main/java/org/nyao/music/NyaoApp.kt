@@ -7,5 +7,6 @@ class NyaoApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Repo.init(this)
+        org.nyao.music.playback.Friends.init(this)
     }
 }

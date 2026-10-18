@@ -5,6 +5,7 @@ import { TelegramOIDC } from './telegram.js';
 import { ReleaseMirror } from './mirror.js';
 import { createApp } from './app.js';
 import { StatusFile } from './status.js';
+import { FcmPush, parseServiceAccount } from './push.js';
 
 const env = process.env;
 const PUBLIC_URL = env.PUBLIC_URL || 'https://api.nmusic.bixtl.cc';
@@ -34,7 +35,10 @@ setInterval(() => mirror.sync(), 3 * 60_000);
 const minBuild = Number(env.MIN_BUILD) || 0;
 if (minBuild) console.log(`[nyao] минимальная сборка: ${minBuild}`);
 const status = new StatusFile(env.STATUS_FILE || '/data/status/status.json');
-const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status }));
+const fcm = parseServiceAccount(env.FCM_SERVICE_ACCOUNT);
+const push = fcm ? new FcmPush(fcm) : null;
+console.log(push ? `[push] Firebase: ${fcm.project_id}` : '[push] FCM_SERVICE_ACCOUNT не задан — push выключены');
+const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL }));
 server.listen(Number(env.PORT) || 8080, () => console.log(`[nyao] сервер слушает :${server.address().port}`));
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

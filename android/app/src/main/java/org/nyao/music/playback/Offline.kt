@@ -51,7 +51,8 @@ object Offline {
         /** Что сейчас качается: id плейлиста → (готово, всего) */
         val progress: Map<String, Pair<Int, Int>> = emptyMap(),
     ) {
-        val ids: Set<String> get() = tracks.mapTo(HashSet()) { it.id }
+        /** Считается один раз на состояние — его читают все значки «скачано» в списках */
+        val ids: Set<String> by lazy { tracks.mapTo(HashSet()) { it.id } }
     }
 
     private val _state = MutableStateFlow(State())

@@ -1,6 +1,8 @@
 package org.nyao.music.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,53 +44,211 @@ import org.nyao.music.data.SOURCE_YT
 import org.nyao.music.ui.AppModel
 import org.nyao.music.ui.Route
 import org.nyao.music.ui.components.NyaoWaves
+import org.nyao.music.ui.components.bouncy
 import org.nyao.music.ui.components.sourceColor
 import org.nyao.music.ui.theme.NyaoColors
 
+// ======================= Профиль (вместо вкладки «Настройки») =======================
+
+/** Профиль: карточка аккаунта Nyao и все настройки списком разделов, как в Android 16 */
 @Composable
-fun SettingsScreen(model: AppModel) {
+fun ProfileScreen(model: AppModel) {
+    val user by Repo.cloud.user.collectAsState()
+    val accounts by Repo.accounts.collectAsState()
+    val s by Repo.prefs.settings.collectAsState()
+    val lf by Repo.lastfm.state.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().padding(16.dp).padding(BottomInset),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().padding(horizontal = 16.dp).padding(top = 12.dp).padding(BottomInset),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Text("Настройки", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp))
-        NyaoAccountCard(model)
-        ViewSettingsCard()
-        Text("Сервисы", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
-        ServiceCard(model, SOURCE_YA)
-        ServiceCard(model, SOURCE_YT)
-        ServiceCard(model, org.nyao.music.data.SOURCE_SC)
-        ServiceCard(model, org.nyao.music.data.SOURCE_VK)
-
-        Text("Моя волна", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
-        OutlinedButton(onClick = { model.go(Route.Wave) }, modifier = Modifier.fillMaxWidth()) { Text("Характер, настроение и баланс источников") }
-
-        EqCard()
-        LastFmCard(model)
-        CacheCard()
-        UpdateCard(model)
-
-        Text("О приложении", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+        // Карточка профиля: нажатие открывает свою страницу профиля (её видят друзья)
+        val social by org.nyao.music.playback.Friends.profile.collectAsState()
+        androidx.compose.runtime.LaunchedEffect(user) { if (user != null) runCatching { org.nyao.music.playback.Friends.refresh() } }
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            Modifier.fillMaxWidth().bouncy(0.97f).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
+                .clickable(enabled = user != null) { model.go(Route.UserPage("")) }.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(NyaoColors.Ink), contentAlignment = Alignment.Center) {
-                    NyaoWaves(Modifier.size(40.dp), animate = false, strokeDp = 3.5f)
-                }
-                Column(Modifier.padding(start = 14.dp)) {
-                    Text("Nyao Music", style = MaterialTheme.typography.titleLarge)
-                    Text("версия ${BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                NyaoAvatar(size = 76, shape = org.nyao.music.ui.components.PolarShape(9, 0.06f))
+                Column(Modifier.weight(1f).padding(start = 16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(user?.name ?: "Аккаунт Nyao", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    Text(
+                        when {
+                            user != null -> social?.nick?.let { "@$it" } ?: user?.username?.let { "@$it" } ?: "синхронизация включена"
+                            model.cloudLogging -> "Подтверди вход в Telegram"
+                            else -> "Войди, чтобы история и миксы были везде"
+                        },
+                        style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted, maxLines = 1,
+                    )
+                    val connected = org.nyao.music.data.ALL_SOURCES.filter { accounts[it] != null }
+                    if (connected.isNotEmpty()) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        connected.forEach { ServiceLogo(it, size = 24) }
+                    }
                 }
             }
-            Text(
-                "Оба сервиса подключены через неофициальные API — после их обновлений что-то может сломаться. Для личного пользования.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TextButton(onClick = { Repo.prefs.setOnboarded(false) }) { Text("Показать приветствие снова") }
+            if (user == null) {
+                if (model.cloudLogging) {
+                    OutlinedButton(onClick = { model.cancelCloudLogin() }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Отменить вход") }
+                } else {
+                    Button(
+                        onClick = { model.cloudLogin(context) },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF2AABEE), contentColor = Color.White),
+                    ) { Text("Войти через Telegram") }
+                }
+            }
         }
+
+        SettingsGroup("Профиль") {
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.BarChart, "Статистика") { model.go(Route.Stats) }
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Devices, "Устройства") { model.connectOpen = true }
+            if (user != null) SettingsRow(org.nyao.music.ui.components.NyaoIcons.Edit, "Мой профиль и приватность", social?.let { if (it.invisible) "невидимка" else when (it.visibility) { "all" -> "видят все"; "nobody" -> "скрыт"; else -> "только друзья" } }) { model.go(Route.SettingsPage("profile")) }
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Person, "Аккаунт Nyao", if (user != null) "вход выполнен" else "не выполнен", last = true) { model.go(Route.SettingsPage("account")) }
+        }
+        SettingsGroup("Приложение") {
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Equalizer, "Звук и воспроизведение", if (s.eqOn) "эквалайзер вкл." else null) { model.go(Route.SettingsPage("sound")) }
+            // настройки волны живут на экране «Моя волна» — здесь их больше нет
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Database, "Офлайн и кэш", last = true) { model.go(Route.SettingsPage("cache")) }
+        }
+        SettingsGroup("Оформление") {
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Palette, "Тема и сетка", org.nyao.music.ui.theme.UiLook.themes.firstOrNull { it.first == s.theme }?.second) { model.go(Route.SettingsPage("theme")) }
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Home, "Вид главной", if (s.isWaveLayout) "Моя волна" else "Плеер", last = true) { model.go(Route.SettingsPage("view")) }
+        }
+        SettingsGroup("Сервисы") {
+            val list = listOf(SOURCE_YA, SOURCE_YT, org.nyao.music.data.SOURCE_SC, org.nyao.music.data.SOURCE_VK)
+            list.forEachIndexed { i, src ->
+                SettingsRow(null, org.nyao.music.data.sourceName(src), if (accounts[src] != null) "подключено" else "войти", leading = { ServiceLogo(src, size = 26) }, valueOk = accounts[src] != null, last = i == list.lastIndex) {
+                    model.go(Route.SettingsPage("svc:$src"))
+                }
+            }
+        }
+        SettingsGroup("Интеграции") {
+            SettingsRow(null, "Last.fm", lf.name ?: if (lf.configured) "подключить" else "выключен", leading = {
+                Box(Modifier.size(26.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFD51007)), contentAlignment = Alignment.Center) { Text("fm", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall) }
+            }, valueOk = lf.name != null, last = true) { model.go(Route.SettingsPage("lastfm")) }
+        }
+        SettingsGroup("Другое") {
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Refresh, "Обновления", BuildConfig.VERSION_NAME) { model.go(Route.SettingsPage("updates")) }
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Info, "О приложении") { model.go(Route.SettingsPage("about")) }
+            if (user != null) SettingsRow(org.nyao.music.ui.components.NyaoIcons.Logout, "Выйти из аккаунта Nyao", danger = true, last = true, chevron = false) { model.cloudLogout() }
+            else SettingsRow(org.nyao.music.ui.components.NyaoIcons.Refresh, "Показать приветствие снова", last = true, chevron = false) { Repo.prefs.setOnboarded(false) }
+        }
+        Text(
+            "Токены Яндекса, YouTube, SoundCloud и VK остаются только на этом телефоне.",
+            style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = Modifier.padding(horizontal = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, style = MaterialTheme.typography.labelLarge, color = NyaoColors.Muted, modifier = Modifier.padding(start = 8.dp))
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer)) { content() }
+    }
+}
+
+@Composable
+private fun SettingsRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector?,
+    title: String,
+    value: String? = null,
+    leading: (@Composable () -> Unit)? = null,
+    valueOk: Boolean = false,
+    danger: Boolean = false,
+    chevron: Boolean = true,
+    last: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Box {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 60.dp).padding(horizontal = 18.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
+                when {
+                    leading != null -> leading()
+                    icon != null -> androidx.compose.material3.Icon(icon, null, tint = if (danger) Color(0xFFFF8A80) else NyaoColors.Muted, modifier = Modifier.size(24.dp))
+                }
+            }
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = if (danger) Color(0xFFFF8A80) else NyaoColors.Text, modifier = Modifier.weight(1f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            if (value != null) Text(value, style = MaterialTheme.typography.bodySmall, color = if (valueOk) Color(0xFF8FE3B0) else NyaoColors.Muted, maxLines = 1)
+            if (chevron) androidx.compose.material3.Icon(org.nyao.music.ui.components.NyaoIcons.ChevronRight, null, tint = NyaoColors.Outline, modifier = Modifier.size(20.dp))
+        }
+        if (!last) Box(Modifier.align(Alignment.BottomEnd).padding(start = 60.dp).fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.06f)))
+    }
+}
+
+private fun sectionTitle(section: String): String = when {
+    section == "profile" -> "Мой профиль"
+    section == "account" -> "Аккаунт Nyao"
+    section == "sound" -> "Звук и воспроизведение"
+    section == "wave" -> "Моя волна"
+    section == "cache" -> "Офлайн и кэш"
+    section == "view" -> "Вид главной"
+    section == "theme" -> "Тема и сетка"
+    section == "lastfm" -> "Last.fm"
+    section == "updates" -> "Обновления"
+    section == "about" -> "О приложении"
+    section.startsWith("svc:") -> org.nyao.music.data.sourceName(section.removePrefix("svc:"))
+    else -> "Настройки"
+}
+
+/** Раздел настроек, открытый из профиля: заголовок с «назад» и знакомые карточки */
+@Composable
+fun SettingsPageScreen(model: AppModel, section: String) {
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.IconButton(onClick = { model.back() }) {
+                androidx.compose.material3.Icon(org.nyao.music.ui.components.NyaoIcons.ArrowBack, "Назад")
+            }
+            Text(sectionTitle(section), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp))
+        }
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 8.dp).padding(BottomInset),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            when {
+                section == "profile" -> EditProfileCard(model)
+                section == "account" -> NyaoAccountCard(model)
+                section == "sound" -> EqCard(showTitle = false)
+                section == "wave" -> WaveSettings(onChanged = { model.refreshWave() })
+                section == "cache" -> StorageCard()
+                section == "view" -> ViewSettingsCard()
+                section == "theme" -> LookSettings()
+                section == "lastfm" -> LastFmCard(model)
+                section == "updates" -> UpdateCard(model, showTitle = false)
+                section == "about" -> AboutCard()
+                section.startsWith("svc:") -> ServiceCard(model, section.removePrefix("svc:"))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AboutCard() {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(NyaoColors.Ink), contentAlignment = Alignment.Center) {
+                NyaoWaves(Modifier.size(40.dp), animate = false, strokeDp = 3.5f)
+            }
+            Column(Modifier.padding(start = 14.dp)) {
+                Text("Nyao Music", style = MaterialTheme.typography.titleLarge)
+                Text("версия ${BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text(
+            "Сервисы подключены через неофициальные API — после их обновлений что-то может сломаться. Для личного пользования.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = { Repo.prefs.setOnboarded(false) }) { Text("Показать приветствие снова") }
     }
 }
 
@@ -100,41 +260,61 @@ private fun ServiceCard(model: AppModel, source: String) {
     val isSc = source == org.nyao.music.data.SOURCE_SC
     val isVk = source == org.nyao.music.data.SOURCE_VK
     val scope = rememberCoroutineScope()
-    var manual by remember { mutableStateOf(false) }
+    var manual by remember { mutableStateOf(Repo.accounts.value[source] == null) }
     var vkLog by remember { mutableStateOf<String?>(null) }
     var value by remember { mutableStateOf("") }
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ServiceLogo(source)
-            Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-                Text(org.nyao.music.data.sourceName(source), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (acc != null) "Вход выполнен: ${acc.name}" + (if (ya && acc.plus == false) " · без Плюса треки могут не играть" else if (isSc) " · треки Go+ пропускаются" else if (isVk) " · бета" else "")
-                    else if (isSc) "Не подключено · поиск работает и без входа" else if (isVk) "Не подключено · бета" else "Не подключено",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    val color = org.nyao.music.ui.components.sourceColor(source)
+    val name = org.nyao.music.data.sourceName(source)
+    fun logout() {
+        scope.launch {
+            when {
+                ya -> Repo.setYandexToken(null)
+                isSc -> Repo.setScToken(null)
+                isVk -> Repo.setVk(null, null)
+                else -> Repo.setYtCookie(null)
             }
-            if (acc != null) {
-                OutlinedButton(onClick = {
-                    scope.launch {
-                        when {
-                            ya -> Repo.setYandexToken(null)
-                            isSc -> Repo.setScToken(null)
-                            isVk -> Repo.setVk(null, null)
-                            else -> Repo.setYtCookie(null)
-                        }
-                        // cookie только этого сервиса — чтобы не выкинуло из остальных
-                        if (isSc) Repo.clearCookies("https://soundcloud.com", "https://api-v2.soundcloud.com", "https://secure.soundcloud.com")
-                        else if (!ya && !isVk) Repo.clearCookies("https://music.youtube.com", "https://www.youtube.com", "https://youtube.com", "https://accounts.google.com", "https://www.google.com", "https://google.com")
-                        model.accountsChanged()
-                    }
-                }) { Text("Выйти") }
-            } else {
-                Button(onClick = { model.loginFor = source }) { Text("Войти") }
+            // cookie только этого сервиса — чтобы не выкинуло из остальных
+            if (isSc) Repo.clearCookies("https://soundcloud.com", "https://api-v2.soundcloud.com", "https://secure.soundcloud.com")
+            else if (!ya && !isVk) Repo.clearCookies("https://music.youtube.com", "https://www.youtube.com", "https://youtube.com", "https://accounts.google.com", "https://www.google.com", "https://google.com")
+            model.accountsChanged()
+        }
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Свечение цвета сервиса и большая карточка входа
+        Box(Modifier.fillMaxWidth()) {
+            Box(
+                Modifier.matchParentSize().background(
+                    androidx.compose.ui.graphics.Brush.radialGradient(listOf(color.copy(alpha = 0.35f), Color.Transparent)),
+                ),
+            )
+            Column(
+                Modifier.fillMaxWidth().padding(vertical = 18.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f)).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(Modifier.size(76.dp).clip(org.nyao.music.ui.components.PolarShape(9, 0.06f)).background(color), contentAlignment = Alignment.Center) {
+                    Text(org.nyao.music.ui.components.sourceShort(source), color = if (ya) Color.Black else Color.White, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+                }
+                Text(if (acc != null) "$name подключена" else "Войти в $name", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    when {
+                        acc != null -> "Вход выполнен: ${acc.name}" + (if (ya && acc.plus == false) " · без Плюса треки могут не играть" else if (isSc) " · треки Go+ пропускаются" else if (isVk) " · бета" else "")
+                        ya -> "Лайки, плейлисты и «Моя волна» Яндекса. Один раз войти — дальше Nyao всё подхватит сам."
+                        isSc -> "Лайки, плейлисты и похожие треки. Поиск работает и без входа."
+                        isVk -> "Музыка VK через сайт vk.com — пока бета."
+                        else -> "Лайки, плейлисты и радио YouTube Music."
+                    },
+                    style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                if (acc != null) {
+                    OutlinedButton(onClick = { logout() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(52.dp)) { Text("Выйти") }
+                } else {
+                    Button(
+                        onClick = { model.loginFor = source },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(52.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                    ) { Text("Войти в окне ${name.substringBefore(' ')}") }
+                }
             }
         }
         val isYt = !ya && !isSc && !isVk
@@ -164,10 +344,15 @@ private fun ServiceCard(model: AppModel, source: String) {
             }
             if (isVk) return@Column
         }
-        TextButton(onClick = { manual = !manual }) {
+        if (!manual) TextButton(onClick = { manual = true }) {
             Text(if (ya) "Вставить OAuth-токен вручную" else if (isSc) "Вставить токен вручную (cookie oauth_token)" else "Вставить cookies вручную (если Google не пускает)")
         }
         if (manual) {
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.weight(1f).height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+                Text("ИЛИ ВРУЧНУЮ", style = MaterialTheme.typography.labelSmall, color = NyaoColors.Muted)
+                Box(Modifier.weight(1f).height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            }
             OutlinedTextField(
                 value = value,
                 onValueChange = { value = it },
@@ -188,7 +373,8 @@ private fun ServiceCard(model: AppModel, source: String) {
                     model.accountsChanged()
                     model.message("Сохранено")
                 }
-            }, enabled = value.isNotBlank()) { Text("Сохранить") }
+            }, enabled = value.isNotBlank(), modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Сохранить") }
+            Text("Токен хранится только на этом телефоне — на сервер Nyao он не уходит.", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
             if (!ya && !isSc) Text(
                 "Cookies можно скопировать из десктопной версии Nyao или из браузера, где ты вошёл в music.youtube.com (нужны SAPISID и __Secure-3PSID).",
                 style = MaterialTheme.typography.bodySmall,
@@ -255,9 +441,9 @@ private fun LastFmCard(model: AppModel) {
 /** Эквалайзер: пресеты и 10 полос, как на ПК. Работает через системный эквалайзер телефона */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun EqCard() {
+private fun EqCard(showTitle: Boolean = true) {
     val s by Repo.prefs.settings.collectAsState()
-    Text("Звук", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+    if (showTitle) Text("Звук", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -358,14 +544,14 @@ private fun EqCard() {
 
 /** Кэш прослушанного: сколько занято и кнопка очистки */
 @Composable
-private fun CacheCard() {
+private fun CacheCard(showTitle: Boolean = true) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var used by remember { mutableStateOf<Long?>(null) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
         used = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { org.nyao.music.playback.PlaybackCache.sizeBytes(context) }
     }
-    Text("Кэш", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+    if (showTitle) Text("Кэш", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -391,7 +577,7 @@ private fun CacheCard() {
  * APK скачивается браузером — после загрузки Android сам предложит установить его поверх.
  */
 @Composable
-private fun UpdateCard(model: AppModel) {
+private fun UpdateCard(model: AppModel, showTitle: Boolean = true) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
@@ -410,7 +596,7 @@ private fun UpdateCard(model: AppModel) {
         }
     }
     androidx.compose.runtime.LaunchedEffect(Unit) { check() }
-    Text("Обновления", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+    if (showTitle) Text("Обновления", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),

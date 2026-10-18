@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { pkce } from './telegram.js';
 import { Hub } from './hub.js';
 import { summarize, periodRange } from './stats.js';
+import { socialRoutes } from './social.js';
 
 const LOGIN_TTL = 10 * 60_000;
 const MAX_BODY = 512 * 1024;
@@ -14,16 +15,16 @@ const CONNECT_CMDS = new Set(['toggle', 'play', 'pause', 'next', 'prev', 'seek',
 const CODE_RE = /^[A-Z0-9]{6}$/;
 
 /** Трек от клиента → только нужные поля, обрезанные по длине */
-function cleanTrack(t) {
+export function cleanTrack(t) {
   if (!t || !t.id) return null;
   return { id: clip(t.id, 128), source: clip(t.source, 8), srcId: clip(t.srcId, 128), title: clip(t.title, 256), artist: clip(t.artist, 256), album: clip(t.album, 256), albumId: t.albumId ? clip(t.albumId, 64) : null, duration: Math.round(Number(t.duration) || 0), cover: t.cover ? clip(t.cover, 512) : null };
 }
 
 export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const newToken = () => crypto.randomBytes(32).toString('base64url');
-const clip = (v, n) => (v == null ? '' : String(v)).slice(0, n);
+export const clip = (v, n) => (v == null ? '' : String(v)).slice(0, n);
 
-class HttpError extends Error {
+export class HttpError extends Error {
   constructor(status, message) {
     super(message);
     this.status = status;
@@ -44,7 +45,7 @@ function send(res, status, body, headers = {}) {
   res.end(data);
 }
 
-async function readJson(req) {
+export async function readJson(req) {
   const chunks = [];
   let size = 0;
   for await (const c of req) {
@@ -71,7 +72,7 @@ function limiter(limit) {
   };
 }
 
-export function page(title, text, ok = true) {
+export function page(title, text, ok = true, action = null) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · Nyao Music</title>
@@ -81,7 +82,8 @@ export function page(title, text, ok = true) {
 .card{max-width:420px;width:100%;background:var(--card);border:1px solid #ffffff12;border-radius:28px;padding:36px 28px;text-align:center}
 .dot{width:72px;height:72px;margin:0 auto 20px;border-radius:24px;background:var(--acc);display:grid;place-items:center;font-size:36px;color:#0b0b0f}
 h1{margin:0 0 8px;font-size:24px}p{margin:0;color:var(--muted)}
-</style></head><body><div class="card"><div class="dot">${ok ? '✓' : '!'}</div><h1>${esc(title)}</h1><p>${esc(text)}</p></div></body></html>`;
+.btn{display:inline-block;margin-top:22px;padding:14px 26px;border-radius:999px;background:var(--acc);color:#0b0b0f;font-weight:700;text-decoration:none}
+</style></head><body><div class="card"><div class="dot">${ok ? '✓' : '!'}</div><h1>${esc(title)}</h1><p>${esc(text)}</p>${action ? `<a class="btn" href="${esc(action.href)}">${esc(action.label)}</a>` : ''}</div></body></html>`;
 }
 
 /** Первая сборка, которая вообще разговаривает с сервером (0.4 (24)) — её считаем у клиентов без заголовка X-Nyao-Build */
@@ -94,7 +96,7 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub() }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '' }) {
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
   setInterval(() => {
     const now = Date.now();
@@ -138,6 +140,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     Object.assign(login, { status: 'done', token, user: publicUser(user) });
   }
 
+  const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl });
   const routes = [
     ['GET', /^\/health$/, async () => ({ ok: true, minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
     // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)
@@ -265,6 +268,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       const t = body.track;
       if (!t || !t.id) {
         await q('DELETE FROM now_playing WHERE session_id = $1', [s.sid]);
+        social.onNow(s.uid, null).catch(() => {});
         return { ok: true };
       }
       const data = {
@@ -293,6 +297,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       // пульт на других устройствах видит изменения сразу
       const { queue: _q, ...light } = data; // очередь в живые события не кладём — её берут из /connect/devices
       hub.pushUser(s.uid, { type: 'now', deviceId: String(s.sid), device: s.device, platform: s.platform, updatedAt: Date.now(), ...light }, s.sid);
+      social.onNow(s.uid, light).catch((e) => log(`[social] now: ${e.message}`));
       return { ok: true };
     }, true],
     ['GET', /^\/now$/, async ({ s }) => {
@@ -403,7 +408,8 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       const rel = mirror && mirror.latest();
       if (!rel) throw new HttpError(503, 'Сервер ещё не знает о релизах');
       return { ...rel, min_build: minBuild };
-    }]
+    }],
+    ...social
   ];
 
   return async function handler(req, res) {

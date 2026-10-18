@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -94,7 +96,7 @@ fun likedPlaylists(liked: List<Track>?, split: Boolean): List<Playlist> {
     return if (per.size > 1) listOf(all) + per else listOf(all)
 }
 
-private fun tint(source: String): Pair<Color, Color> = when (source) {
+private fun tint(source: String): Pair<Color, Color> = if (org.nyao.music.ui.theme.Look.current.mono) NyaoColors.S3 to NyaoColors.Text else when (source) {
     SOURCE_YA -> Color(0xFF5C4D00) to NyaoColors.Ya
     org.nyao.music.data.SOURCE_SC -> Color(0xFF6A2A00) to Color(0xFFFFB37A)
     org.nyao.music.data.SOURCE_VK -> Color(0xFF00337A) to Color(0xFFA8CCFF)
@@ -130,8 +132,11 @@ fun PlayerHome(model: AppModel, name: String?) {
         (model.playlists ?: emptyList()).forEach { p -> add(Quick(p.title, p.source, NyaoIcons.QueueMusic, p.cover) { model.go(Route.PlaylistPage(p)) }) }
     }.take(6)
 
+    val mono = org.nyao.music.ui.theme.Look.current.mono
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
-        item {
+        // Mono: вместо приветствия — огромная «Моя волна» с фигурами
+        if (mono) item { MonoWaveHero(model, Modifier.padding(bottom = 6.dp), trailing = { HomeSearchButton(model) }) }
+        if (!mono) item {
             Row(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 16.dp, top = 18.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -187,11 +192,7 @@ fun PlayerHome(model: AppModel, name: String?) {
         val recent = model.recent
         if (!recent.isNullOrEmpty()) {
             item { Text("Недавно слушал", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 24.dp, bottom = 12.dp)) }
-            item {
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    itemsIndexed(recent) { i, t -> Box(Modifier.appear(i)) { TrackTile(t) { PlayerConnection.playList(recent, i, "Недавно слушал") } } }
-                }
-            }
+            item { TrackShelf(recent) { i -> PlayerConnection.playList(recent, i, "Недавно слушал") } }
         }
         val top = model.top
         if (!top.isNullOrEmpty()) {
@@ -209,7 +210,7 @@ fun PlayerHome(model: AppModel, name: String?) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text("${i + 1}", style = MaterialTheme.typography.titleMedium, color = NyaoColors.Muted, modifier = Modifier.width(18.dp))
-                    Cover(t.cover, Modifier.size(48.dp), RoundedCornerShape(14.dp))
+                    Cover(t.cover, Modifier.size(48.dp), org.nyao.music.ui.theme.coverShape(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(t.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(t.artist, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -219,7 +220,7 @@ fun PlayerHome(model: AppModel, name: String?) {
                 }
             }
         }
-        item {
+        if (!mono) item {
             Text("Для настроения", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 24.dp, bottom = 12.dp))
             WaveHero(model, Modifier.padding(horizontal = 16.dp))
         }
@@ -285,9 +286,98 @@ fun ViewSettingsCard() {
     ) {
         Text("Вид приложения", style = MaterialTheme.typography.titleMedium)
         LayoutChoice(s.layout ?: "player", { Repo.prefs.setLayout(it) })
-        AccentChoice(s.accent) { Repo.prefs.setAccent(it) }
         SwitchRow("«Мне нравится» по сервисам", "Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud", s.splitLiked) { Repo.prefs.setSplitLiked(it) }
         if (!s.isWaveLayout) SwitchRow("Вкладка «Волна» в панели", "В режиме «Плеер» волна — плитка на главной", s.waveTab) { Repo.prefs.setWaveTab(it) }
+    }
+}
+
+/**
+ * «Тема и сетка»: готовые темы меняют всё разом, ниже можно собрать своё поверх темы —
+ * например, кнопки-печеньки из Expressive в теме Mono.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun LookSettings() {
+    val s by Repo.prefs.settings.collectAsState()
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("Готовая тема меняет всё сразу. Ниже можно собрать своё — например, кнопки-печеньки от Expressive в теме Mono.", style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            org.nyao.music.ui.theme.UiLook.themes.forEach { (id, name) ->
+                val on = s.theme == id
+                Column(
+                    Modifier.weight(1f).bouncy().clip(RoundedCornerShape(22.dp)).clickable { Repo.prefs.setTheme(id) }.padding(4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ThemePreview(id, Modifier.fillMaxWidth().height(150.dp).border(BorderStroke(if (on) 3.dp else 1.dp, if (on) NyaoColors.Text else Color.White.copy(alpha = 0.1f)), RoundedCornerShape(20.dp)))
+                    Text(name, style = MaterialTheme.typography.titleSmall, color = if (on) NyaoColors.Text else NyaoColors.Muted)
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Собрать своё", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = { Repo.prefs.setTheme(s.theme) }) { Text("Сбросить к теме") }
+        }
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            ChipChoice("Кнопки", listOf("cookie" to "Печенька", "circle" to "Круг", "square" to "Квадрат"), s.buttons) { Repo.prefs.setLookButtons(it) }
+            ChipChoice("Сетка главной", listOf("carousels" to "Карусели", "tiles" to "Плитка", "mosaic" to "Мозаика"), s.grid) { Repo.prefs.setLookGrid(it) }
+            ChipChoice("Обложки", listOf("rounded" to "Скруглённые", "square" to "Квадратные", "cookie" to "Печенька"), s.covers) { Repo.prefs.setLookCovers(it) }
+            SwitchRow("Подписи в панели", "Название выбранной вкладки рядом с иконкой", s.navLabels) { Repo.prefs.setLookNavLabels(it) }
+            AccentChoice(s.accent) { Repo.prefs.setAccent(it) }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChipChoice(title: String, options: List<Pair<String, String>>, current: String, onPick: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { (id, label) -> org.nyao.music.ui.components.PillChip(label, id == current, { onPick(id) }) }
+        }
+    }
+}
+
+/** Миниатюра главной в теме — чтобы было видно разницу до выбора */
+@Composable
+private fun ThemePreview(theme: String, modifier: Modifier) {
+    val b = org.nyao.music.ui.theme.BasePalette.of(theme)
+    val acc = org.nyao.music.ui.theme.Accent.palette
+    val bg: androidx.compose.ui.graphics.Brush = when (theme) {
+        "glass" -> androidx.compose.ui.graphics.Brush.linearGradient(listOf(acc.hero, Color(0xFF0E0C16), acc.container))
+        "mono" -> androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF2B2B2E), b.bg, b.bg))
+        else -> androidx.compose.ui.graphics.Brush.verticalGradient(listOf(b.bg, b.bg))
+    }
+    Box(modifier.clip(RoundedCornerShape(20.dp)).background(bg)) {
+        when (theme) {
+            "mono" -> {
+                Box(Modifier.align(Alignment.TopEnd).offset(x = 14.dp, y = 10.dp).size(56.dp).clip(org.nyao.music.ui.components.PolarShape(9, 0.07f)).background(Color(0xFF3A3A3E)))
+                Box(Modifier.align(Alignment.TopEnd).offset(x = (-14).dp, y = 52.dp).size(26.dp).clip(org.nyao.music.ui.components.PolarShape(4, 0.2f, 0.4f)).background(acc.a))
+                Text("Моя\nволна", color = Color.White, fontWeight = androidx.compose.ui.text.font.FontWeight.Black, fontSize = 15.sp, lineHeight = 14.sp, modifier = Modifier.padding(8.dp))
+                Box(Modifier.align(Alignment.CenterEnd).padding(end = 8.dp, top = 30.dp).size(22.dp).clip(CircleShape).background(Color.White))
+            }
+            "glass" -> {
+                Box(Modifier.padding(8.dp).fillMaxWidth().height(46.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.14f)).border(BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)), RoundedCornerShape(12.dp)))
+                Box(Modifier.padding(start = 16.dp, top = 30.dp).size(16.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
+            }
+            else -> {
+                Box(Modifier.align(Alignment.TopCenter).padding(top = 12.dp).size(54.dp).clip(org.nyao.music.ui.components.PolarShape(12, 0.05f)).background(acc.tonal))
+                Box(Modifier.align(Alignment.TopCenter).padding(top = 20.dp).size(38.dp).clip(org.nyao.music.ui.components.PolarShape(9, 0.08f)).background(acc.a))
+            }
+        }
+        // плитки и панель снизу
+        Column(Modifier.align(Alignment.BottomCenter).padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                val tile = if (theme == "glass") Color.White.copy(alpha = 0.12f) else b.s3
+                Box(Modifier.weight(1f).height(22.dp).clip(RoundedCornerShape(7.dp)).background(tile))
+                Box(Modifier.weight(1f).height(22.dp).clip(RoundedCornerShape(7.dp)).background(if (theme == "mono") tile else acc.container))
+            }
+            Box(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(if (theme == "glass") Color.White.copy(alpha = 0.2f) else b.s2))
+        }
     }
 }
 

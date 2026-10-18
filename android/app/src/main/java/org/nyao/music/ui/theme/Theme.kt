@@ -50,6 +50,50 @@ data class AccentPalette(
     }
 }
 
+/**
+ * Оформление 0.8: готовая тема (Expressive / Mono / Glass) и то, что можно собрать поверх неё —
+ * форма кнопок, сетка главной, форма обложек, подписи в панели.
+ */
+data class UiLook(
+    val theme: String = "expressive",
+    val buttons: String = "cookie",   // cookie | circle | square
+    val grid: String = "carousels",   // carousels | tiles | mosaic
+    val covers: String = "rounded",   // rounded | square | cookie
+    val navLabels: Boolean = true,
+) {
+    val mono: Boolean get() = theme == "mono"
+    val glass: Boolean get() = theme == "glass"
+
+    companion object {
+        /** Что меняет готовая тема, если ничего не собирать самому */
+        fun preset(theme: String) = when (theme) {
+            "mono" -> UiLook("mono", buttons = "circle", grid = "carousels", covers = "rounded", navLabels = false)
+            "glass" -> UiLook("glass", buttons = "circle", grid = "tiles", covers = "rounded", navLabels = true)
+            else -> UiLook("expressive")
+        }
+        val themes = listOf("expressive" to "Expressive", "mono" to "Mono", "glass" to "Glass")
+    }
+}
+
+/** Фон и поверхности темы (акцент — отдельно, из AccentPalette) */
+data class BasePalette(
+    val bg: Color, val s1: Color, val s2: Color, val s3: Color,
+    val text: Color, val muted: Color, val outline: Color, val outlineVariant: Color, val lowest: Color, val highest: Color,
+) {
+    companion object {
+        val Expressive = BasePalette(Color(0xFF141218), Color(0xFF1D1B25), Color(0xFF211F26), Color(0xFF2B2930), Color(0xFFE6E0E9), Color(0xFFCAC4D0), Color(0xFF958DA5), Color(0xFF49454F), Color(0xFF0F0D13), Color(0xFF36343B))
+        val Mono = BasePalette(Color(0xFF0B0B0C), Color(0xFF141416), Color(0xFF1A1A1C), Color(0xFF242427), Color(0xFFF2F2F3), Color(0xFF9A9AA2), Color(0xFF6E6E76), Color(0xFF2E2E32), Color(0xFF060607), Color(0xFF2E2E32))
+        // стекло: полупрозрачные поверхности поверх цветного фона
+        val Glass = BasePalette(Color(0xFF0E0C16), Color(0x14FFFFFF), Color(0x1AFFFFFF), Color(0x24FFFFFF), Color(0xFFF5F5F7), Color(0xB3F5F5F7), Color(0x80F5F5F7), Color(0x33FFFFFF), Color(0x0AFFFFFF), Color(0x2EFFFFFF))
+        fun of(theme: String) = when (theme) { "mono" -> Mono; "glass" -> Glass; else -> Expressive }
+    }
+}
+
+object Look {
+    var current by mutableStateOf(UiLook())
+    val base: BasePalette get() = BasePalette.of(current.theme)
+}
+
 /** Текущая палитра. Читается из NyaoColors — экраны перерисовываются сами, когда она меняется */
 object Accent {
     var palette by mutableStateOf(AccentPalette.Lavender)
@@ -58,19 +102,20 @@ object Accent {
 
 /** Палитра из макетов «Android · Material Expressive» */
 object NyaoColors {
-    val Bg = Color(0xFF141218)
-    val S1 = Color(0xFF1D1B25)
-    val S2 = Color(0xFF211F26)
-    val S3 = Color(0xFF2B2930)
-    val Tonal: Color get() = Accent.palette.tonal
+    val Bg: Color get() = Look.base.bg
+    val S1: Color get() = Look.base.s1
+    val S2: Color get() = Look.base.s2
+    val S3: Color get() = Look.base.s3
+    // Mono: акцент только точками — выбранное белым, крупные плашки серыми
+    val Tonal: Color get() = if (Look.current.mono) Color(0xFF222225) else Accent.palette.tonal
     val Lavender: Color get() = Accent.palette.a
     val OnLavender: Color get() = Accent.palette.onA
-    val Primary: Color get() = Accent.palette.container
-    val OnPrimary: Color get() = Accent.palette.onContainer
-    val Hero: Color get() = Accent.palette.hero
-    val Text = Color(0xFFE6E0E9)
-    val Muted = Color(0xFFCAC4D0)
-    val Outline = Color(0xFF958DA5)
+    val Primary: Color get() = if (Look.current.mono) Color(0xFFF2F2F3) else Accent.palette.container
+    val OnPrimary: Color get() = if (Look.current.mono) Color(0xFF0B0B0C) else Accent.palette.onContainer
+    val Hero: Color get() = if (Look.current.mono) Color(0xFF1C1C1E) else Accent.palette.hero
+    val Text: Color get() = Look.base.text
+    val Muted: Color get() = Look.base.muted
+    val Outline: Color get() = Look.base.outline
     val Ya = Color(0xFFFFD60A)
     val Yt = Color(0xFFFF6A5C)
     val YtBadge = Color(0xFFE5281F)
@@ -106,30 +151,31 @@ private val NyaoType = Typography(
     labelSmall = body(11, 600, 1.2f),
 )
 
-private fun scheme(p: AccentPalette) = darkColorScheme(
+private fun scheme(p: AccentPalette, b: BasePalette, mono: Boolean, glass: Boolean = false) = darkColorScheme(
     primary = p.a,
     onPrimary = p.onA,
-    primaryContainer = p.container,
-    onPrimaryContainer = p.onContainer,
+    primaryContainer = if (mono) Color(0xFFF2F2F3) else p.container,
+    onPrimaryContainer = if (mono) Color(0xFF0B0B0C) else p.onContainer,
     secondary = p.a,
     onSecondary = p.onA,
-    secondaryContainer = p.tonal,
-    onSecondaryContainer = NyaoColors.Text,
+    secondaryContainer = if (mono) Color(0xFF222225) else p.tonal,
+    onSecondaryContainer = b.text,
     tertiary = Color(0xFFFFB4A8),
     onTertiary = Color(0xFF561E16),
-    background = NyaoColors.Bg,
-    onBackground = NyaoColors.Text,
-    surface = NyaoColors.Bg,
-    onSurface = NyaoColors.Text,
-    surfaceVariant = NyaoColors.S3,
-    onSurfaceVariant = NyaoColors.Muted,
-    surfaceContainerLowest = Color(0xFF0F0D13),
-    surfaceContainerLow = NyaoColors.S1,
-    surfaceContainer = NyaoColors.S2,
-    surfaceContainerHigh = NyaoColors.S3,
-    surfaceContainerHighest = Color(0xFF36343B),
-    outline = NyaoColors.Outline,
-    outlineVariant = Color(0xFF49454F),
+    background = b.bg,
+    onBackground = b.text,
+    surface = b.bg,
+    onSurface = b.text,
+    surfaceVariant = b.s3,
+    onSurfaceVariant = b.muted,
+    // Glass: шторки, меню и диалоги почти непрозрачные — иначе текст под ними мешает читать
+    surfaceContainerLowest = b.lowest,
+    surfaceContainerLow = if (glass) Color(0xF2161320) else b.s1,
+    surfaceContainer = if (glass) Color(0xE61C1828) else b.s2,
+    surfaceContainerHigh = if (glass) Color(0xF5221E30) else b.s3,
+    surfaceContainerHighest = if (glass) Color(0xF52A2638) else b.highest,
+    outline = b.outline,
+    outlineVariant = b.outlineVariant,
 )
 
 private val NyaoShapes = Shapes(
@@ -144,7 +190,8 @@ private val NyaoShapes = Shapes(
 @Composable
 fun NyaoTheme(content: @Composable () -> Unit) {
     val p = Accent.palette
-    val colors = remember(p) { scheme(p) }
+    val look = Look.current
+    val colors = remember(p, look.theme) { scheme(p, BasePalette.of(look.theme), look.mono, look.glass) }
     MaterialTheme(colorScheme = colors, typography = NyaoType, shapes = NyaoShapes, content = content)
 }
 

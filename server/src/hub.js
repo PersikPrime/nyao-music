@@ -40,7 +40,8 @@ export class Hub {
   push(sid, event) {
     const b = this.box(sid);
     b.seq++;
-    b.events.push({ id: b.seq, at: this.now(), ...event });
+    // id и at — служебные: событие не может их подменить (иначе ломается курсор опроса)
+    b.events.push({ ...event, id: b.seq, at: this.now() });
     if (b.events.length > KEEP) b.events.splice(0, b.events.length - KEEP);
     for (const w of b.waiters) w();
   }

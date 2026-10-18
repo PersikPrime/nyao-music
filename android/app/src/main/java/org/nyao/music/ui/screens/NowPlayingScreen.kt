@@ -75,6 +75,12 @@ import org.nyao.music.ui.components.SourceTag
 import org.nyao.music.ui.components.WavyProgress
 import org.nyao.music.ui.components.rememberCoverPalette
 import org.nyao.music.ui.theme.tabular
+import org.nyao.music.ui.theme.Look
+import org.nyao.music.ui.theme.coverShape
+import org.nyao.music.ui.theme.playButtonShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 /**
  * «Сейчас играет» по макету: обложка-«гребешок», заголовок Unbounded, лайк-печенька,
@@ -94,12 +100,15 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
     val sleep by PlayerConnection.sleep.collectAsState()
     val t = current ?: return
     val pal = rememberCoverPalette(t.cover)
-    var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     val repeat by PlayerConnection.repeat.collectAsState()
     val shuffle by PlayerConnection.shuffle.collectAsState()
     val nextList by PlayerConnection.upNext.collectAsState()
+    val playedList by PlayerConnection.played.collectAsState()
+    val mono = Look.current.mono
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     var pos by remember { mutableLongStateOf(0L) }
     var dur by remember { mutableLongStateOf(0L) }
@@ -112,10 +121,14 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
     }
     val isLiked = t.id in liked
     val upNext = nextList.take(40)
+    val played = playedList.filter { it.id != t.id }.take(40)
     val wave = mode == Repo.Mode.WAVE
+    // индекс заголовка очереди: шапка, обложка, название, сервис, прогресс, кнопки, инструменты (+ текст)
+    val queueItem = 7 + if (showLyrics) 1 else 0
 
     LazyColumn(
         Modifier.fillMaxSize().background(pal.background),
+        state = listState,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         item {
@@ -142,7 +155,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     contentKey = { it.id },
                     label = "cover",
                 ) { tr ->
-                    Cover(tr.cover, Modifier.fillMaxSize().graphicsLayer { scaleX = coverScale; scaleY = coverScale }, PolarShape(12, 0.035f))
+                    Cover(tr.cover, Modifier.fillMaxSize().graphicsLayer { scaleX = coverScale; scaleY = coverScale }, if (mono) coverShape(32.dp) else PolarShape(12, 0.035f))
                 }
             }
         }
@@ -191,6 +204,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     onSeek = { f -> PlayerConnection.seekTo((f * dur).toLong()) },
                     color = pal.accent,
                     trackColor = pal.container.copy(alpha = 0.7f),
+                    wavy = !mono,
                 )
                 Row(Modifier.padding(top = 4.dp)) {
                     Text(formatTime((pos / 1000).toInt()), style = MaterialTheme.typography.bodySmall.tabular, color = pal.sub, modifier = Modifier.weight(1f))
@@ -198,8 +212,30 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                 }
             }
         }
-        // Группа кнопок: «Играть» шире и меняет форму
-        item {
+        // Группа кнопок: «Играть» шире и меняет форму. В Mono — белая кнопка в выбранной форме между двумя круглыми
+        if (mono) item {
+            Row(
+                Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(64.dp).bouncy().clip(CircleShape).background(pal.surface).clickable { PlayerConnection.prev() },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(NyaoIcons.SkipPrevious, "Предыдущий", tint = pal.onContainer, modifier = Modifier.size(30.dp)) }
+                Box(
+                    Modifier.size(92.dp).bouncy().clip(playButtonShape(playing)).background(pal.accent).clickable { PlayerConnection.toggle() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (buffering && !playing) CircularProgressIndicator(color = pal.onAccent, modifier = Modifier.size(30.dp), strokeWidth = 3.dp)
+                    else Icon(if (playing) NyaoIcons.Pause else NyaoIcons.PlayArrow, if (playing) "Пауза" else "Играть", tint = pal.onAccent, modifier = Modifier.size(40.dp))
+                }
+                Box(
+                    Modifier.size(64.dp).bouncy().clip(CircleShape).background(pal.surface).clickable { PlayerConnection.next() },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(NyaoIcons.SkipNext, "Следующий", tint = pal.onContainer, modifier = Modifier.size(30.dp)) }
+            }
+        } else item {
             val playWeight by animateFloatAsState(if (playing) 2.2f else 1.6f, spring(dampingRatio = 0.65f), label = "pw")
             val playRadius by animateFloatAsState(if (playing) 20f else 40f, spring(dampingRatio = 0.65f), label = "pr")
             Row(Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -225,11 +261,10 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
             Row(Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(horizontal = 12.dp, vertical = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                 Tool(NyaoIcons.FormatQuote, "Текст", showLyrics, pal) {
                     showLyrics = !showLyrics
-                    if (showLyrics) showQueue = false
                 }
-                Tool(NyaoIcons.QueueMusic, "Очередь", showQueue, pal) {
-                    showQueue = !showQueue
-                    if (showQueue) showLyrics = false
+                // очередь всегда ниже — кнопка просто прокручивает к ней
+                Tool(NyaoIcons.QueueMusic, "Очередь", false, pal) {
+                    scope.launch { listState.animateScrollToItem(queueItem) }
                 }
                 Tool(NyaoIcons.Shuffle, if (shuffle) "Перемешивание включено" else "Перемешать", shuffle, pal, enabled = !wave) { PlayerConnection.toggleShuffle() }
                 Tool(
@@ -250,54 +285,97 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
             }
         }
         if (showLyrics) item { LyricsPanel(t, pos, pal) }
-        // «Далее»: следующий трек или вся очередь
-        if (!showLyrics && upNext.isNotEmpty()) {
-            val shown = if (showQueue) upNext else upNext.take(1)
+        // Очередь целиком: что дальше, а ниже — что уже играло (можно переиграть или лайкнуть)
+        item {
+            Row(
+                Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(start = 28.dp, end = 20.dp, top = 4.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("ДАЛЕЕ", style = MaterialTheme.typography.labelSmall, color = pal.sub, modifier = Modifier.weight(1f))
+                if (upNext.isNotEmpty()) Text("${upNext.size}${if (nextList.size > upNext.size) "+" else ""}", style = MaterialTheme.typography.labelSmall, color = pal.sub)
+            }
+        }
+        if (upNext.isEmpty()) item {
+            Text(
+                if (wave) "Волна подбирает следующий трек…" else "Дальше ничего нет",
+                style = MaterialTheme.typography.bodyMedium,
+                color = pal.sub,
+                modifier = Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(horizontal = 28.dp, vertical = 8.dp),
+            )
+        }
+        itemsIndexed(upNext, key = { _, p -> "n${p.first}" }) { i, (queueIndex, q) ->
+            QueueRow(model, q, q.id in liked, groupShape(i, upNext.size), pal, past = false, onPlay = { PlayerConnection.playAt(queueIndex) }) { close ->
+                androidx.compose.material3.DropdownMenuItem(text = { Text("Играть следующим") }, onClick = { close(); PlayerConnection.move(queueIndex, index + 1) })
+                if (queueIndex > index + 1) androidx.compose.material3.DropdownMenuItem(text = { Text("Выше") }, onClick = { close(); PlayerConnection.move(queueIndex, queueIndex - 1) })
+                if (queueIndex < queue.size - 1) androidx.compose.material3.DropdownMenuItem(text = { Text("Ниже") }, onClick = { close(); PlayerConnection.move(queueIndex, queueIndex + 1) })
+                androidx.compose.material3.DropdownMenuItem(text = { Text("Убрать из очереди") }, onClick = { close(); PlayerConnection.removeAt(queueIndex) })
+                androidx.compose.material3.DropdownMenuItem(text = { Text("Похожее · радио по треку") }, onClick = { close(); PlayerConnection.startRadio(q) })
+                if (Repo.cloud.loggedIn) androidx.compose.material3.DropdownMenuItem(text = { Text("Отправить другу") }, onClick = { close(); org.nyao.music.playback.Friends.shareRequest.value = q })
+            }
+        }
+        if (played.isNotEmpty()) {
             item {
                 Text(
-                    "ДАЛЕЕ",
+                    "УЖЕ ИГРАЛО",
                     style = MaterialTheme.typography.labelSmall,
                     color = pal.sub,
-                    modifier = Modifier.fillMaxWidth().padding(start = 28.dp, top = 4.dp, bottom = 8.dp),
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(start = 28.dp, top = 20.dp, bottom = 8.dp),
                 )
             }
-            itemsIndexed(shown) { i, (queueIndex, q) ->
-                val shape = when {
-                    shown.size == 1 -> RoundedCornerShape(28.dp)
-                    i == 0 -> RoundedCornerShape(28.dp, 28.dp, 6.dp, 6.dp)
-                    i == shown.lastIndex -> RoundedCornerShape(6.dp, 6.dp, 28.dp, 28.dp)
-                    else -> RoundedCornerShape(6.dp)
-                }
-                Row(
-                    Modifier.padding(horizontal = 12.dp, vertical = 1.5.dp).fillMaxWidth().widthIn(max = 560.dp).bouncy().clip(shape).background(pal.surface)
-                        .clickable { PlayerConnection.playAt(queueIndex) }.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Cover(q.cover, Modifier.size(44.dp), RoundedCornerShape(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(q.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, color = pal.onContainer)
-                        Text(q.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = pal.sub)
-                    }
-                    SourceTag(q.source)
-                    // очередь можно править: убрать трек или переставить
-                    Box {
-                        var qm by remember { mutableStateOf(false) }
-                        IconButton(onClick = { qm = true }, modifier = Modifier.size(36.dp)) { Icon(NyaoIcons.MoreVert, "Ещё", tint = pal.sub) }
-                        androidx.compose.material3.DropdownMenu(expanded = qm, onDismissRequest = { qm = false }) {
-                            androidx.compose.material3.DropdownMenuItem(text = { Text("Играть следующим") }, onClick = { qm = false; PlayerConnection.move(queueIndex, index + 1) })
-                            if (queueIndex > index + 1) androidx.compose.material3.DropdownMenuItem(text = { Text("Выше") }, onClick = { qm = false; PlayerConnection.move(queueIndex, queueIndex - 1) })
-                            if (queueIndex < queue.size - 1) androidx.compose.material3.DropdownMenuItem(text = { Text("Ниже") }, onClick = { qm = false; PlayerConnection.move(queueIndex, queueIndex + 1) })
-                            androidx.compose.material3.DropdownMenuItem(text = { Text("Убрать из очереди") }, onClick = { qm = false; PlayerConnection.removeAt(queueIndex) })
-                            androidx.compose.material3.DropdownMenuItem(text = { Text("Похожее · радио по треку") }, onClick = { qm = false; PlayerConnection.startRadio(q) })
-                        }
-                    }
+            itemsIndexed(played, key = { _, p -> "p" + p.id }) { i, q ->
+                QueueRow(model, q, q.id in liked, groupShape(i, played.size), pal, past = true, onPlay = { PlayerConnection.replay(q) }) { close ->
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Играть снова") }, onClick = { close(); PlayerConnection.replay(q) })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Играть следующим") }, onClick = { close(); PlayerConnection.playNext(q) })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Похожее · радио по треку") }, onClick = { close(); PlayerConnection.startRadio(q) })
                 }
             }
         }
         item { Spacer(Modifier.navigationBarsPadding().height(28.dp)) }
     }
     if (showInfo) TrackInfoSheet(model, t) { showInfo = false }
+}
+
+private fun groupShape(i: Int, size: Int) = when {
+    size == 1 -> RoundedCornerShape(28.dp)
+    i == 0 -> RoundedCornerShape(28.dp, 28.dp, 6.dp, 6.dp)
+    i == size - 1 -> RoundedCornerShape(6.dp, 6.dp, 28.dp, 28.dp)
+    else -> RoundedCornerShape(6.dp)
+}
+
+/** Строка очереди: обложка, название, лайк и меню. Сыгранные — приглушены, но живые */
+@Composable
+private fun QueueRow(
+    model: AppModel,
+    q: org.nyao.music.data.Track,
+    liked: Boolean,
+    shape: androidx.compose.ui.graphics.Shape,
+    pal: CoverPalette,
+    past: Boolean,
+    onPlay: () -> Unit,
+    menu: @Composable (close: () -> Unit) -> Unit,
+) {
+    Row(
+        Modifier.padding(horizontal = 12.dp, vertical = 1.5.dp).fillMaxWidth().widthIn(max = 560.dp).bouncy().clip(shape).background(pal.surface)
+            .clickable(onClick = onPlay).padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.graphicsLayer { alpha = if (past) 0.55f else 1f }) { Cover(q.cover, Modifier.size(44.dp), RoundedCornerShape(12.dp)) }
+        Column(Modifier.weight(1f)) {
+            Text(q.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, color = if (past) pal.onContainer.copy(alpha = 0.6f) else pal.onContainer)
+            Text(q.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = pal.sub.copy(alpha = if (past) 0.7f else 1f))
+        }
+        org.nyao.music.ui.components.DownloadedMark(q)
+        SourceTag(q.source)
+        IconButton(onClick = { model.like(q, !liked) }, modifier = Modifier.size(40.dp)) {
+            Icon(if (liked) NyaoIcons.Favorite else NyaoIcons.FavoriteBorder, if (liked) "Убрать из «Мне нравится»" else "Нравится", tint = if (liked) pal.accent else pal.sub, modifier = Modifier.size(20.dp))
+        }
+        Box {
+            var open by remember { mutableStateOf(false) }
+            IconButton(onClick = { open = true }, modifier = Modifier.size(36.dp)) { Icon(NyaoIcons.MoreVert, "Ещё", tint = pal.sub) }
+            androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) { menu { open = false } }
+        }
+    }
 }
 
 /** Ссылка на трек в его сервисе */
@@ -359,6 +437,10 @@ private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClos
                     onClose()
                     model.openArtist(t)
                 }) { Text("Исполнитель") }
+                if (Repo.cloud.loggedIn) androidx.compose.material3.OutlinedButton(onClick = {
+                    onClose()
+                    org.nyao.music.playback.Friends.shareRequest.value = t
+                }) { Text("Другу") }
                 model.albumOf(t)?.let { al ->
                     androidx.compose.material3.OutlinedButton(onClick = {
                         onClose()
@@ -390,7 +472,7 @@ private fun LikeCookie(liked: Boolean, pal: CoverPalette, onClick: () -> Unit) {
         pop.animateTo(1f, spring(dampingRatio = 0.3f, stiffness = 500f))
     }
     Box(
-        Modifier.size(56.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value; rotationZ = (pop.value - 1f) * 40f }.bouncy().clip(PolarShape(9, depth)).background(if (liked) pal.accent else pal.surface).clickable(onClick = onClick),
+        Modifier.size(56.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value; rotationZ = (pop.value - 1f) * 40f }.bouncy().clip(if (Look.current.mono) CircleShape else PolarShape(9, depth)).background(if (liked) pal.accent else pal.surface).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(if (liked) NyaoIcons.Favorite else NyaoIcons.FavoriteBorder, if (liked) "Убрать из «Мне нравится»" else "Нравится", tint = if (liked) pal.onAccent else pal.sub)
