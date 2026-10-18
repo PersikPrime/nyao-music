@@ -47,6 +47,64 @@ export const SCHEMA = [
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     data JSONB NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // ---------- Мини-соцсеть: профили, друзья, приглашения, входящие ----------
+  // ник храним и как ввели, и в нижнем регистре (уникальность без учёта регистра)
+  `CREATE TABLE IF NOT EXISTS profiles (
+    user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    nick TEXT NOT NULL,
+    nick_lc TEXT UNIQUE NOT NULL,
+    nick_set BOOLEAN NOT NULL DEFAULT false,
+    bio TEXT NOT NULL DEFAULT '',
+    visibility TEXT NOT NULL DEFAULT 'friends',
+    show_now BOOLEAN NOT NULL DEFAULT true,
+    show_stats BOOLEAN NOT NULL DEFAULT true,
+    show_likes BOOLEAN NOT NULL DEFAULT false,
+    invisible BOOLEAN NOT NULL DEFAULT false,
+    status_track JSONB,
+    pinned JSONB,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // пара хранится один раз: a < b. status: pending (заявка от requester) | friends
+  `CREATE TABLE IF NOT EXISTS friendships (
+    a BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    b BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    requester BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (a, b)
+  )`,
+  `CREATE TABLE IF NOT EXISTS blocks (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, blocked_id)
+  )`,
+  // приглашение по ссылке, QR или касанием телефонов: кто открыл — сразу в друзьях
+  `CREATE TABLE IF NOT EXISTS invites (
+    code TEXT PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL
+  )`,
+  // входящие: присланные треки, приглашения в комнату, реакции, заявки
+  `CREATE TABLE IF NOT EXISTS inbox (
+    id BIGSERIAL PRIMARY KEY,
+    to_user BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    from_user BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    data JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    read_at TIMESTAMPTZ
+  )`,
+  `CREATE INDEX IF NOT EXISTS inbox_to_time ON inbox (to_user, created_at)`,
+  // токены push (Firebase) на устройство — для уведомлений, когда приложение закрыто
+  `CREATE TABLE IF NOT EXISTS push_tokens (
+    session_id BIGINT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`
 ];
 
