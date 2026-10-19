@@ -136,6 +136,11 @@ export class SpotifyEngine {
         autoplayPolicy: 'no-user-gesture-required'
       }
     });
+    // Spotify пускает только поддерживаемые браузеры: окно плеера представляется обычным Chrome той же версии
+    // (без «NyaoMusic/…» и «Electron/…»). Widevine и подпись VMP — настоящие.
+    const ua = chromeUserAgent(this.win.webContents.getUserAgent());
+    this.win.webContents.setUserAgent(ua);
+    this.note(`браузер для Spotify: ${ua}`);
     this.win.webContents.on('console-message', (_e, level, message) => {
       if (level >= 2) this.note(`console: ${message}`);
     });
@@ -257,6 +262,11 @@ export class SpotifyEngine {
         break;
     }
   }
+}
+
+/** «… NyaoMusic/0.8 Chrome/152 Electron/44 Safari/537.36» → «… Chrome/152 Safari/537.36» */
+export function chromeUserAgent(ua) {
+  return String(ua || '').replace(/\s+NyaoMusic\/\S+/i, '').replace(/\s+Electron\/\S+/i, '').replace(/\s+nyao-music\/\S+/i, '');
 }
 
 /** WAV-тишина длиной с трек (8 кГц, моно, 16 бит) — на её месте в <audio> играет трек Spotify */
