@@ -168,7 +168,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
     }
 
     /** Недавно звучавшее на всех устройствах — волна это пропустит. Пропущенные треки помним дольше */
-    suspend fun recentIds(days: Int = 3, skippedDays: Int = 14): Set<String> {
+    suspend fun recentIds(days: Int = 14, skippedDays: Int = 30): Set<String> {
         val now = System.currentTimeMillis()
         val ids = HashSet<String>()
         val hist = fileLock.withLock { readArr(historyFile) }

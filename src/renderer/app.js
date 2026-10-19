@@ -2978,6 +2978,24 @@ api.win.onFullscreen((on) => {
   if (!on) fullscreen.close();
 });
 $('#pb-full').onclick = () => fullscreen.toggle();
+// ---------- Запоминание сессии: трек, место и очередь переживают закрытие приложения ----------
+const SESSION_KEY = 'nyao.session';
+let sessionSavedAt = 0;
+function saveSession(force = false) {
+  if (!force && Date.now() - sessionSavedAt < 5000) return;
+  sessionSavedAt = Date.now();
+  try {
+    const s = player.snapshot();
+    if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  } catch {
+    // хранилище недоступно — просто не запоминаем
+  }
+}
+player.addEventListener('track', () => saveSession(true));
+player.addEventListener('queue', () => saveSession(true));
+player.addEventListener('state', () => saveSession(!player.playing));
+player.addEventListener('time', () => saveSession());
+window.addEventListener('beforeunload', () => saveSession(true));
 player.addEventListener('track', pushRpc);
 player.addEventListener('state', pushRpc);
 player.addEventListener('track', pushNow);
@@ -3334,6 +3352,13 @@ function openMixBuilder() {
     if (state.route === 'settings') renderSettings();
   }).catch(() => {});
   if (api.onOutdated) api.onOutdated((min) => showOutdated(min));
+  // прошлый трек и очередь — на месте, на паузе
+  try {
+    const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+    if (saved) player.restore(saved);
+  } catch {
+    // нет сохранённого — ничего страшного
+  }
   // обновился с версии, где вида ещё не было: один раз предлагаем выбрать
   if (state.settings.onboarded && !state.settings.layout) askLayout();
   if (!state.settings.onboarded) {

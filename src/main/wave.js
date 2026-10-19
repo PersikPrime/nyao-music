@@ -194,7 +194,7 @@ export class WaveMixer {
     let lastList = [];
     if (this.yaUp && share < 100) {
       // Яндекс прислал только уже звучавшее — просим следующую пачку, а не сдаёмся
-      for (let attempt = 0; attempt < 4; attempt++) {
+      for (let attempt = 0; attempt < 6; attempt++) {
         let list;
         try {
           list = await (attempt === 0 ? yaPromise() : retryPromise());
@@ -206,7 +206,7 @@ export class WaveMixer {
           gotAny = true;
           lastList = [...lastList, ...list.filter((t) => t && !lastList.some((x) => x.id === t.id))];
         }
-        base = this.pickFresh(list || [], attempt < 2);
+        base = this.pickFresh(list || [], attempt < 4);
         if (base.length) break;
       }
       // новых пачек не дали — лучше повтор из всего полученного, чем тишина
@@ -269,6 +269,16 @@ export class WaveMixer {
   }
 
   async more(queueIds) {
+    // волна восстановлена после перезапуска (start не вызывался) — всё равно не повторяем недавнее
+    if (!this.recent || !this.recent.size) {
+      try {
+        this.recent = await this.getRecent();
+      } catch {
+        this.recent = new Set();
+      }
+      if (!this.seen) this.seen = new Set();
+      for (const id of queueIds || []) this.seen.add(id);
+    }
     return this.batch(() => this.ya.waveMore(queueIds), () => this.ya.waveMore([...queueIds, ...[...this.seen].slice(-10)]));
   }
 

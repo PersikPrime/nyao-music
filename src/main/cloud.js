@@ -205,7 +205,7 @@ export class NyaoCloud {
    * Что недавно звучало (для волны без повторов): своя история + история всех устройств с сервера.
    * Пропущенные треки помним дольше — раз скипнул, не надо их снова подсовывать.
    */
-  async recentIds({ days = 3, skippedDays = 14 } = {}) {
+  async recentIds({ days = 14, skippedDays = 30 } = {}) {
     const now = Date.now();
     const ids = new Set();
     for (const p of this.history()) {

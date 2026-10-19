@@ -170,7 +170,8 @@ class WaveMixer(
         var lastList: List<Track> = emptyList()
         if (yaOn && s.ytmShare < 100) {
             // Яндекс прислал только уже звучавшее — просим следующую пачку, а не сдаёмся
-            for (attempt in 0 until 4) {
+            // Яндекс охотно повторяет знакомое — просим новые пачки дольше, прежде чем согласиться на повтор
+            for (attempt in 0 until 6) {
                 val base = try {
                     if (attempt == 0) yaCall() else retryCall()
                 } catch (e: Exception) {
@@ -181,7 +182,7 @@ class WaveMixer(
                     gotAny = true
                     lastList = (lastList + base).distinctBy { it.id }
                 }
-                fresh = lock.withLock { pickFresh(base, strict = attempt < 2) }
+                fresh = lock.withLock { pickFresh(base, strict = attempt < 4) }
                 if (fresh.isNotEmpty()) break
             }
             // новых пачек не дали — лучше повтор из того, что есть, чем тишина
@@ -245,6 +246,11 @@ class WaveMixer(
 
     suspend fun more(queueIds: List<String>): List<Track> {
         val s = prefs.settings.value
+        // волна восстановлена после перезапуска (start не вызывался) — всё равно не повторяем недавнее
+        if (recent.isEmpty()) {
+            recent = runCatching { recentProvider() }.getOrDefault(emptySet())
+            lock.withLock { queueIds.forEach { seen += it } }
+        }
         return batch({ ya.waveMore(queueIds, s.diversity, s.mood) }, { ya.waveMore(queueIds + seen.toList().takeLast(10), s.diversity, s.mood) })
     }
 

@@ -268,6 +268,56 @@ export class Player extends EventTarget {
     if (this.mode === 'wave') api.wave.feedback(skipped ? 'skip' : 'trackFinished', t, played).catch(() => {});
   }
 
+  /**
+   * Что играло — для восстановления после перезапуска. В волне — только сыгранное и текущий трек:
+   * дальше волна подберёт свежие треки, а не повторит стоявшие в очереди.
+   */
+  snapshot() {
+    const cur = this.index;
+    if (!this.queue.length || cur < 0) return null;
+    const from = Math.max(0, cur - 100);
+    const to = this.mode === 'wave' ? cur + 1 : Math.min(this.queue.length, cur + 301);
+    return {
+      tracks: this.queue.slice(from, to),
+      index: cur - from,
+      position: Math.floor(this.audio.currentTime || 0),
+      label: this.label,
+      mode: this.mode === 'wave' ? 'wave' : 'list',
+      shuffle: this.shuffle,
+      repeat: this.repeat,
+      at: Date.now(),
+    };
+  }
+
+  /** После запуска: прошлый трек на том же месте, на паузе. Радио по треку — как список (дальше «похожее») */
+  restore(s) {
+    if (!s || !Array.isArray(s.tracks) || !s.tracks.length || this.queue.length) return false;
+    this.queue = s.tracks;
+    this.index = Math.min(Math.max(0, s.index | 0), s.tracks.length - 1);
+    this.mode = s.mode === 'wave' ? 'wave' : 'list';
+    this.label = s.label || '';
+    this.shuffle = !!s.shuffle;
+    this.repeat = ['off', 'all', 'one'].includes(s.repeat) ? s.repeat : 'off';
+    this.original = this.mode === 'list' ? s.tracks.slice() : undefined;
+    const t = this.current;
+    this.audio.src = `nyao://stream/${encodeURIComponent(t.id)}`;
+    const pos = Number(s.position) || 0;
+    if (pos > 2) {
+      const once = () => {
+        this.audio.removeEventListener('loadedmetadata', once);
+        this.seek(pos);
+      };
+      this.audio.addEventListener('loadedmetadata', once);
+    }
+    this.startedAt = Date.now();
+    this.updateSession();
+    this.emit('track');
+    this.emit('queue');
+    this.emit('state');
+    this.maybeMore();
+    return true;
+  }
+
   /** «Продолжить с другого устройства»: включает трек и перематывает на нужное место */
   resume(track, position = 0, label = 'С другого устройства') {
     this.playList([track], 0, label);

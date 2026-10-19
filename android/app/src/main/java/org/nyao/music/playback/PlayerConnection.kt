@@ -47,9 +47,69 @@ object PlayerConnection {
     private val _index = MutableStateFlow(-1)
     val index: StateFlow<Int> = _index
 
+    // ---------- Запоминание сессии: трек, место и очередь переживают закрытие приложения ----------
+    private var sessionFile: java.io.File? = null
+    private var lastSaveKey = ""
+
+    /**
+     * Сохраняет, что играло. В волне — только уже сыгранное и текущий трек: дальше при следующем запуске
+     * волна подберёт свежие треки, а не повторит те, что стояли в очереди.
+     */
+    private fun saveSession(force: Boolean = false) {
+        val c = controller ?: return
+        val file = sessionFile ?: return
+        val cur = c.currentMediaItemIndex
+        if (c.mediaItemCount == 0 || cur < 0) return
+        val mode = Repo.mode.value
+        val from = maxOf(0, cur - 100)
+        val to = if (mode == Repo.Mode.WAVE) cur else minOf(c.mediaItemCount - 1, cur + 300)
+        val tracks = (from..to).mapNotNull { Repo.track(c.getMediaItemAt(it).mediaId) }
+        val idx = (from..to).count { it < cur && Repo.track(c.getMediaItemAt(it).mediaId) != null }
+        if (tracks.isEmpty()) return
+        val pos = c.currentPosition
+        val key = "${tracks.size}|$idx|${tracks[idx.coerceAtMost(tracks.lastIndex)].id}|${pos / 5000}|$mode|${c.shuffleModeEnabled}|${c.repeatMode}"
+        if (!force && key == lastSaveKey) return
+        lastSaveKey = key
+        val o = org.json.JSONObject()
+            .put("tracks", org.json.JSONArray().apply { tracks.forEach { put(org.nyao.music.data.trackToJson(it)) } })
+            .put("index", idx)
+            .put("position", pos)
+            .put("label", Repo.queueLabel.value)
+            .put("mode", when (mode) { Repo.Mode.WAVE -> "wave"; Repo.Mode.RADIO -> "radio"; else -> "list" })
+            .put("shuffle", c.shuffleModeEnabled)
+            .put("repeat", c.repeatMode)
+            .put("at", System.currentTimeMillis())
+        ioScope.launch { runCatching { file.writeText(o.toString()) } }
+    }
+
+    /** После запуска: если плеер пустой — ставим прошлый трек на то же место, на паузе */
+    private fun restoreSession(c: MediaController) {
+        if (c.mediaItemCount > 0) return
+        val file = sessionFile ?: return
+        ioScope.launch {
+            val o = runCatching { org.json.JSONObject(file.readText()) }.getOrNull() ?: return@launch
+            val arr = o.optJSONArray("tracks") ?: return@launch
+            val tracks = (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let { j -> org.nyao.music.data.trackFromJson(j) } }
+            if (tracks.isEmpty()) return@launch
+            val idx = o.optInt("index").coerceIn(0, tracks.lastIndex)
+            withContext(Dispatchers.Main) {
+                if (c.mediaItemCount > 0) return@withContext
+                tracks.forEach { Repo.rememberTrack(it) }
+                // волна продолжится свежими треками, радио по треку — как обычный список (с «дальше похожее»)
+                Repo.mode.value = if (o.optString("mode") == "wave") Repo.Mode.WAVE else Repo.Mode.LIST
+                Repo.queueLabel.value = o.optString("label")
+                c.shuffleModeEnabled = o.optBoolean("shuffle")
+                c.repeatMode = o.optInt("repeat", Player.REPEAT_MODE_OFF)
+                c.setMediaItems(tracks.map { Repo.mediaItem(it) }, idx, o.optLong("position").coerceAtLeast(0L))
+                c.pause()
+            }
+        }
+    }
+
     fun connect(context: Context) {
         if (future != null) return
         val app = context.applicationContext
+        sessionFile = java.io.File(app.filesDir, "session.json")
         val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
         val f = MediaController.Builder(app, token).buildAsync()
         future = f
@@ -60,6 +120,7 @@ object PlayerConnection {
             }
             controller = c
             c.addListener(listener)
+            restoreSession(c)
             sync()
             startTicker()
             pending.forEach { it(c) }
@@ -88,7 +149,9 @@ object PlayerConnection {
             lastId = newId
             lastPosMs = 0L
             lastDurMs = 0L
+            saveSession()
         }
+        if (!c.isPlaying && _playing.value) saveSession(force = true)
         if (newId != lastNowId || c.isPlaying != lastNowPlaying) {
             lastNowId = newId
             lastNowPlaying = c.isPlaying
@@ -170,6 +233,7 @@ object PlayerConnection {
                     lastPosMs = c.currentPosition
                     if (c.duration > 0) lastDurMs = c.duration
                 }
+                if (c.isPlaying) saveSession()
                 if (++n % 15 == 0 && c.isPlaying) pushNowMain()
                 if (n % 150 == 0) ioScope.launch { runCatching { Repo.cloud.flush() } }
             }
