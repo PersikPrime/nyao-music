@@ -67,7 +67,7 @@
     "artifactName": "NyaoMusic-${version}-${os}-${arch}.${ext}",
     "electronVersion": "44.5.1+wvcus",
     "electronDownload": {
-      "mirror": "https://github.com/castlabs/electron-releases/releases/download/v"
+      "mirror": "https://github.com/castlabs/electron-releases/releases/download/"
     },
     "afterPack": "build/evs-sign.cjs"
   }
