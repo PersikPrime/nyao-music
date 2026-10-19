@@ -1,14 +1,19 @@
 // Устройство Spotify Connect внутри Nyao на ПК: официальный Web Playback SDK в скрытом окне.
 // Звук играет сам SDK через Widevine (Electron от castlabs), поэтому прослушивания засчитываются в Spotify.
 // Тот же движок, что на Android (SpotifyEngine.kt), только окно вместо WebView.
-import { BrowserWindow, ipcMain, session } from 'electron';
+import { BrowserWindow, ipcMain, session, net } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const PLAYER_URL = 'nyao://spotify-player/player.html';
+// Как на телефоне (https://appassets.androidplatform.net): страница плеера открыта с обычного https-адреса.
+// Адрес на нашем домене, но в сеть не уходит — его отдаёт само приложение в отдельной сессии окна плеера.
+export const PLAYER_HOST = 'spotify-player.nmusic.bixtl.cc';
+export const PLAYER_URL = `https://${PLAYER_HOST}/player.html`;
 export const PLAYER_FILE = path.join(__dirname, 'player.html');
-const ALLOWED_HOSTS = new Set(['spotify-player', 'sdk.scdn.co']);
+const PARTITION = 'persist:nyao-spotify';
+const ALLOWED_HOSTS = new Set([PLAYER_HOST, 'sdk.scdn.co']);
 
 export class SpotifyEngine {
   /** sp — SpotifyProvider; widevine — промис готовности Widevine; onChange — состояние для интерфейса */
@@ -76,7 +81,18 @@ export class SpotifyEngine {
       ok ? c.resolve(payload) : c.reject(new Error(payload));
     });
     // Widevine (EME) разрешаем только окну плеера Spotify и фрейму официального SDK
-    const ses = session.defaultSession;
+    const ses = session.fromPartition(PARTITION);
+    // своя страница плеера — из приложения, всё остальное — в сеть как обычно
+    ses.protocol.handle('https', (req) => {
+      let host = '';
+      try {
+        host = new URL(req.url).host;
+      } catch {
+        host = '';
+      }
+      if (host === PLAYER_HOST) return new Response(fs.readFileSync(PLAYER_FILE), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      return net.fetch(req, { bypassCustomProtocolHandlers: true });
+    });
     // журнал: лицензия и ошибки сети плеера Spotify (только адрес без параметров и код ответа)
     const mine = (d) => this.win && !this.win.isDestroyed() && d.webContentsId === this.win.webContents.id;
     const short = (u) => {
@@ -129,6 +145,7 @@ export class SpotifyEngine {
       height: 240,
       webPreferences: {
         preload: path.join(__dirname, 'spotify-preload.cjs'),
+        partition: PARTITION,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,

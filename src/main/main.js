@@ -10,7 +10,7 @@ import { shapeOf } from './providers/ytraw.js';
 import { SoundCloudProvider } from './providers/soundcloud.js';
 import { VKProvider } from './providers/vk.js';
 import { SpotifyProvider, SP_REDIRECT } from './providers/spotify.js';
-import { SpotifyEngine, PLAYER_FILE, silenceResponse } from './spotify/spotify-engine.js';
+import { SpotifyEngine, silenceResponse } from './spotify/spotify-engine.js';
 import { checkUpdate, downloadAsset } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
@@ -944,10 +944,6 @@ app.whenReady().then(() => {
   initProviders();
   protocol.handle('nyao', async (request) => {
     const u = new URL(request.url);
-    // страница Spotify Web Playback SDK для скрытого окна плеера
-    if (u.host === 'spotify-player') {
-      return new Response(fs.readFileSync(PLAYER_FILE), { headers: { 'content-type': 'text/html; charset=utf-8' } });
-    }
     // трек Spotify: в <audio> — тишина той же длины, звук даёт устройство Spotify (см. renderer/spotify-sync.js)
     if (u.host === 'stream' && decodeURIComponent(u.pathname.slice(1)).startsWith('sp:')) {
       return silenceResponse(Number(u.searchParams.get('d')) || 0, request.headers.get('range'));
