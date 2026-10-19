@@ -1,6 +1,7 @@
 package org.nyao.music.data
 
 import android.util.Log
+import kotlinx.coroutines.sync.withLock
 import okhttp3.FormBody
 import okhttp3.Request
 import org.json.JSONArray
@@ -202,6 +203,55 @@ class VkApi(private val prefs: Prefs) {
         token = null
     }
 
+    /** Нужен для тихого продления сессии (невидимый WebView). Задаёт Repo.init */
+    @Volatile var appContext: android.content.Context? = null
+    private val refreshLock = kotlinx.coroutines.sync.Mutex()
+    @Volatile private var lastRefresh = 0L
+
+    /**
+     * Тихое продление сессии: vk.com сам обновляет свои cookie, когда открыт его сайт.
+     * Открываем его в невидимом WebView (те же cookie, что после входа), ждём загрузку и сохраняем cookie на диск.
+     * Ни пароля, ни cookie мы никуда не отправляем — всё остаётся в WebView этого телефона.
+     * true — сессия жива (VK не отправил на страницу входа).
+     */
+    suspend fun refreshSession(force: Boolean = false): Boolean = refreshLock.withLock {
+        val ctx = appContext ?: return false
+        if (!force && System.currentTimeMillis() - lastRefresh < 60_000) return true
+        val result = kotlinx.coroutines.withTimeoutOrNull(25_000) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                kotlinx.coroutines.suspendCancellableCoroutine<Boolean> { cont ->
+                    val wv = android.webkit.WebView(ctx)
+                    wv.settings.javaScriptEnabled = true
+                    wv.settings.domStorageEnabled = true
+                    wv.settings.userAgentString = UA
+                    android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+                    var done = false
+                    fun finish(ok: Boolean) {
+                        if (done) return
+                        done = true
+                        android.webkit.CookieManager.getInstance().flush()
+                        wv.stopLoading()
+                        wv.destroy()
+                        if (cont.isActive) cont.resumeWith(Result.success(ok))
+                    }
+                    wv.webViewClient = object : android.webkit.WebViewClient() {
+                        override fun onPageFinished(view: android.webkit.WebView, url: String) {
+                            val login = url.contains("login") || url.contains("/join") || url.contains("id.vk.")
+                            // даём скриптам VK пару секунд обновить cookie
+                            view.postDelayed({ finish(!login) }, if (login) 0 else 3000)
+                        }
+                    }
+                    cont.invokeOnCancellation { android.os.Handler(android.os.Looper.getMainLooper()).post { finish(false) } }
+                    wv.loadUrl("$base/audios${uid ?: ""}")
+                }
+            }
+        } ?: false
+        lastRefresh = System.currentTimeMillis()
+        debug(if (result) "сессия VK продлена" else "продлить сессию VK не удалось")
+        if (result) prefs.vkRefreshedAt = System.currentTimeMillis()
+        result
+    }
+
     fun cookies(url: String = base): String? = runCatching { android.webkit.CookieManager.getInstance().getCookie(url) }.getOrNull()
 
     private fun send(req: Request.Builder): Pair<Int, String> {
@@ -212,7 +262,26 @@ class VkApi(private val prefs: Prefs) {
         }
     }
 
-    private suspend fun post(act: String, params: Map<String, Any?>): Any? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    private suspend fun post(act: String, params: Map<String, Any?>): Any? = try {
+        postOnce(act, params)
+    } catch (e: SessionExpired) {
+        // VK говорит «не вошёл»: сначала пробуем тихо продлить сессию и повторить, и только потом просим войти заново
+        if (refreshSession(force = true)) {
+            try {
+                postOnce(act, params)
+            } catch (e2: SessionExpired) {
+                prefs.vkUid = null
+                throw ApiException("Сессия VK закончилась — войди заново", 401)
+            }
+        } else {
+            prefs.vkUid = null
+            throw ApiException("Сессия VK закончилась — войди заново", 401)
+        }
+    }
+
+    private class SessionExpired : java.io.IOException("VK: нет сессии")
+
+    private suspend fun postOnce(act: String, params: Map<String, Any?>): Any? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val me = uid ?: throw ApiException("Нужен вход во VK")
         val form = FormBody.Builder().add("al", "1").add("act", act)
         params.forEach { (k, v) -> form.add(k, v?.toString() ?: "") }
@@ -231,10 +300,7 @@ class VkApi(private val prefs: Prefs) {
             throw ApiException("VK изменил формат ответа")
         }
         when (payload.opt(0)?.toString()) {
-            "3" -> {
-                prefs.vkUid = null
-                throw ApiException("Сессия VK закончилась — войди заново", 401)
-            }
+            "3" -> throw SessionExpired()
             "8" -> throw ApiException("VK: " + unescapeHtml(payload.optJSONArray(1)?.optString(0) ?: "ошибка").trim('"'))
         }
         payload.opt(1)

@@ -407,6 +407,14 @@ object PlayerConnection {
         val t = _current.value ?: return
         val played = (positionMs() / 1000).toInt()
         next()
-        if (Repo.mode.value == Repo.Mode.WAVE) withContext(Dispatchers.IO) { Repo.wave.feedback("dislike", t, played) }
+        when (Repo.mode.value) {
+            Repo.Mode.WAVE -> withContext(Dispatchers.IO) { Repo.wave.feedback("dislike", t, played) }
+            // радио по треку: Яндекс учитывает «не нравится» в станции, а сам трек больше не вернётся в это радио
+            Repo.Mode.RADIO -> withContext(Dispatchers.IO) {
+                Repo.radio.ban(t)
+                if (t.isYa) Repo.ya.radioFeedback("dislike", t, played)
+            }
+            else -> {}
+        }
     }
 }

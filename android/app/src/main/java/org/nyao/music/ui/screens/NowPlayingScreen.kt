@@ -277,7 +277,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     repeat != Player.REPEAT_MODE_OFF,
                     pal,
                 ) { PlayerConnection.cycleRepeat() }
-                Tool(NyaoIcons.Block, "Не нравится", false, pal, enabled = wave) { model.dislike() }
+                Tool(NyaoIcons.Block, "Не нравится", false, pal, enabled = wave || mode == Repo.Mode.RADIO) { model.dislike() }
                 Tool(NyaoIcons.Bedtime, if (sleep) "Таймер сна: 30 мин" else "Таймер сна", sleep, pal) {
                     PlayerConnection.toggleSleep()
                     model.message(if (!sleep) "Пауза через 30 минут" else "Таймер сна выключен")

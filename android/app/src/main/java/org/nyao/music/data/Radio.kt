@@ -19,6 +19,11 @@ class Radio(private val ya: YandexApi, private val yt: YtMusicApi, private val s
         else -> emptyList()
     }
 
+    /** «Не нравится» в радио: трек больше не попадёт в эту подборку */
+    fun ban(t: Track) {
+        seen += t.id
+    }
+
     private fun take(list: List<Track>): List<Track> {
         val out = list.filter { it.available && seen.add(it.id) }
         played += out

@@ -181,11 +181,13 @@ class YandexApi(private val prefs: Prefs) {
 
     // ---------- Радио по треку: станция track:ID (своя сессия, волну не трогает) ----------
     private var radioSession: String? = null
+    private var radioBatch: String? = null
 
     suspend fun radioStart(trackId: String): List<Track> {
         val id = trackId.substringBefore(":")
         val s = obj("POST", "/rotor/session/new", json = JSONObject().put("seeds", JSONArray().put("track:$id")).put("includeTracksInResponse", true).put("includeWaveModel", false).put("interactive", true))
         radioSession = s.str("radioSessionId")
+        radioBatch = s.str("batchId")
         return sequence(s)
     }
 
@@ -193,8 +195,14 @@ class YandexApi(private val prefs: Prefs) {
         val sid = radioSession ?: return emptyList()
         val ids = JSONArray()
         queueIds.filter { it.startsWith("ya:") }.takeLast(10).forEach { ids.put(it.removePrefix("ya:")) }
-        return sequence(obj("POST", "/rotor/session/$sid/tracks", json = JSONObject().put("queue", ids)))
+        val res = obj("POST", "/rotor/session/$sid/tracks", json = JSONObject().put("queue", ids))
+        res.str("batchId")?.let { radioBatch = it }
+        return sequence(res)
     }
+
+    /** Отзыв в станцию радио по треку (dislike, skip …) */
+    suspend fun radioFeedback(type: String, track: Track, playedSeconds: Int = 0) =
+        sendFeedback(radioSession, radioBatch, "mobile-radio-track", type, track, playedSeconds)
 
     suspend fun waveMore(queueIds: List<String>, diversity: String?, mood: String?): List<Track> {
         val sid = waveSession ?: return waveStart(diversity, mood)
@@ -216,20 +224,23 @@ class YandexApi(private val prefs: Prefs) {
     }
 
     /** type: radioStarted | trackStarted | trackFinished | skip | like | dislike */
-    suspend fun waveFeedback(type: String, track: Track?, playedSeconds: Int = 0) {
-        val sid = waveSession ?: return
+    suspend fun waveFeedback(type: String, track: Track?, playedSeconds: Int = 0) =
+        sendFeedback(waveSession, waveBatch, "mobile-radio-user-onyourwave", type, track, playedSeconds)
+
+    private suspend fun sendFeedback(session: String?, batch: String?, from: String, type: String, track: Track?, playedSeconds: Int) {
+        val sid = session ?: return
         if (type != "radioStarted" && (track == null || !track.isYa)) return
         val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
         val event = JSONObject()
             .put("type", type)
             .put("timestamp", fmt.format(Date()))
-            .put("from", "mobile-radio-user-onyourwave")
+            .put("from", from)
         if (type != "radioStarted" && track != null) {
             event.put("trackId", if (track.albumId != null) "${track.srcId}:${track.albumId}" else track.srcId)
         }
         if (type == "trackFinished" || type == "skip" || type == "dislike") event.put("totalPlayedSeconds", playedSeconds)
         try {
-            raw("POST", "/rotor/session/$sid/feedback", json = JSONObject().put("event", event).put("batchId", waveBatch ?: ""))
+            raw("POST", "/rotor/session/$sid/feedback", json = JSONObject().put("event", event).put("batchId", batch ?: ""))
         } catch (_: Exception) {
             // фидбек не критичен
         }

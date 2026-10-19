@@ -76,7 +76,11 @@ object Repo {
         yt = YtMusicApi(prefs, context.applicationContext.filesDir)
         ytStreams = YtStreams(yt)
         sc = ScApi(prefs)
-        vk = VkApi(prefs)
+        vk = VkApi(prefs).also { it.appContext = context.applicationContext }
+        // сессия vk.com живёт, пока сайт сам обновляет cookie — продлеваем её тихо раз в 12 часов
+        if (vk.loggedIn && System.currentTimeMillis() - prefs.vkRefreshedAt > 12 * 3600_000L) {
+            bg.launch { runCatching { vk.refreshSession() } }
+        }
         cloud = NyaoCloud(prefs, context.applicationContext.filesDir)
         mixStore = MixStore(context.applicationContext.filesDir)
         lastfm = LastFm(prefs, context.applicationContext.filesDir)

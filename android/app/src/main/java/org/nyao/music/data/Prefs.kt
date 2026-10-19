@@ -141,6 +141,11 @@ class Prefs(context: Context) {
         get() = sp.getLong("vkUid", 0L).takeIf { it != 0L }
         set(v) = sp.edit().apply { if (v == null) remove("vkUid") else putLong("vkUid", v) }.apply()
 
+    /** Когда сессию VK последний раз тихо продлевали (раз в 12 часов, см. Repo) */
+    var vkRefreshedAt: Long
+        get() = sp.getLong("vkRefreshedAt", 0L)
+        set(v) = sp.edit().putLong("vkRefreshedAt", v).apply()
+
     var vkOrigin: String?
         get() = sp.getString("vkOrigin", null)
         set(v) = sp.edit().apply { if (v == null) remove("vkOrigin") else putString("vkOrigin", v) }.apply()

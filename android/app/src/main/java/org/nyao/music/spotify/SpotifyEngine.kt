@@ -175,6 +175,7 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
 
     suspend fun pause() { call("pause") }
     suspend fun resume() { call("resume") }
+    suspend fun nextTrack() { call("nextTrack") }
     suspend fun seek(positionMs: Long) { call("seek", positionMs.coerceAtLeast(0)) }
     suspend fun setVolume(volume: Double) { call("setVolume", volume.coerceIn(0.0, 1.0)) }
     suspend fun activateElement() { call("activateElement") }
