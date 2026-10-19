@@ -77,6 +77,22 @@ export class SpotifyEngine {
     });
     // Widevine (EME) разрешаем только окну плеера Spotify и фрейму официального SDK
     const ses = session.defaultSession;
+    // журнал: лицензия и ошибки сети плеера Spotify (только адрес без параметров и код ответа)
+    const mine = (d) => this.win && !this.win.isDestroyed() && d.webContentsId === this.win.webContents.id;
+    const short = (u) => {
+      try {
+        const x = new URL(u);
+        return x.host + x.pathname.slice(0, 60);
+      } catch {
+        return '?';
+      }
+    };
+    ses.webRequest.onCompleted({ urls: ['https://*/*'] }, (d) => {
+      if (mine(d) && (d.statusCode >= 400 || /licen|widevine|playready/i.test(d.url))) this.note(`сеть: ${d.method} ${short(d.url)} → ${d.statusCode}`);
+    });
+    ses.webRequest.onErrorOccurred({ urls: ['https://*/*'] }, (d) => {
+      if (mine(d)) this.note(`сеть: ${d.method} ${short(d.url)} → ${d.error}`);
+    });
     ses.setPermissionRequestHandler((wc, permission, cb, details) => {
       if (permission === 'mediaKeySystem') {
         let host = '';
@@ -199,6 +215,9 @@ export class SpotifyEngine {
     const message = (p && p.message) || '';
     if (type !== 'player_state_changed') this.note(`событие ${type}${message ? ': ' + message : ''}`);
     switch (type) {
+      case 'eme':
+        this.note(`EME: ${p && p.keySystem} → ${p && p.result}${p && p.robustness ? ' · robustness ' + p.robustness : ''}`);
+        break;
       case 'diag':
         this.note(`браузер: ${p && p.ua} · secure=${p && p.secure} · EME=${p && p.eme} · Widevine=${p && p.widevine} · SW_SECURE_CRYPTO=${p && p.widevineSw}`);
         break;

@@ -91,6 +91,28 @@
     }
   };
 
+  // Как в Chrome: только Widevine. Electron от castlabs на Windows показывает ещё и PlayReady —
+  // SDK Spotify спотыкается о него. Плюс журнал: какой ключ просит SDK и что получает.
+  (function () {
+    var orig = navigator.requestMediaKeySystemAccess && navigator.requestMediaKeySystemAccess.bind(navigator);
+    if (!orig) return;
+    navigator.requestMediaKeySystemAccess = function (keySystem, configs) {
+      if (keySystem.indexOf('com.widevine.alpha') !== 0) {
+        emit('eme', { keySystem: keySystem, result: 'скрыт (только Widevine)' });
+        return Promise.reject(new DOMException('Unsupported keySystem', 'NotSupportedError'));
+      }
+      return orig(keySystem, configs).then(function (acc) {
+        var c = acc.getConfiguration ? acc.getConfiguration() : {};
+        var rob = (c.audioCapabilities || []).map(function (x) { return x.robustness || '-'; }).join(',');
+        emit('eme', { keySystem: keySystem, result: 'ok', robustness: rob });
+        return acc;
+      }, function (e) {
+        emit('eme', { keySystem: keySystem, result: 'нет (' + (e && e.name) + ')' });
+        throw e;
+      });
+    };
+  })();
+
   // диагностика: какой браузер видит Spotify и даёт ли WebView Widevine через EME
   function diag() {
     var info = { ua: navigator.userAgent, secure: window.isSecureContext, eme: !!navigator.requestMediaKeySystemAccess };
