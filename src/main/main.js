@@ -9,6 +9,8 @@ import { YTMusicProvider } from './providers/ytmusic.js';
 import { shapeOf } from './providers/ytraw.js';
 import { SoundCloudProvider } from './providers/soundcloud.js';
 import { VKProvider } from './providers/vk.js';
+import { SpotifyProvider, SP_REDIRECT } from './providers/spotify.js';
+import { SpotifyEngine, PLAYER_FILE, silenceResponse } from './spotify/spotify-engine.js';
 import { checkUpdate, downloadAsset } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
@@ -62,7 +64,34 @@ async function pollStatus() {
 }
 const up = (id) => !svcStatus.outages.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
-let ya, yt, sc, vk, wave, streams, catalog, win, cloud, lastfm, radio, live;
+let ya, yt, sc, vk, sp, spEngine, wave, streams, catalog, win, cloud, lastfm, radio, live;
+
+/**
+ * Widevine (Electron от castlabs): компонент CDM скачивается и проверяется при первом запуске.
+ * В обычном Electron его нет — тогда Spotify-плеер на ПК недоступен, остальное работает как раньше.
+ */
+let widevineState = null;
+function widevineReady() {
+  if (!widevineState) {
+    widevineState = (async () => {
+      try {
+        const { components } = await import('electron');
+        if (!components || typeof components.whenReady !== 'function') return { ok: false, reason: 'в этой сборке Electron нет Widevine' };
+        await Promise.race([components.whenReady(), new Promise((_, rej) => setTimeout(() => rej(new Error('Widevine не загрузился за 60 секунд')), 60_000))]);
+        return { ok: true, status: components.status() };
+      } catch (e) {
+        return { ok: false, reason: e.message || String(e) };
+      }
+    })();
+  }
+  return widevineState;
+}
+
+/** Spotify не должен держать поиск и библиотеку дольше 6 секунд */
+function spSafe(promise, fallback) {
+  return Promise.race([safe(promise, fallback), new Promise((r) => setTimeout(() => r(fallback), 6000))]);
+}
+const spOn = () => sp && sp.loggedIn && !sp.regionBlocked;
 
 /** Ключи Last.fm кладёт сборка (из секретов GitHub) в lastfm-keys.json рядом; без него Last.fm выключен */
 function lastfmKeys() {
@@ -165,6 +194,9 @@ function initProviders() {
       }
     }
   });
+  // Spotify: официальный Web API + Web Playback SDK в скрытом окне (нужен Premium и свой Client ID)
+  sp = new SpotifyProvider({ store: secrets, fetchFn, openUrl: (url) => shell.openExternal(url) });
+  spEngine = new SpotifyEngine({ sp, widevine: widevineReady(), onChange: (st) => send('spotify:state', st) });
   cloud = new NyaoCloud({
     dir: app.getPath('userData'),
     getToken: () => secrets.get('nyaoToken'),
@@ -525,8 +557,8 @@ function registerIpc() {
     return cloud.request('GET', `/stats?${qs}`);
   });
   // трек из другого сервиса → тот, что можно включить здесь (для «Слушать вместе»)
-  const providers = () => ({ ya, yt, sc, vk });
-  const usable = (s) => up(s) && (s === 'yt' || s === 'sc' || (s === 'ya' && ya.loggedIn) || (s === 'vk' && vk.loggedIn));
+  const providers = () => ({ ya, yt, sc, vk, sp });
+  const usable = (s) => up(s) && (s === 'yt' || s === 'sc' || (s === 'ya' && ya.loggedIn) || (s === 'vk' && vk.loggedIn) || (s === 'sp' && spOn()));
   handle('match:playable', async (track) => {
     if (!track) return null;
     if (usable(track.source)) return track;
@@ -564,6 +596,64 @@ function registerIpc() {
   handle('cloud:top', (opts) => cloud.top(opts || {}));
   handle('cloud:sync', () => syncCloud());
   handle('sc:flush', () => flushScLikes());
+
+  // ---------- Spotify ----------
+  const spStatus = async () => {
+    const wv = await Promise.race([widevineReady(), new Promise((r) => setTimeout(() => r({ ok: false, reason: 'ещё загружается' }), 300))]);
+    return {
+      clientId: sp.clientId,
+      hasClientId: sp.hasClientId,
+      loggedIn: sp.loggedIn,
+      regionBlocked: sp.regionBlocked,
+      redirect: SP_REDIRECT,
+      widevine: wv,
+      engine: spEngine.status,
+      account: sp.loggedIn ? await spSafe(sp.getAccount(), { name: sp.regionBlocked ? 'Spotify (нужен VPN)' : 'Spotify', error: true }) : null
+    };
+  };
+  handle('spotify:status', () => spStatus());
+  handle('spotify:setClientId', (id) => {
+    sp.setClientId(id);
+    return spStatus();
+  });
+  handle('spotify:login', async () => {
+    await sp.login();
+    showWindow();
+    return spStatus();
+  });
+  handle('spotify:logout', () => {
+    spEngine.release();
+    sp.logout();
+    return spStatus();
+  });
+  handle('spotify:prewarm', async () => {
+    if (!spOn()) return false;
+    await spEngine.awaitReady(60_000);
+    return true;
+  });
+  handle('spotify:play', (uris, positionMs) => spEngine.playUris(uris, positionMs));
+  handle('spotify:pause', () => spEngine.pause());
+  handle('spotify:resume', () => spEngine.resume());
+  handle('spotify:seek', (ms) => spEngine.seek(ms));
+  handle('spotify:next', () => spEngine.nextTrack());
+  handle('spotify:volume', (v) => (spEngine.started ? spEngine.setVolume(v) : null));
+  handle('spotify:modes', () => spEngine.ensureModes());
+  handle('spotify:snapshot', () => ({ status: spEngine.status, snapshot: spEngine.snapshot }));
+  handle('spotify:debug', async () => {
+    const wv = await Promise.race([widevineReady(), new Promise((r) => setTimeout(() => r({ ok: false, reason: 'ещё загружается' }), 300))]);
+    return [
+      `Client ID: ${sp.hasClientId ? 'задан' : 'нет'}`,
+      `Вход: ${sp.loggedIn ? 'да' : 'нет'}`,
+      `Widevine: ${wv.ok ? 'готов' : wv.reason}`,
+      `Плеер: ${spEngine.status.state}${spEngine.status.message ? ' — ' + spEngine.status.message : ''}`,
+      '',
+      '— Плеер —',
+      spEngine.debugText() || 'Плеер ещё не запускался.',
+      '',
+      '— Web API —',
+      sp.debugText() || 'Ошибок Web API пока не было.'
+    ].join('\n');
+  });
 
   handle('auth:status', async () => {
     await vk.refresh();
@@ -658,28 +748,30 @@ function registerIpc() {
   });
 
   handle('library:playlists', async () => {
-    const [yaLists, ytLists, scLists, vkLists] = await Promise.all([
+    const [yaLists, ytLists, scLists, vkLists, spLists] = await Promise.all([
       ya.loggedIn ? safe(ya.playlists(), []) : [],
       yt.loggedIn ? safe(yt.playlists(), []) : [],
       sc.loggedIn ? safe(sc.playlists(), []) : [],
-      vk.loggedIn ? safe(vk.playlists(), []) : []
+      vk.loggedIn ? safe(vk.playlists(), []) : [],
+      spOn() ? spSafe(sp.playlists(), []) : []
     ]);
-    return [...readMixes().map(mixSummary), ...yaLists, ...ytLists, ...scLists, ...vkLists];
+    return [...readMixes().map(mixSummary), ...yaLists, ...ytLists, ...scLists, ...vkLists, ...spLists];
   });
 
   handle('library:liked', async () => {
-    const [a, b, c, d] = await Promise.all([
+    const [a, b, c, d, e] = await Promise.all([
       ya.loggedIn ? safe(ya.likedTracks(), []) : [],
       yt.loggedIn ? safe(yt.likedTracks(), []) : [],
       sc.loggedIn ? safe(sc.likedTracks(), []) : [],
-      vk.loggedIn ? safe(vk.likedTracks(), []) : []
+      vk.loggedIn ? safe(vk.likedTracks(), []) : [],
+      spOn() ? spSafe(sp.likedTracks(), []) : []
     ]);
     // Чередуем, чтобы общий список не был «сначала весь Яндекс, потом весь YT»
     const out = [];
-    for (let i = 0; i < Math.max(a.length, b.length, c.length, d.length); i++) {
-      for (const l of [a, b, c, d]) if (l[i]) out.push(l[i]);
+    for (let i = 0; i < Math.max(a.length, b.length, c.length, d.length, e.length); i++) {
+      for (const l of [a, b, c, d, e]) if (l[i]) out.push(l[i]);
     }
-    return { tracks: out, ya: a.length, yt: b.length, sc: c.length, vk: d.length };
+    return { tracks: out, ya: a.length, yt: b.length, sc: c.length, vk: d.length, sp: e.length };
   });
 
   handle('library:tracks', async (playlistId) => {
@@ -688,6 +780,7 @@ function registerIpc() {
     if (playlistId.startsWith('yt:')) return yt.playlistTracks(playlistId);
     if (playlistId.startsWith('sc:')) return sc.playlistTracks(playlistId);
     if (playlistId.startsWith('vk:')) return vk.playlistTracks(playlistId);
+    if (playlistId.startsWith('sp:')) return sp.playlistTracks(playlistId);
     throw new Error('Неизвестный плейлист');
   });
 
@@ -745,15 +838,16 @@ function registerIpc() {
     // Поиск YouTube Music работает и без входа — аккаунт нужен только для лайков и библиотеки
     // SoundCloud тоже ищет без входа
     const yaOn = ya.loggedIn && up('ya');
-    const [a, b, c, d, arYa, arYt, alYa, alYt] = await Promise.all([
+    const [a, b, c, d, e, arYa, arYt, alYa, alYt] = await Promise.all([
       yaOn ? safe(ya.search(q), []) : [], up('yt') ? safe(yt.search(q), []) : [], up('sc') ? safe(sc.search(q), []) : [], vk.loggedIn && up('vk') ? safe(vk.search(q), []) : [],
+      spOn() ? spSafe(sp.search(q), []) : [],
       // исполнители и альбомы: Яндекс и YouTube Music
       yaOn ? safe(ya.searchArtist(q), []) : [], up('yt') ? safe(yt.searchArtist(q), []) : [],
       yaOn ? safe(ya.searchAlbum(q), []) : [], up('yt') ? safe(yt.searchAlbum(q), []) : []
     ]);
     const albums = [];
     for (let i = 0; i < Math.max(alYa.length, alYt.length) && albums.length < 12; i++) for (const l of [alYa, alYt]) if (l[i] && albums.length < 12) albums.push(l[i]);
-    return { ya: a, yt: b, sc: c, vk: d, artists: mergeArtists([arYa, arYt], q), albums };
+    return { ya: a, yt: b, sc: c, vk: d, sp: e, artists: mergeArtists([arYa, arYt], q), albums };
   });
 
   handle('wave:start', () => wave.start());
@@ -788,6 +882,7 @@ function registerIpc() {
     else if (track.source === 'yt') await yt.like(track, on);
     else if (track.source === 'sc') return likeSoundCloud(track, on);
     else if (track.source === 'vk') await vk.like(track, on);
+    else if (track.source === 'sp') await sp.like(track, on);
     return on;
   });
 }
@@ -848,6 +943,15 @@ app.whenReady().then(() => {
   }
   initProviders();
   protocol.handle('nyao', async (request) => {
+    const u = new URL(request.url);
+    // страница Spotify Web Playback SDK для скрытого окна плеера
+    if (u.host === 'spotify-player') {
+      return new Response(fs.readFileSync(PLAYER_FILE), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    }
+    // трек Spotify: в <audio> — тишина той же длины, звук даёт устройство Spotify (см. renderer/spotify-sync.js)
+    if (u.host === 'stream' && decodeURIComponent(u.pathname.slice(1)).startsWith('sp:')) {
+      return silenceResponse(Number(u.searchParams.get('d')) || 0, request.headers.get('range'));
+    }
     const res = await streams.handle(request);
     // эквалайзер (Web Audio) читает звук только с разрешением CORS
     try {

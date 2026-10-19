@@ -11,6 +11,12 @@ function shuffled(arr) {
   return a;
 }
 
+/** Ссылка на поток. Трек Spotify — тишина его длины (звук даёт устройство Spotify, см. spotify-sync.js) */
+export function streamSrc(t) {
+  const base = `nyao://stream/${encodeURIComponent(t.id)}`;
+  return t.source === 'sp' ? `${base}?d=${Math.round(t.duration || 0)}` : base;
+}
+
 export class Player extends EventTarget {
   constructor(audio) {
     super();
@@ -187,7 +193,7 @@ export class Player extends EventTarget {
   load() {
     const t = this.current;
     if (!t) return;
-    this.audio.src = `nyao://stream/${encodeURIComponent(t.id)}`;
+    this.audio.src = streamSrc(t);
     this.audio.play().catch(() => {});
     this.startedAt = Date.now();
     if (this.mode === 'wave') api.wave.feedback('trackStarted', t, 0).catch(() => {});
@@ -300,7 +306,7 @@ export class Player extends EventTarget {
     this.repeat = ['off', 'all', 'one'].includes(s.repeat) ? s.repeat : 'off';
     this.original = this.mode === 'list' ? s.tracks.slice() : undefined;
     const t = this.current;
-    this.audio.src = `nyao://stream/${encodeURIComponent(t.id)}`;
+    this.audio.src = streamSrc(t);
     const pos = Number(s.position) || 0;
     if (pos > 2) {
       const once = () => {
@@ -332,6 +338,8 @@ export class Player extends EventTarget {
 
   async next(skipped = true) {
     if (!this.current) return;
+    // переход сам по окончании трека (для Spotify: он перейдёт к следующему по списку без команды)
+    this.lastAuto = !skipped;
     this.reportLeave(skipped);
     if (this.index + 1 >= this.queue.length) {
       if (this.mode === 'wave' || this.mode === 'radio') {

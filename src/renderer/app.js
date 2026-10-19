@@ -1,4 +1,5 @@
 import { Player } from './player.js';
+import { SpotifySync } from './spotify-sync.js';
 import { Ribbon } from './ribbon.js';
 import { Onboarding } from './onboarding.js';
 import { layoutChoiceHtml } from './layouts.js';
@@ -15,6 +16,9 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const view = $('#view');
 const player = new Player($('#audio'));
+// треки Spotify: <audio> ведёт очередь (тишина той же длины), звук — устройство Spotify в главном процессе
+const spotifySync = new SpotifySync(player, window.nyao && window.nyao.spotify, { onMessage: (m) => toast(m, true) });
+if (window.nyao && window.nyao.spotify) spotifySync.start();
 const eq = new Equalizer(player.audio);
 
 // ---------- Тема по системе: macOS — Liquid Glass, остальное — Windows ----------
@@ -70,13 +74,14 @@ function badge(source, extra = '') {
   if (source === 'yt') return `<span class="badge yt ${extra}">YT</span>`;
   if (source === 'sc') return `<span class="badge sc ${extra}">SC</span>`;
   if (source === 'vk') return `<span class="badge vk ${extra}">VK</span>`;
+  if (source === 'sp') return `<span class="badge sp ${extra}">SP</span>`;
   if (source === 'mix') return '<span class="badge mix">Я+YT</span>';
   return '';
 }
-const RING = { ya: '#FFD60A', yt: '#FF6A5C', sc: '#FF8A3D', vk: '#5AA9FF', mix: '#C6B8FF' };
+const RING = { ya: '#FFD60A', yt: '#FF6A5C', sc: '#FF8A3D', vk: '#5AA9FF', sp: '#1ED760', mix: '#C6B8FF' };
 function coverHtml(item, cls = '', withBadge = false) {
   const src = item && item.source;
-  const bgCls = src === 'ya' ? 'ya-bg' : src === 'yt' ? 'yt-bg' : src === 'sc' ? 'sc-bg' : src === 'vk' ? 'vk-bg' : '';
+  const bgCls = src === 'ya' ? 'ya-bg' : src === 'yt' ? 'yt-bg' : src === 'sc' ? 'sc-bg' : src === 'vk' ? 'vk-bg' : src === 'sp' ? 'sp-bg' : '';
   const ring = `<svg width="45%" height="45%" viewBox="0 0 72 72" fill="none" stroke="${RING[src] || RING.mix}" stroke-width="3"><circle cx="36" cy="36" r="26"/><circle cx="36" cy="36" r="12"/></svg>`;
   const img = item && item.cover ? `<img src="${esc(item.cover)}" alt="" loading="lazy">` : '';
   return `<div class="cover ${cls} ${bgCls}">${ring}${img}${withBadge ? badge(src) : ''}</div>`;
@@ -291,6 +296,7 @@ function srcName(source, gen = false) {
   if (source === 'ya') return gen ? 'Яндекс Музыки' : 'Яндекс Музыка';
   if (source === 'sc') return 'SoundCloud';
   if (source === 'vk') return 'VK Музыка';
+  if (source === 'sp') return 'Spotify';
   if (source === 'mix') return gen ? 'моего микса' : 'Мой микс';
   return 'YouTube Music';
 }
@@ -298,7 +304,8 @@ const SERVICES = [
   { id: 'ya', short: 'Я', name: 'Яндекс Музыка', bg: 'var(--ya)', fg: '#000' },
   { id: 'yt', short: 'YT', name: 'YouTube Music', bg: 'var(--yt-bright)', fg: '#fff' },
   { id: 'sc', short: 'SC', name: 'SoundCloud', bg: 'var(--sc)', fg: '#fff' },
-  { id: 'vk', short: 'VK', name: 'VK Музыка', bg: 'var(--vk)', fg: '#fff', dev: true }
+  { id: 'vk', short: 'VK', name: 'VK Музыка', bg: 'var(--vk)', fg: '#fff', dev: true },
+  { id: 'sp', short: 'SP', name: 'Spotify', bg: 'var(--sp)', fg: '#000' }
 ];
 function svcDot(s, on = true) {
   return `<span class="dot ${on ? '' : 'off'}" style="background:${s.bg};color:${s.fg}">${s.short}</span>`;
@@ -748,7 +755,7 @@ function ensureLyrics() {
 
 function libraryCounts() {
   const l = state.lib.lists || [];
-  return { all: l.length + 1, ya: l.filter((p) => p.source === 'ya').length, yt: l.filter((p) => p.source === 'yt').length, sc: l.filter((p) => p.source === 'sc').length, vk: l.filter((p) => p.source === 'vk').length, mix: l.filter((p) => p.source === 'mix').length };
+  return { all: l.length + 1, ya: l.filter((p) => p.source === 'ya').length, yt: l.filter((p) => p.source === 'yt').length, sc: l.filter((p) => p.source === 'sc').length, vk: l.filter((p) => p.source === 'vk').length, sp: l.filter((p) => p.source === 'sp').length, mix: l.filter((p) => p.source === 'mix').length };
 }
 
 function renderLibrary() {
@@ -770,7 +777,7 @@ function renderLibrary() {
           <button class="btn" data-action="mix-builder">${ICONS.plus}Новый микс</button>
         </div>
       </div>
-      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${state.status.vk ? f('vk', 'VK', 'var(--vk)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}${f('artists', `Исполнители${state.favArtists.length ? ' · ' + state.favArtists.length : ''}`)}</div>
+      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${state.status.vk ? f('vk', 'VK', 'var(--vk)') : ''}${state.status.sp || c.sp ? f('sp', 'Spotify', 'var(--sp)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}${f('artists', `Исполнители${state.favArtists.length ? ' · ' + state.favArtists.length : ''}`)}</div>
       ${lib.filter === 'artists' ? (state.favArtists.length ? `<div class="tiles">${state.favArtists.map((x) => `<button class="tile fav-tile" data-action="open-artist" data-ref="${esc((x.refs && (x.refs.ya || x.refs.yt)) || x.ref)}">
           ${coverHtml({ cover: x.cover, source: String(x.ref).slice(0, 2) }, 'round')}<div class="t">${esc(x.name)}</div><div class="s">${x.at ? 'любимый исполнитель' : 'из Яндекса'}</div></button>`).join('')}</div>`
         : '<div class="empty">Здесь будут любимые исполнители. Открой исполнителя и нажми ♥ рядом с «Слушать» — его треки станут чаще попадать в «Мою волну».</div>') : shown ? `<div class="tiles">${shown.map((p) => `<button class="tile ${p.id === lib.selected ? 'sel' : ''}" data-action="lib-select" data-id="${esc(p.id)}">
@@ -782,7 +789,7 @@ function renderLibrary() {
       ${sel ? `<div class="aside-head">
         <div class="pl-head">
           ${isLiked(sel) ? heart('50', sel.source) : coverHtml(sel)}
-          <div style="min-width:0"><span class="muted" style="font-size:12px">${sel.id === 'liked' ? 'Общий список лайков' : isLiked(sel) ? 'Лайки одного сервиса' : sel.source === 'mix' ? 'Смешанный плейлист' : sel.source === 'ya' ? 'Плейлист Яндекса' : sel.source === 'sc' ? 'Плейлист SoundCloud' : sel.source === 'vk' ? 'Плейлист VK' : 'Плейлист YouTube Music'}</span>
+          <div style="min-width:0"><span class="muted" style="font-size:12px">${sel.id === 'liked' ? 'Общий список лайков' : isLiked(sel) ? 'Лайки одного сервиса' : sel.source === 'mix' ? 'Смешанный плейлист' : sel.source === 'ya' ? 'Плейлист Яндекса' : sel.source === 'sc' ? 'Плейлист SoundCloud' : sel.source === 'vk' ? 'Плейлист VK' : sel.source === 'sp' ? 'Плейлист Spotify' : 'Плейлист YouTube Music'}</span>
           <h2>${esc(sel.title)}</h2>
           <span class="muted" style="font-size:12px">${lib.tracks ? `${lib.tracks.length} треков · ${fmt(lib.tracks.reduce((a, t) => a + (t.duration || 0), 0))}` : 'Загружаю…'}</span></div>
         </div>
@@ -790,7 +797,7 @@ function renderLibrary() {
           <button class="btn primary" data-action="pl-play" ${lib.tracks && lib.tracks.length ? '' : 'disabled'}>${ICONS.play}Слушать</button>
           <button class="icbtn" data-action="pl-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
           <span class="grow"></span>
-          ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}${lib.tracks.some((t) => t.source === 'sc') ? `<span class="dotsrc sc" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sc').length}` : ''}${lib.tracks.some((t) => t.source === 'vk') ? `<span class="dotsrc vk" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'vk').length}` : ''}</span>` : ''}
+          ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}${lib.tracks.some((t) => t.source === 'sc') ? `<span class="dotsrc sc" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sc').length}` : ''}${lib.tracks.some((t) => t.source === 'vk') ? `<span class="dotsrc vk" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'vk').length}` : ''}${lib.tracks.some((t) => t.source === 'sp') ? `<span class="dotsrc sp" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sp').length}` : ''}</span>` : ''}
           ${lib.tracks && lib.tracks.length ? `<button class="icbtn" data-action="pl-transfer" aria-label="Перенести в другой сервис" title="Перенести в другой сервис">${ICONS.transfer}</button>` : ''}
           ${sel.source === 'mix' && !isLiked(sel) ? `<button class="icbtn" data-action="del-mix" aria-label="Удалить микс">${ICONS.ban}</button>` : ''}
         </div>
@@ -816,7 +823,7 @@ function renderSearch() {
   view.innerHTML = `<div class="scroll">
     <h1 class="page">Поиск</h1>
     <form class="search-field" data-form="search" style="max-width:640px">${ICONS.search}<input name="q" type="search" value="${esc(s.q)}" placeholder="Трек или исполнитель" aria-label="Поиск"></form>
-    ${s.res ? `<div class="chips">${f('all', 'Все')}${f('ya', `Яндекс · ${s.res.ya.length}`, 'var(--ya)')}${f('yt', `YouTube Music · ${s.res.yt.length}`, 'var(--yt-bright)')}${f('sc', `SoundCloud · ${(s.res.sc || []).length}`, 'var(--sc)')}${(s.res.vk || []).length ? f('vk', `VK · ${s.res.vk.length}`, 'var(--vk)') : ''}</div>` : ''}
+    ${s.res ? `<div class="chips">${f('all', 'Все')}${f('ya', `Яндекс · ${s.res.ya.length}`, 'var(--ya)')}${f('yt', `YouTube Music · ${s.res.yt.length}`, 'var(--yt-bright)')}${f('sc', `SoundCloud · ${(s.res.sc || []).length}`, 'var(--sc)')}${(s.res.vk || []).length ? f('vk', `VK · ${s.res.vk.length}`, 'var(--vk)') : ''}${(s.res.sp || []).length || state.status.sp ? f('sp', `Spotify · ${(s.res.sp || []).length}`, 'var(--sp)') : ''}</div>` : ''}
     ${extra}
     ${s.loading ? '<div class="skeleton" style="height:300px"></div>' : s.res ? (merged.length ? tracksHtml(merged, 'search') : !best && !artists.length && !albums.length ? '<div class="empty">Ничего не нашлось</div>' : '') : ''}
   </div>`;
@@ -948,6 +955,37 @@ const SVC_HELP = {
     input: `<div class="hint">VK Музыка в этой сборке экспериментальная: у VK нет открытого API, Nyao работает через сайт vk.com от имени твоей сессии. Если что-то не грузится — открой лог и пришли его разработчику.</div><button class="btn" data-action="vk-log">Открыть vk-debug.log</button>`
   }
 };
+/** Spotify: свой Client ID → вход (PKCE) → плеер на Web Playback SDK (нужен Premium) */
+function spCard() {
+  const s = state.spotify || {};
+  const acc = state.status.sp;
+  const eng = s.engine || { state: 'idle' };
+  const engText = { idle: 'запустится с первым треком', loading: 'загружается…', connecting: 'подключается…', ready: 'готов', not_ready: 'нет связи, переподключается', failed: eng.message || 'ошибка' }[eng.state] || eng.state;
+  const wv = s.widevine || {};
+  const status = acc
+    ? `Вход выполнен: ${esc(acc.name)}${acc.premium === false ? ' · без Premium плеер Spotify не играет — работают поиск и библиотека' : ''}`
+    : 'Не подключено';
+  return `<div class="card">
+    <div class="svc">
+      <div class="logo" style="background:var(--sp);color:#000">SP</div>
+      <div class="info"><div class="name">Spotify</div><div class="st">${status}</div></div>
+      ${acc ? '<button class="btn danger" data-action="sp-logout">Выйти</button>' : `<button class="btn primary" data-action="sp-login" ${s.hasClientId ? '' : 'disabled'}>Войти</button>`}
+    </div>
+    ${s.regionBlocked ? '<div class="hint" style="color:#ffb37a">Spotify сейчас отвечает «недоступен в этой стране». Без VPN Nyao его пропускает, остальные сервисы работают как обычно.</div>' : ''}
+    ${acc ? `<div class="hint">Плеер: <b>${esc(engText)}</b> · Widevine: ${wv.ok ? 'готов' : esc(wv.reason || 'проверяется')}. Звук идёт из официального плеера Spotify — прослушивания засчитываются в твой Spotify.</div>` : ''}
+    ${acc ? '' : `<div class="hint" style="margin-top:10px"><b>Один раз настроить</b><br>
+      1. Открой <button class="link-plain" data-action="open-url" data-url="https://developer.spotify.com/dashboard" style="color:var(--accent)">developer.spotify.com/dashboard</button> → Create app (или своё приложение с телефона).<br>
+      2. В Redirect URIs добавь адрес ниже — посимвольно:<br>
+      <code style="user-select:all">${esc(s.redirect || '')}</code> <button class="link-plain" data-action="sp-copy-redirect" style="color:var(--accent)">Копировать</button><br>
+      3. Отметь Web API и Web Playback SDK.<br>
+      4. В User Management добавь почту своего Spotify.<br>
+      5. Вставь Client ID из Basic Information. Client Secret не нужен.</div>
+    <div class="manual" style="display:flex;gap:8px;margin-top:8px"><input type="text" data-sp-client placeholder="Client ID (32 символа)" value="${esc(s.clientId || '')}" style="flex:1"><button class="btn" data-action="sp-save-id">Сохранить</button></div>
+    <div class="hint">Client ID и вход хранятся только на этом компьютере.</div>`}
+    <details><summary>Что-то не работает?</summary><div class="manual"><button class="btn" data-action="sp-debug">Показать журнал</button><pre class="hint" id="sp-log" style="white-space:pre-wrap;max-height:320px;overflow:auto"></pre></div></details>
+  </div>`;
+}
+
 function svcCard(svc) {
   const st = state.status[svc];
   const meta = SERVICES.find((x) => x.id === svc);
@@ -1261,6 +1299,7 @@ function renderSettingsSection(sec) {
       ${layout() === 'player' ? `<div class="pref-row"><span><b>Вкладка «Моя волна» в меню</b><span class="hint">В режиме «Плеер» волна живёт плиткой на главной. Можно вернуть её отдельной вкладкой.</span></span>
         <button class="switch ${state.settings.waveTab ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.waveTab}" aria-label="Вкладка «Моя волна» в меню" data-action="toggle-wavetab"><span></span></button></div>` : ''}
     </section>`;
+  else if (sec === 'svc:sp') body = spCard();
   else if (sec.startsWith('svc:')) body = svcCard(sec.slice(4));
   else if (sec === 'lastfm') body = `<section class="card" id="lastfm-card">${lastfmCardInner()}</section>`;
   else if (sec === 'discord') body = discordCardHtml();
@@ -1494,6 +1533,11 @@ const RENDER = { friends: () => friends.renderFriends(), user: () => friends.ren
 // ---------- Загрузка данных ----------
 async function loadStatus() {
   state.status = await api.auth.status().catch(() => ({ ya: null, yt: null, sc: null, vk: null }));
+  // Spotify — отдельно: вход со своим Client ID, свой экран в настройках
+  if (api.spotify) {
+    state.spotify = await api.spotify.status().catch(() => null);
+    state.status.sp = state.spotify && state.spotify.loggedIn ? state.spotify.account || { name: 'Spotify' } : null;
+  }
   renderAccounts();
 }
 function releasesHtml() {
@@ -1538,7 +1582,7 @@ let likedPromise = null;
 function loadLiked(force = false) {
   if (!likedPromise || force) {
     likedPromise = api.library.liked().then((r) => {
-      state.lib.counts = { ya: r.ya, yt: r.yt, sc: r.sc || 0, vk: r.vk || 0 };
+      state.lib.counts = { ya: r.ya, yt: r.yt, sc: r.sc || 0, vk: r.vk || 0, sp: r.sp || 0 };
       state.lib.liked = r.tracks;
       r.tracks.forEach((t) => player.liked.add(t.id));
       return r.tracks;
@@ -2613,6 +2657,43 @@ async function handleAction(el, e) {
     case 'vk-log':
       api.vkLog && api.vkLog();
       break;
+    case 'sp-save-id': {
+      const v = ($('[data-sp-client]') || {}).value || '';
+      if (!/^[0-9a-fA-F]{32}$/.test(v.trim())) {
+        toast('Client ID — 32 символа из Spotify Developer Dashboard', true);
+        break;
+      }
+      state.spotify = await api.spotify.setClientId(v.trim());
+      toast('Client ID сохранён — теперь «Войти»');
+      renderSettings();
+      break;
+    }
+    case 'sp-copy-redirect':
+      copyText((state.spotify && state.spotify.redirect) || '');
+      toast('Скопировано');
+      break;
+    case 'sp-login':
+      el.disabled = true;
+      toast('Открыл вход Spotify в браузере — подтверди доступ');
+      try {
+        state.spotify = await api.spotify.login();
+        toast('Spotify подключён');
+        api.spotify.prewarm().catch(() => {});
+      } catch (err) {
+        toast(err.message, true);
+      }
+      await afterAuthChange();
+      break;
+    case 'sp-logout':
+      state.spotify = await api.spotify.logout();
+      await afterAuthChange();
+      break;
+    case 'sp-debug': {
+      const log = await api.spotify.debug().catch((e) => e.message);
+      const pre = $('#sp-log');
+      if (pre) pre.textContent = log;
+      break;
+    }
     case 'yt-log':
       api.ytLog && api.ytLog();
       break;

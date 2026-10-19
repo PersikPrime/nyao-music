@@ -15,7 +15,7 @@ function artistsOf(t) {
  */
 export function arrangeSearch(res, filter = 'all', q = '') {
   if (!res) return { tracks: [], best: null, artists: [], albums: [] };
-  const lists = [res.ya || [], res.yt || [], res.sc || [], res.vk || []];
+  const lists = [res.sp || [], res.ya || [], res.yt || [], res.sc || [], res.vk || []];
   let tracks = [];
   for (let i = 0; i < Math.max(0, ...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) tracks.push(l[i]);
   if (filter !== 'all') tracks = tracks.filter((t) => t.source === filter);

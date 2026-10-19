@@ -1,7 +1,7 @@
 {
   "name": "nyao-music",
   "productName": "Nyao Music",
-  "version": "0.8.67",
+  "version": "0.8.68",
   "description": "Единый плеер для Яндекс Музыки и YouTube Music с общей «Моей волной»",
   "author": "Takko",
   "license": "UNLICENSED",
@@ -20,7 +20,7 @@
     "youtubei.js": "^18.1.0"
   },
   "devDependencies": {
-    "electron": "^44.7.0",
+    "electron": "git+https://github.com/castlabs/electron-releases.git#v44.5.1+wvcus",
     "electron-builder": "^26.0.0"
   },
   "build": {
@@ -64,6 +64,11 @@
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "Nyao Music"
     },
-    "artifactName": "NyaoMusic-${version}-${os}-${arch}.${ext}"
+    "artifactName": "NyaoMusic-${version}-${os}-${arch}.${ext}",
+    "electronVersion": "44.5.1+wvcus",
+    "electronDownload": {
+      "mirror": "https://github.com/castlabs/electron-releases/releases/download/v"
+    },
+    "afterPack": "build/evs-sign.cjs"
   }
 }

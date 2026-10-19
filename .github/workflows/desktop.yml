@@ -4,8 +4,8 @@ name: Desktop (Windows + macOS)
 
 on:
   push:
-    # nightly — экспериментальные сборки только для Android
-    branches-ignore: [nightly]
+    # все ветки, включая nightly: на nightly пробуем Electron от castlabs (Widevine для Spotify)
+    branches: ['**']
     paths: ['src/**', 'build/**', 'package.json', 'package-lock.json', 'version.json', '.github/workflows/desktop.yml', '.github/scripts/**']
   workflow_dispatch:
 
@@ -32,6 +32,27 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Electron от castlabs несёт Widevine; VMP-подпись — через castlabs EVS (учётка в секретах)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Вход в castlabs EVS
+        shell: bash
+        env:
+          EVS_ACCOUNT: ${{ secrets.NYAO_EVS_ACCOUNT }}
+          EVS_PASSWD: ${{ secrets.NYAO_EVS_PASSWD }}
+        run: |
+          python -m pip install --quiet --upgrade castlabs-evs
+          if [ -z "$EVS_ACCOUNT" ] || [ -z "$EVS_PASSWD" ]; then
+            echo "::warning::Нет секретов NYAO_EVS_ACCOUNT / NYAO_EVS_PASSWD — сборка без VMP-подписи, Spotify на ней может не играть"
+            exit 0
+          fi
+          if python -m castlabs_evs.account -n reauth -A "$EVS_ACCOUNT" -P "$EVS_PASSWD"; then
+            echo "NYAO_EVS_READY=1" >> "$GITHUB_ENV"
+            echo "PYTHON=python" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Вход в castlabs EVS не удался — сборка без VMP-подписи"
+          fi
       - name: Ключи Last.fm
         shell: bash
         env:

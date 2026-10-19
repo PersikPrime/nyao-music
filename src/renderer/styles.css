@@ -24,6 +24,7 @@
   --yt-bright: #ff453a;
   --sc: #ff5500;
   --vk: #0077ff;
+  --sp: #1ed760;
   --font: 'Onest', 'Segoe UI', system-ui, sans-serif;
   --display: 'Unbounded', 'Onest', sans-serif;
   --card-radius: 20px;
@@ -91,6 +92,8 @@ h2.sec { margin: 0; font-size: 20px; font-weight: 600; }
 .badge.sc.dim { background: #3a1e0c; color: #d08a5c; }
 .badge.vk { background: var(--vk); color: #fff; }
 .badge.vk.dim { background: #0a1e36; color: #6fa8e6; }
+.badge.sp { background: var(--sp); color: #000; }
+.badge.sp.dim { background: #0b2e1a; color: #7fe3a6; }
 .badge.mix { background: #2a2540; color: #e2daff; }
 .badge.ya.dim { background: #3a3410; color: #c9b44a; }
 .badge.yt.dim { background: #3a1414; color: #c97a74; }
@@ -441,7 +444,9 @@ details textarea, details input[type=text] { flex: 1; min-width: 0; background: 
 .dotsrc.sc { background: var(--sc); }
 .cover.sc-bg { background: #2a1408; }
 .dotsrc.vk { background: var(--vk); }
+.dotsrc.sp { background: var(--sp); }
 .cover.vk-bg { background: #0a1e36; }
+.cover.sp-bg { background: #0b2e1a; }
 .update-bar { height: 6px; border-radius: 3px; background: var(--s3); overflow: hidden; margin-top: 10px; }
 .update-bar span { display: block; height: 100%; background: var(--accent); transition: width .2s; }
 
@@ -793,6 +798,7 @@ body.fs-on .toast { z-index: 1000; }
 .st-src .b-yt { background: var(--yt-bright); }
 .st-src .b-sc { background: var(--sc); }
 .st-src .b-vk { background: var(--vk); }
+.st-src .b-sp { background: var(--sp); }
 
 /* ---------- Перенос плейлиста ---------- */
 .xf-targets { display: flex; flex-direction: column; gap: 8px; }
