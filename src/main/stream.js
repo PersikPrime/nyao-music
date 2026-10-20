@@ -176,7 +176,7 @@ export class StreamService {
 
   async check(url, headers) {
     try {
-      const res = await this.fetchers.yt(url, { headers: { ...headers, Range: 'bytes=0-1' } });
+      const res = await this.fetchers.yt(url, { headers: { ...headers, Range: 'bytes=0-1' }, signal: AbortSignal.timeout(6000) });
       if (res.body && res.body.cancel) res.body.cancel().catch(() => {});
       return res.status;
     } catch (e) {
@@ -198,7 +198,8 @@ export class StreamService {
     const provider = this.providers[source];
     if (!provider) throw new Error(`Неизвестный источник: ${source}`);
     const log = (msg) => console.log('[yt]', msg);
-    const exclude = this.failedClients.get(trackId) || [];
+    const failure = this.failedClients.get(trackId);
+    const exclude = failure && failure.until > Date.now() ? failure.clients : [];
     const job = (source === 'yt' ? provider.streamUrl(srcId, (u, h) => this.check(u, h), log, { exclude }) : provider.streamUrl(srcId))
       .then((r) => {
         const entry = { source, client: r.client, url: r.url, headers: r.headers || {}, expires: Date.now() + (r.ttl || 30 * 60_000), mime: r.mime, hls: !!r.hls, loudnessDb: Number.isFinite(r.loudnessDb) ? r.loudnessDb : null };
@@ -276,9 +277,10 @@ export class StreamService {
         this.cache.delete(trackId);
         if (entry.source === 'yt' && entry.client) {
           // этот клиент YouTube больше не пускают — для трека берём другой
-          const list = this.failedClients.get(trackId) || [];
-          this.failedClients.set(trackId, [...list, entry.client]);
-          if (this.providers.yt.reportBlocked) this.providers.yt.reportBlocked(entry.client);
+          const failure = this.failedClients.get(trackId);
+          const list = failure && failure.until > Date.now() ? failure.clients : [];
+          this.failedClients.set(trackId, { clients: [...new Set([...list, entry.client])], until: Date.now() + 10 * 60_000 });
+          if (this.providers.yt.reportBlocked) this.providers.yt.reportBlocked(entry.client, trackId.slice(3));
         }
         if (upstream.body && upstream.body.cancel) upstream.body.cancel().catch(() => {});
         continue;

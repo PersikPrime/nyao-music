@@ -50,6 +50,7 @@ class ScApi(private val prefs: Prefs) {
 
     @Volatile private var clientId: String? = null
     private var account: Account? = null
+    var onAccount: (String) -> Unit = {}
     private val raw = ConcurrentHashMap<String, JSONObject>()
 
     fun reset() {
@@ -75,7 +76,8 @@ class ScApi(private val prefs: Prefs) {
         throw ApiException("SoundCloud: не удалось получить client_id")
     }
 
-    private suspend fun request(method: String, path: String, query: Map<String, String> = emptyMap(), retry: Boolean = true): Any? {
+    private suspend fun request(method: String, path: String, query: Map<String, String> = emptyMap(), retry: Boolean = true, interactive: Boolean = false): Any? {
+        val token = prefs.scToken
         val base = if (path.startsWith("http")) path else API + path
         val url = base.toHttpUrl().newBuilder().apply {
             setQueryParameter("client_id", clientId())
@@ -87,7 +89,8 @@ class ScApi(private val prefs: Prefs) {
             .header("Accept", "application/json")
             .header("Origin", "https://soundcloud.com")
             .header("Referer", "https://soundcloud.com/")
-        prefs.scToken?.let { rb.header("Authorization", "OAuth $it") }
+        if (token != prefs.scToken) throw ApiException("Аккаунт SoundCloud изменился — повтори запрос")
+        token?.let { rb.header("Authorization", "OAuth $it") }
         if (method != "GET") {
             // Запись (лайки) проверяет защита DataDome: отправляем cookie из окна входа и его же User-Agent
             runCatching { android.webkit.CookieManager.getInstance().getCookie("https://soundcloud.com") }.getOrNull()?.let { rb.header("Cookie", it) }
@@ -96,13 +99,13 @@ class ScApi(private val prefs: Prefs) {
         val (code, text) = Net.call(rb.build())
         if ((code == 401 || code == 403) && retry && !loggedIn) {
             clientId(force = true)
-            return request(method, path, query, retry = false)
+            return request(method, path, query, retry = false, interactive = interactive)
         }
         if (code == 403 && text.contains("captcha-delivery.com")) {
             // ссылка на проверку DataDome — окно с ней откроется в приложении
             Regex("https://[a-z.]*captcha-delivery\\.com/[^\"\\s]+").find(text)?.value?.replace("\\u0026", "&")?.let {
                 // не чаще раза в полчаса, чтобы фоновые попытки не выдёргивали окно снова и снова
-                if (System.currentTimeMillis() - captchaShownAt > 30 * 60_000L) {
+                if (interactive && System.currentTimeMillis() - captchaShownAt > 30 * 60_000L) {
                     captchaShownAt = System.currentTimeMillis()
                     captcha.value = it
                 }
@@ -124,8 +127,10 @@ class ScApi(private val prefs: Prefs) {
 
     suspend fun account(): Account {
         account?.let { return it }
+        val token = prefs.scToken
         val me = obj("/me")
-        return Account(me.str("username") ?: "SoundCloud", uid = me.opt("id")?.toString()).also { account = it }
+        if (token != prefs.scToken) throw ApiException("Аккаунт SoundCloud изменился — повтори запрос")
+        return Account(me.str("username") ?: "SoundCloud", uid = me.opt("id")?.toString()).also { account = it; it.uid?.let(onAccount) }
     }
 
     private suspend fun uid(): String = account().uid ?: throw ApiException("SoundCloud не вернул id пользователя")
@@ -179,8 +184,11 @@ class ScApi(private val prefs: Prefs) {
 
     suspend fun related(srcId: String): List<Track> = remember(obj("/tracks/$srcId/related", mapOf("limit" to "30")).arr("collection").objects())
 
-    suspend fun like(srcId: String, on: Boolean) {
-        request(if (on) "PUT" else "DELETE", "/users/${uid()}/track_likes/$srcId")
+    suspend fun like(srcId: String, on: Boolean, interactive: Boolean = false) {
+        val token = prefs.scToken
+        val me = uid()
+        if (token != prefs.scToken) throw ApiException("Аккаунт SoundCloud изменился — повтори запрос")
+        request(if (on) "PUT" else "DELETE", "/users/$me/track_likes/$srcId", interactive = interactive)
     }
 
     /** Пул для «Моей волны»: «похожие» на случайные лайки */

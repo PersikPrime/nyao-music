@@ -1,3 +1,4 @@
+import { safeDiagnostic } from '../diagnostics.js';
 // Spotify (официальный путь): вход OAuth PKCE со своим Client ID, Web API для поиска, библиотеки и
 // управления воспроизведением на устройстве Nyao (Web Playback SDK в скрытом окне, см. spotify-engine.js).
 // Client Secret не нужен. Токены лежат только на этом компьютере (secrets, зашифрованы safeStorage).
@@ -85,7 +86,7 @@ export class SpotifyProvider {
 
   note(s) {
     const t = new Date().toTimeString().slice(0, 8);
-    this.log.push(`${t} ${String(s).slice(0, 300)}`);
+    this.log.push(`${t} ${safeDiagnostic(s).slice(0, 300)}`);
     if (this.log.length > 60) this.log.shift();
   }
   debugText() {

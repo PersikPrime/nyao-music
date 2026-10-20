@@ -69,6 +69,7 @@ class PlaybackService : MediaSessionService() {
     private var loadingMore = false
     private var lastId: String? = null
     private var lastPos = 0L
+    private var retryStartedAt = 0L
     private var retries = 0
     private var errorsInRow = 0
     private var spotify: org.nyao.music.spotify.SpotifySync? = null
@@ -195,6 +196,7 @@ class PlaybackService : MediaSessionService() {
             lastId = mediaItem?.mediaId
             lastPos = 0
             retries = 0
+            retryStartedAt = 0L
             val cur = mediaItem?.mediaId?.let { Repo.track(it) }
             if (wave && cur != null) scope.launch(Dispatchers.IO) { Repo.wave.feedback("trackStarted", cur, 0) }
             maybeMore()
@@ -350,13 +352,15 @@ class PlaybackService : MediaSessionService() {
         val http = generateSequence(error.cause) { it.cause }
             .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
             .firstOrNull()
-        Log.w("Nyao", "ошибка ${item.mediaId}: ${error.errorCodeName} ${http?.responseCode ?: ""} ${error.cause?.message}")
+        Log.w("Nyao", org.nyao.music.data.Diagnostics.safe("ошибка ${item.mediaId}: ${error.errorCodeName} ${http?.responseCode ?: ""} ${error.cause?.message}"))
         val api = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<org.nyao.music.data.ApiException>().firstOrNull()
         val code = http?.responseCode ?: api?.code ?: 0
         if (uri != null && (http != null || api != null)) Repo.forgetStream(uri)
         // 403 от googlevideo — берём ссылку у другого клиента; 404 от SoundCloud — берём трек заново.
         // Продолжаем с того же места.
-        if ((code == 403 || code == 410 || code == 404) && retries < 4) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (retryStartedAt == 0L) retryStartedAt = now
+        if ((code == 403 || code == 410 || code == 404) && retries < 4 && now - retryStartedAt < 30_000) {
             retries++
             val pos = player.currentPosition
             player.prepare()
@@ -367,8 +371,9 @@ class PlaybackService : MediaSessionService() {
         errorsInRow++
         val track = Repo.track(item.mediaId)
         val reason = generateSequence<Throwable>(error) { it.cause }.mapNotNull { it.message }.lastOrNull() ?: error.errorCodeName
-        PlaybackEvents.emit("Не играет «${track?.title ?: item.mediaId}»: $reason")
+        PlaybackEvents.emit("Не играет «${track?.title ?: item.mediaId}»: ${org.nyao.music.data.Diagnostics.safe(reason)}")
         if (errorsInRow >= 3) {
+            player.pause()
             PlaybackEvents.emit("Три трека подряд не загрузились — остановил воспроизведение")
             errorsInRow = 0
             return

@@ -26,7 +26,14 @@ object Match {
         return n.toDouble() / (a.size + b.size - n)
     }
 
+    fun recordingVersion(title: String): String {
+        val s = title.lowercase()
+        return listOf("live", "remix", "acoustic", "instrumental", "karaoke", "cover", "slowed", "sped up")
+            .filter { Regex("(?:^|[^a-z])" + it + "(?:$|[^a-z])").containsMatchIn(s) }.joinToString(",")
+    }
+
     fun similarity(src: Track, cand: Track): Double {
+        if (recordingVersion(src.title) != recordingVersion(cand.title)) return 0.0
         val st = norm(src.title)
         val ct = norm(cand.title)
         var title = if (st.isNotEmpty() && st == ct) 1.0 else jaccard(tokens(src.title), tokens(cand.title))
@@ -59,6 +66,7 @@ object Match {
         for (q in queries) {
             val list = runCatching { search(q) }.getOrDefault(emptyList())
             for (c in list.take(15)) {
+                if (!c.available) continue
                 val s = similarity(t, c)
                 if (best == null || s > best.second) best = c to s
             }

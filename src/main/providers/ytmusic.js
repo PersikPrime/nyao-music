@@ -511,22 +511,20 @@ export class YTMusicProvider {
 
   // Клиент, на котором googlevideo начал отвечать 403, отправляется «на скамейку» на 10 минут.
   // Если заблокированы все — пересоздаём анонимную сессию (новые visitor data).
-  reportBlocked(client) {
+  reportBlocked(client, videoId = '*') {
     if (!client) return;
-    this.blocked.set(client, Date.now() + 10 * 60_000);
-    const now = Date.now();
-    if (STREAM_CLIENTS.every((c) => (this.blocked.get(c) || 0) > now)) this.resetStreamSession();
+    this.blocked.set(videoId + ':' + client, Date.now() + 10 * 60_000);
   }
 
   resetStreamSession() {
     this.anon = null;
-    this.blocked.clear();
     this.sessionResets = (this.sessionResets || 0) + 1;
   }
 
-  clientOrder(exclude = []) {
+  clientOrder(exclude = [], videoId = '*') {
     const now = Date.now();
-    return STREAM_CLIENTS.filter((c) => !exclude.includes(c)).sort((a, b) => ((this.blocked.get(a) || 0) > now) - ((this.blocked.get(b) || 0) > now));
+    for (const [key, until] of this.blocked) if (until <= now) this.blocked.delete(key);
+    return STREAM_CLIENTS.filter(c => !exclude.includes(c) && !(this.blocked.get(videoId + ':' + c) > now) && !(this.blocked.get('*:' + c) > now));
   }
 
   // Прямая ссылка на аудиопоток.
@@ -534,20 +532,29 @@ export class YTMusicProvider {
   // exclude — клиенты, которые для этого трека уже отдали 403.
   async streamUrl(videoId, check, log = () => {}, { exclude = [] } = {}) {
     const errors = [];
+    const deadline = Date.now() + 25_000;
+    const bounded = async fn => {
+      const remaining = Math.min(6000, deadline - Date.now());
+      if (remaining <= 0) throw new Error('YouTube не ответил вовремя');
+      let timer;
+      try { return await Promise.race([Promise.resolve().then(fn), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('YouTube не ответил вовремя')), remaining); })]); }
+      finally { clearTimeout(timer); }
+    };
     for (let round = 0; round < 2; round++) {
-      const yt = await this.streamClient();
-      for (const client of this.clientOrder(exclude)) {
+      const yt = await bounded(() => this.streamClient());
+      for (const client of this.clientOrder(exclude, videoId)) {
         try {
-          const info = await yt.getBasicInfo(videoId, { client });
+          if (Date.now() >= deadline) break;
+          const info = await bounded(() => yt.getBasicInfo(videoId, { client }));
           const ps = info.playability_status;
           if (ps && ps.status && ps.status !== 'OK') throw new Error(`playability ${ps.status}${ps.reason ? ': ' + ps.reason : ''}`);
           const format = info.chooseFormat({ type: 'audio', quality: 'best', format: 'any' });
-          const url = await format.decipher(yt.session.player);
+          const url = await bounded(() => format.decipher(yt.session.player));
           if (!url) throw new Error('у формата нет прямой ссылки (вероятно, только SABR)');
           const headers = streamHeaders(client);
           if (check) {
-            const status = await check(url, headers);
-            if (status === 403) this.reportBlocked(client);
+            const status = await bounded(() => check(url, headers));
+            if (status === 403) this.reportBlocked(client, videoId);
             if (status !== 200 && status !== 206) throw new Error(`проверка ссылки: HTTP ${status || 'нет ответа'}`);
           }
           const expire = Number(new URL(url).searchParams.get('expire')) * 1000;
@@ -566,7 +573,6 @@ export class YTMusicProvider {
       if (round === 0) {
         log(`${videoId}: все клиенты отказали, пересоздаю сессию`);
         this.resetStreamSession();
-        exclude = [];
       }
     }
     throw new Error('YouTube не отдал поток. ' + errors.slice(-4).join(' | '));

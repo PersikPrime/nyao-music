@@ -206,6 +206,7 @@ export class Player extends EventTarget {
     this.audio.play().catch(() => {});
     this.startedAt = Date.now();
     if (this.mode === 'wave') api.wave.feedback('trackStarted', t, 0).catch(() => {});
+    if (this.mode === 'radio') api.radio.feedback('trackStarted', t, 0).catch(() => {});
     const nxt = this.queue[this.index + 1];
     if (nxt) api.prepare(nxt.id).catch(() => {});
     this.updateSession();
@@ -286,6 +287,7 @@ export class Player extends EventTarget {
     const skip = skipped && played < Math.min(30, dur * 0.5);
     if (played >= 5 || skip) api.cloud && api.cloud.play({ track: t, listened: played, skipped: skip }).catch(() => {});
     if (this.mode === 'wave') api.wave.feedback(skipped ? 'skip' : 'trackFinished', t, played).catch(() => {});
+    if (this.mode === 'radio') api.radio.feedback(skipped ? 'skip' : 'trackFinished', t, played).catch(() => {});
   }
 
   /**
@@ -409,6 +411,7 @@ export class Player extends EventTarget {
     const t = this.current;
     if (!t) return;
     if (this.mode === 'wave') api.wave.feedback('dislike', t, Math.round(this.audio.currentTime)).catch(() => {});
+    if (this.mode === 'radio') api.radio.feedback('dislike', t, Math.round(this.audio.currentTime)).catch(() => {});
     this.next(true);
   }
 

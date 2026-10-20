@@ -20,6 +20,7 @@ export class SpotifySync {
     this.status = { state: 'idle' };
     this.modesSet = false;
     this.starting = 0;
+    this.pendingSince = 0;
   }
 
   start() {
@@ -37,7 +38,7 @@ export class SpotifySync {
       if ('snapshot' in st) this.snap = st.snapshot;
       if (st.error && isSp(p.current)) {
         this.msg(st.error.message);
-        if (['account', 'init', 'auth'].includes(st.error.kind)) this.stopSp();
+        if (['account', 'init', 'auth', 'engine', 'playback'].includes(st.error.kind)) this.stopSp();
       }
     });
     setInterval(() => {
@@ -124,6 +125,7 @@ export class SpotifySync {
     }
     if (this.loaded === id) {
       if (this.confirmed) this.command(() => this.api.resume());
+      else this.pendingSince = Date.now();
       return;
     }
     const prev = this.loaded;
@@ -139,6 +141,7 @@ export class SpotifySync {
     if (prev && this.confirmed && pi >= 0 && this.spList[pi + 1] === id && this.audio.currentTime < 1.5) {
       this.loaded = id;
       this.confirmed = false;
+      this.pendingSince = Date.now();
       this.startPos = 0;
       if (auto) this.autoWaitUntil = Date.now() + 3000; // доиграл сам — Spotify перейдёт без команды
       else this.command(() => this.api.next());
@@ -147,6 +150,7 @@ export class SpotifySync {
     this.autoWaitUntil = 0;
     this.loaded = id;
     this.confirmed = false;
+    this.pendingSince = Date.now();
     this.startPos = this.audio.currentTime * 1000;
     this.spList = this.upcoming();
     if (!this.spList.length) this.spList = [id];
@@ -161,7 +165,7 @@ export class SpotifySync {
       if (token !== this.starting || this.loaded !== id) return;
       this.loaded = null;
       this.msg(e.message || 'Spotify не включил трек');
-      this.skip();
+      this.stopSp();
     });
   }
 
@@ -176,6 +180,11 @@ export class SpotifySync {
       return;
     }
     const playing = !this.audio.paused;
+    if (!this.confirmed && playing && now - this.pendingSince > 45_000) {
+      this.msg('Spotify не подтвердил запуск — нажми «играть», чтобы повторить');
+      this.stopSp();
+      return;
+    }
     if (this.isTrack(snap, id)) {
       if (!this.confirmed && !snap.paused) {
         this.confirmed = true;
@@ -229,6 +238,7 @@ export class SpotifySync {
     this.loaded = null;
     this.confirmed = false;
     this.starting++;
-    this.skip();
+    this.audio.pause();
+    this.command(() => this.api.pause());
   }
 }

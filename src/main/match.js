@@ -39,7 +39,14 @@ function jaccard(a, b) {
  * Насколько cand похож на src: 0…1.
  * YouTube часто кладёт «Исполнитель - Название» в название ролика, а «канал» — в исполнителя: это тоже учитываем.
  */
+export function recordingVersion(title) {
+  const s = String(title || '').toLowerCase();
+  return ['live', 'remix', 'acoustic', 'instrumental', 'karaoke', 'cover', 'slowed', 'sped up']
+    .filter(word => new RegExp('(?:^|[^a-z])' + word + '(?:$|[^a-z])').test(s)).join(',');
+}
+
 export function similarity(src, cand) {
+  if (recordingVersion(src.title) !== recordingVersion(cand.title)) return 0;
   const st = norm(src.title);
   const ct = norm(cand.title);
   let title = st && st === ct ? 1 : jaccard(tokens(src.title), tokens(cand.title));
@@ -83,6 +90,7 @@ export async function findMatch(track, search, { minScore = 0.62 } = {}) {
       list = [];
     }
     for (const c of list.slice(0, 15)) {
+      if (c.available === false || c.preview) continue;
       const score = similarity(track, c);
       if (!best || score > best.score) best = { track: c, score };
     }

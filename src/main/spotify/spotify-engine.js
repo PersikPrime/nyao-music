@@ -1,3 +1,4 @@
+import { safeDiagnostic } from '../diagnostics.js';
 // Устройство Spotify Connect внутри Nyao на ПК: официальный Web Playback SDK в скрытом окне.
 // Звук играет сам SDK через Widevine (Electron от castlabs), поэтому прослушивания засчитываются в Spotify.
 // Тот же движок, что на Android (SpotifyEngine.kt), только окно вместо WebView.
@@ -29,10 +30,12 @@ export class SpotifyEngine {
     this.readyWaiters = [];
     this.log = [];
     this.wired = false;
+    this.startPromise = null;
+    this.generation = 0;
   }
 
   note(s) {
-    this.log.push(`${new Date().toTimeString().slice(0, 8)} ${String(s).slice(0, 400)}`);
+    this.log.push(`${new Date().toTimeString().slice(0, 8)} ${safeDiagnostic(s).slice(0, 400)}`);
     if (this.log.length > 80) this.log.shift();
   }
   debugText() {
@@ -129,11 +132,18 @@ export class SpotifyEngine {
     return !!this.win && !this.win.isDestroyed();
   }
 
-  async start() {
-    if (this.started) return;
+  start() {
+    if (this.started) return Promise.resolve();
+    if (!this.startPromise) this.startPromise = this.open().finally(() => { this.startPromise = null; });
+    return this.startPromise;
+  }
+
+  async open() {
+    const generation = this.generation;
     this.wire();
     this.setStatus({ state: 'loading' });
     const wv = await this.widevine;
+    if (generation !== this.generation) return;
     this.note(`Widevine: ${wv.ok ? 'готов ' + JSON.stringify(wv.status || {}) : 'нет — ' + wv.reason}`);
     if (!wv.ok) {
       this.fail('init', `Widevine не готов: ${wv.reason}`);
@@ -171,12 +181,14 @@ export class SpotifyEngine {
   }
 
   release() {
+    this.generation++;
+    for (const waiter of this.readyWaiters.splice(0)) waiter({ state: 'failed', message: 'Плеер Spotify остановлен' });
     if (this.started) {
       this.exec("window.__engine && window.__engine.call(0, 'disconnect', '[]')");
       this.win.destroy();
     }
     this.win = null;
-    for (const c of this.calls.values()) c.reject(new Error('Плеер Spotify остановлен'));
+    for (const c of this.calls.values()) { clearTimeout(c.timer); c.reject(new Error('Плеер Spotify остановлен')); }
     this.calls.clear();
     this.snapshot = null;
     this.setStatus({ state: 'idle' });
@@ -190,11 +202,21 @@ export class SpotifyEngine {
   async awaitReady(timeoutMs = 30_000) {
     if (this.status.state === 'failed') this.release();
     if (this.status.state === 'ready') return this.status.deviceId;
-    const p = new Promise((resolve) => this.readyWaiters.push(resolve));
-    await this.start();
-    const s = await Promise.race([p, new Promise((r) => setTimeout(() => r({ state: 'failed', message: 'Плеер Spotify не ответил' }), timeoutMs))]);
-    if (s.state !== 'ready') throw new Error(s.message || 'Плеер Spotify не готов');
-    return s.deviceId;
+    let timer, waiter;
+    const waiting = new Promise(resolve => {
+      waiter = resolve;
+      this.readyWaiters.push(waiter);
+      timer = setTimeout(() => resolve({ state: 'failed', message: 'Плеер Spotify не ответил — попробуй ещё раз' }), timeoutMs);
+    });
+    this.start().catch(() => waiter({ state: 'failed', message: 'Не удалось запустить плеер Spotify' }));
+    try {
+      const state = await waiting;
+      if (state.state !== 'ready') throw new Error(state.message || 'Плеер Spotify не готов');
+      return state.deviceId;
+    } finally {
+      clearTimeout(timer);
+      this.readyWaiters = this.readyWaiters.filter(w => w !== waiter);
+    }
   }
 
   call(method, ...args) {

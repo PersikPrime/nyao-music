@@ -229,3 +229,30 @@ export function vkSessionFetch(url, opts = {}) {
   ses.setUserAgent(FIREFOX_UA);
   return ses.fetch(url, opts);
 }
+
+let vkRefreshing = null;
+/** Let VK renew its own cookies. A loaded page alone is not proof of authentication. */
+export function refreshVkSession(uid, base) {
+  if (vkRefreshing) return vkRefreshing;
+  if (!/^https:\/\/vk\.(com|ru)$/.test(base) || !Number(uid)) return Promise.resolve(null);
+  vkRefreshing = new Promise(resolve => {
+    const w = new BrowserWindow({ show: false, webPreferences: { partition: VK_PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    w.webContents.setUserAgent(FIREFOX_UA);
+    session.fromPartition(VK_PARTITION).setUserAgent(FIREFOX_UA);
+    w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    let done = false;
+    const finish = result => { if (done) return; done = true; clearTimeout(timer); if (!w.isDestroyed()) w.destroy(); resolve(result); };
+    const timer = setTimeout(() => finish(null), 25_000);
+    w.webContents.on('did-finish-load', async () => {
+      try {
+        const state = await w.webContents.executeJavaScript('({ uid: Number(window.vk?.id) || 0, url: location.href })');
+        if (state.uid === Number(uid)) finish(true);
+        else { const u = new URL(state.url); if (u.pathname.startsWith('/login') || u.pathname.startsWith('/join') || /^(id|login)\.vk\./.test(u.hostname)) finish(false); }
+      } catch { /* Wait for a later navigation or the deadline. */ }
+    });
+    w.webContents.on('did-fail-load', (_e, _code, _desc, _url, main) => { if (main) finish(null); });
+    w.on('closed', () => finish(null));
+    w.loadURL(base + '/audios' + Number(uid)).catch(() => finish(null));
+  }).finally(() => { vkRefreshing = null; });
+  return vkRefreshing;
+}

@@ -225,8 +225,9 @@ fun NyaoRoot() {
             org.nyao.music.ui.screens.ScCaptchaScreen(url) { ok ->
                 Repo.sc.captcha.value = null
                 if (ok) scope.launch {
-                    runCatching { Repo.flushScLikes() }
-                    PlaybackEvents.emit("Проверка пройдена — лайки SoundCloud отправлены")
+                    runCatching { Repo.flushScLikes() }.onSuccess {
+                        PlaybackEvents.emit(if (it.left == 0) "SoundCloud: все изменения отправлены" else "SoundCloud пока не принял изменения — они сохранены")
+                    }
                 }
             }
         }

@@ -42,12 +42,13 @@ export class CaptchaError extends Error {
 }
 
 export class SoundCloudProvider {
-  constructor({ token = null, fetch = globalThis.fetch, writeFetch = null } = {}) {
+  constructor({ token = null, fetch = globalThis.fetch, writeFetch = null, onAccount = () => {} } = {}) {
     this.token = token;
     this.fetch = fetch;
     // Запросы на запись (лайки) идут через сессию браузера, где ты входил: там cookie защиты DataDome
     // и отпечаток настоящего Chromium. Без них SoundCloud отвечает 403 и капчей.
     this.writeFetch = writeFetch;
+    this.onAccount = onAccount;
     this.clientId = null;
     this.account = null;
     this.raw = new Map(); // id → исходный объект трека (нужен для потока)
@@ -83,7 +84,9 @@ export class SoundCloudProvider {
   }
 
   async request(method, path, { query = {}, retry = true } = {}) {
+    const token = this.token;
     const clientId = await this.getClientId();
+    if (token !== this.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
     const url = new URL(path.startsWith('http') ? path : API + path);
     url.searchParams.set('client_id', clientId);
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
@@ -91,7 +94,7 @@ export class SoundCloudProvider {
     const headers = { Accept: 'application/json', Origin: 'https://soundcloud.com', Referer: 'https://soundcloud.com/' };
     if (!write) headers['User-Agent'] = UA; // в сессии браузера свой User-Agent — не подменяем его
     if (this.token) headers.Authorization = `OAuth ${this.token}`;
-    const res = await (write ? this.writeFetch : this.fetch)(url.toString(), { method, headers });
+    const res = await (write ? this.writeFetch : this.fetch)(url.toString(), { method, headers, signal: AbortSignal.timeout(12_000) });
     if ((res.status === 401 || res.status === 403) && retry && !this.token) {
       // client_id протух — берём свежий и повторяем
       await this.getClientId(true);
@@ -102,7 +105,7 @@ export class SoundCloudProvider {
       const m = text.match(/https:\/\/[a-z.]*captcha-delivery\.com\/[^"\s]+/);
       if (m) throw new CaptchaError(m[0].replace(/\\u0026/g, '&'));
     }
-    if (!res.ok) throw new Error(`SoundCloud ${method} ${url.pathname}: ${res.status} ${text.slice(0, 160)}`);
+    if (!res.ok) throw Object.assign(new Error(`SoundCloud ${method}: HTTP ${res.status}`), { status: res.status });
     return text ? JSON.parse(text) : null;
   }
 
@@ -113,8 +116,11 @@ export class SoundCloudProvider {
 
   async getAccount() {
     if (this.account) return this.account;
+    const token = this.token;
     const me = await this.request('GET', '/me');
+    if (token !== this.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
     this.account = { uid: me.id, name: me.username || me.full_name || 'SoundCloud', plus: /go/i.test((me.creator_subscriptions || []).map((s) => s.product && s.product.id).join(',')) };
+    this.onAccount(me.id);
     return this.account;
   }
 
@@ -189,7 +195,9 @@ export class SoundCloudProvider {
   }
 
   async like(track, on = true) {
+    const token = this.token;
     const { uid } = await this.getAccount();
+    if (token !== this.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
     await this.request(on ? 'PUT' : 'DELETE', `/users/${uid}/track_likes/${track.srcId}`);
   }
 

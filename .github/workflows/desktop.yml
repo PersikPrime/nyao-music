@@ -32,9 +32,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Проверка версии
+        shell: bash
+        run: |
+          node scripts/bump.mjs --sync
+          git diff --exit-code -- version.json package.json
       - name: Проверка порядка VMP-подписи
         run: node --test build/evs-sign.test.cjs
-      - name: Проверка общей волны
+      - name: Проверка волны и восстановления сервисов
         run: node --test test/*.test.js
       # Electron от castlabs несёт Widevine; VMP-подпись — через castlabs EVS (учётка в секретах)
       - uses: actions/setup-python@v5

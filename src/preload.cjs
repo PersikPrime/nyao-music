@@ -24,7 +24,8 @@ contextBridge.exposeInMainWorld('nyao', {
   onControl: (cb) => ipcRenderer.on('control', (_e, cmd) => cb(cmd)),
   radio: {
     start: (track) => call('radio:start', track),
-    more: (ids) => call('radio:more', ids)
+    more: (ids) => call('radio:more', ids),
+    feedback: (type, track, played) => call('radio:feedback', type, track, played)
   },
   lastfm: {
     status: () => call('lastfm:status'),

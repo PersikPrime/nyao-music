@@ -188,6 +188,10 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putBoolean("favImportedYa", v).apply()
 
     /** Отложенные лайки SoundCloud: "id:1" (поставить) или "id:0" (снять) */
+    var scIdentity: String?
+        get() = sp.getString("scIdentity", null)
+        set(v) = sp.edit().putString("scIdentity", v).apply()
+
     var scPendingLikes: Set<String>
         get() = sp.getStringSet("scPending", emptySet()) ?: emptySet()
         set(v) = sp.edit().putStringSet("scPending", v).apply()

@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { PendingLikes } from './pending-likes.js';
+import { safeDiagnostic } from './diagnostics.js';
 import { fileURLToPath } from 'node:url';
 import { settings, secrets } from './store.js';
 import { YandexProvider } from './providers/yandex.js';
@@ -27,7 +29,7 @@ import { transferPlaylist, TARGETS } from './transfer.js';
 import { findMatch } from './match.js';
 import { mergeArtists } from '../renderer/search.js';
 import os from 'node:os';
-import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch } from './auth.js';
+import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch, refreshVkSession } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(__dirname, '..', 'renderer');
@@ -167,7 +169,7 @@ function ytLog(op, err, meta = {}) {
     const lines = [`${new Date().toISOString()} [${op}] v${readVersion().name}.${readVersion().build} ${JSON.stringify(rest)}`];
     if (err) lines.push('  ' + String((err && err.stack) || err).split('\n').slice(0, 10).join('\n  '));
     if (response) lines.push('  shape: ' + JSON.stringify(shapeOf(response)).slice(0, 60_000));
-    fs.appendFileSync(file, lines.join('\n') + '\n');
+    fs.appendFileSync(file, safeDiagnostic(lines.join('\n')) + '\n');
     if (err) console.warn('[yt]', op, err && err.message);
   } catch {}
 }
@@ -178,7 +180,11 @@ function initProviders() {
   // по которым googlevideo проверяет ссылку
   const nodeFetch = globalThis.fetch.bind(globalThis);
   yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch, log: ytLog });
-  sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch });
+  sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch, onAccount: uid => {
+    const key = crypto.createHash('sha256').update(sc.token).digest('hex');
+    writePending(readPending().map(x => x.account === key ? { ...x, account: 'uid:' + uid } : x));
+    secrets.set('scIdentity', { key, uid: String(uid) });
+  } });
   // VK Музыка (dev): всё через сессию окна входа VK; сырые ответы при сбоях — в vk-debug.log
   const vkLog = path.join(app.getPath('userData'), 'vk-debug.log');
   vk = new VKProvider({
@@ -186,9 +192,10 @@ function initProviders() {
     // id и домен (vk.com / vk.ru) запоминаем при входе — это не токен, сама сессия живёт в cookie окна входа
     getUserId: async () => Number(secrets.get('vkUid')) || null,
     getBase: () => secrets.get('vkOrigin') || 'https://vk.com',
+    refreshSession: (uid, base) => refreshVkSession(uid, base),
     debug: (msg) => {
       try {
-        fs.appendFileSync(vkLog, `[${new Date().toISOString()}] ${msg}\n\n`);
+        fs.appendFileSync(vkLog, `[${new Date().toISOString()}] ${safeDiagnostic(msg)}\n\n`);
       } catch {
         // лог не критичен
       }
@@ -273,44 +280,31 @@ function initProviders() {
 const pendingFile = () => path.join(app.getPath('userData'), 'sc-pending-likes.json');
 function readPending() {
   try {
-    return JSON.parse(fs.readFileSync(pendingFile(), 'utf8'));
+    const list = JSON.parse(fs.readFileSync(pendingFile(), 'utf8'));
+    return Array.isArray(list) ? list : [];
   } catch {
     return [];
   }
 }
 function writePending(list) {
-  fs.writeFileSync(pendingFile(), JSON.stringify(list, null, 2));
+  fs.writeFileSync(pendingFile() + '.tmp', JSON.stringify(list, null, 2));
+  fs.renameSync(pendingFile() + '.tmp', pendingFile());
 }
-function queueScLike(track, on) {
-  const list = readPending().filter((x) => x.srcId !== track.srcId);
-  list.push({ srcId: track.srcId, title: track.title, on, at: Date.now() });
-  writePending(list);
-}
-let flushing = false;
-/** Пытается дослать отложенные лайки. Капчу здесь не показываем — только в ответ на действие пользователя */
+const scAccountKey = () => {
+  if (!sc?.token) return null;
+  const key = crypto.createHash('sha256').update(sc.token).digest('hex');
+  const identity = secrets.get('scIdentity');
+  return identity?.key === key ? 'uid:' + identity.uid : key;
+};
+const scLikes = new PendingLikes({
+  read: readPending, write: writePending, account: scAccountKey,
+  send: item => sc.like({ srcId: item.srcId }, item.on)
+});
 async function flushScLikes() {
-  if (flushing || !sc || !sc.loggedIn) return;
-  const list = readPending();
-  if (!list.length) return;
-  flushing = true;
-  const left = [];
-  for (let i = 0; i < list.length; i++) {
-    try {
-      await sc.like({ srcId: list[i].srcId }, list[i].on);
-    } catch (e) {
-      if (e.captcha) {
-        left.push(...list.slice(i)); // защита всё ещё злится — остальное даже не пробуем
-        break;
-      }
-      left.push(list[i]);
-    }
-  }
-  // за время отправки могли добавиться новые лайки — не теряем их
-  const added = readPending().filter((x) => !list.some((y) => y.srcId === x.srcId && y.at === x.at));
-  writePending([...left.filter((x) => !added.some((y) => y.srcId === x.srcId)), ...added]);
-  const done = list.length - left.length;
-  flushing = false;
-  if (done && win && !win.isDestroyed()) win.webContents.send('sc:pending', { sent: done, left: left.length });
+  if (!sc?.loggedIn) return { sent: 0, left: 0 };
+  const result = await scLikes.flush();
+  if (result.sent && win && !win.isDestroyed()) win.webContents.send('sc:pending', { sent: result.sent, left: result.left });
+  return { sent: result.sent, left: result.left };
 }
 
 // ---------- Мои миксы: локальные плейлисты из треков обоих сервисов ----------
@@ -363,7 +357,7 @@ async function safe(promise, fallback) {
   try {
     return await promise;
   } catch (e) {
-    console.warn('[nyao]', e.message);
+    console.warn('[nyao]', safeDiagnostic(e.message));
     return fallback;
   }
 }
@@ -373,8 +367,8 @@ function handle(channel, fn) {
     try {
       return { ok: true, data: await fn(...args) };
     } catch (e) {
-      console.error(`[${channel}]`, e);
-      return { ok: false, error: e.message || String(e) };
+      console.error(`[${channel}]`, safeDiagnostic(e.message));
+      return { ok: false, error: safeDiagnostic(e.message || String(e)) };
     }
   });
 }
@@ -384,28 +378,15 @@ function handle(channel, fn) {
  * если всё равно не вышло, ставим лайк в очередь (в Nyao он уже стоит).
  */
 async function likeSoundCloud(track, on) {
-  try {
-    await sc.like(track, on);
-    flushScLikes();
-    return on;
-  } catch (e) {
-    if (!e.captcha) {
-      queueScLike(track, on);
-      return { on, pending: true, reason: e.message };
-    }
-    const solved = await solveScCaptcha(win, e.captcha);
-    if (solved) {
-      try {
-        await sc.like(track, on);
-        flushScLikes();
-        return on;
-      } catch {
-        // упадём в очередь ниже
-      }
-    }
-    queueScLike(track, on);
-    return { on, pending: true, reason: solved ? 'SoundCloud всё ещё не пускает' : 'проверку не прошли' };
+  const token = sc.token;
+  scLikes.enqueue(track, on);
+  let result = await scLikes.flush();
+  if (result.error?.captcha && token === sc.token) {
+    const solved = await solveScCaptcha(win, result.error.captcha);
+    if (solved && token === sc.token) result = await scLikes.flush();
   }
+  const pending = scLikes.list().some(x => x.srcId === String(track.srcId));
+  return pending ? { on, pending: true, reason: result.error?.captcha ? 'SoundCloud ждёт проверки' : 'SoundCloud пока не принял изменение — повторю позже' } : on;
 }
 
 function registerIpc() {
@@ -469,7 +450,7 @@ function registerIpc() {
   });
   handle('rpc:update', (info) => rpc.update(info));
   handle('rpc:status', () => rpc.status);
-  handle('sc:pending', () => readPending());
+  handle('sc:pending', () => scLikes.list());
   handle('yt:openLog', () => {
     const file = path.join(app.getPath('userData'), 'yt-debug.log');
     if (!fs.existsSync(file)) fs.writeFileSync(file, 'Сбоев YouTube пока не было.\n');
@@ -515,6 +496,7 @@ function registerIpc() {
   });
   handle('radio:start', (track) => radio.start(track));
   handle('radio:more', (ids) => radio.more(ids));
+  handle('radio:feedback', (type, track, played) => radio.feedback(type, track, played));
   handle('lastfm:status', () => lastfm.status());
   handle('lastfm:connect', () => lastfm.connect());
   handle('lastfm:cancel', () => lastfm.cancel());
@@ -555,10 +537,14 @@ function registerIpc() {
   const usable = (s) => up(s) && (s === 'yt' || s === 'sc' || (s === 'ya' && ya.loggedIn) || (s === 'vk' && vk.loggedIn) || (s === 'sp' && spOn()));
   handle('match:playable', async (track) => {
     if (!track) return null;
-    if (usable(track.source)) return track;
+    if (usable(track.source)) {
+      if (track.source !== 'sp') return track;
+      const account = await spSafe(sp.getAccount(), null);
+      if (account?.premium === true) return track;
+    }
     const order = ['ya', 'vk', 'yt', 'sc'].filter(usable);
     for (const s of order) {
-      const m = await findMatch(track, (q) => providers()[s].search(q));
+      const m = await findMatch(track, (q) => providers()[s].search(q), { minScore: 0.85 });
       if (m) return m.track;
     }
     return null;

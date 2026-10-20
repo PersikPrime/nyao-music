@@ -32,6 +32,7 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
     /** Spotify уже сообщил, что играет наш трек */
     private var confirmed = false
     private var lastCommand = 0L
+    private var pendingSince = 0L
     private var starting: Job? = null
     private var focusHandled = true
     /** Треки, отданные Spotify одним списком: текущий и идущие следом треки Spotify — он подгружает их заранее */
@@ -55,7 +56,7 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
             engine.errors.collect { (kind, msg) ->
                 if (!isSp(player.currentMediaItem)) return@collect
                 PlaybackEvents.emit(msg)
-                if (kind == "account" || kind == "init" || kind == "auth") stopSp()
+                if (kind in setOf("account", "init", "auth", "engine", "playback")) stopSp()
             }
         }
         // раз в полсекунды сверяем позицию и следим, чтобы Spotify не играл, когда не должен
@@ -127,12 +128,12 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
             return
         }
         if (loaded == id) {
-            if (confirmed) command { engine.resume() }
+            if (confirmed) command { engine.resume() } else pendingSince = SystemClock.elapsedRealtime()
             return
         }
         if (!Spotify.loggedIn) {
             PlaybackEvents.emit("Чтобы играли треки Spotify, войди в Spotify в настройках")
-            skip()
+            stopSp()
             return
         }
         val prev = loaded
@@ -148,6 +149,7 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
         if (prev != null && confirmed && pi >= 0 && spList.getOrNull(pi + 1) == id && player.currentPosition < 1500) {
             loaded = id
             confirmed = false
+            pendingSince = SystemClock.elapsedRealtime()
             startPos = 0
             if (lastReason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                 // предыдущий доиграл: Spotify перейдёт сам через мгновение, команда «дальше» пропустила бы лишний трек
@@ -160,6 +162,7 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
         autoWaitUntil = 0
         loaded = id
         confirmed = false
+        pendingSince = SystemClock.elapsedRealtime()
         starting?.cancel()
         val from = player.currentPosition
         startPos = from
@@ -178,7 +181,7 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
                 if (loaded != id) return@launch
                 loaded = null
                 PlaybackEvents.emit(e.message ?: "Spotify не включил трек")
-                skip()
+                stopSp()
             }
         }
     }
@@ -191,6 +194,11 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
         if (!isSp(item) || id == null || id != idOf(item)) {
             // в Nyao сейчас не трек Spotify, а Spotify играет (например, догрузился уже пропущенный) — глушим
             if (engine.started && snap != null && !snap.paused && now - lastCommand > 800) command { engine.pause() }
+            return
+        }
+        if (!confirmed && player.playWhenReady && now - pendingSince > 45_000) {
+            PlaybackEvents.emit("Spotify не подтвердил запуск — нажми «играть», чтобы повторить")
+            stopSp()
             return
         }
         if (snap != null && snap.isTrack(id)) {
@@ -267,7 +275,8 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
         loaded = null
         confirmed = false
         starting?.cancel()
-        skip()
+        player.pause()
+        command { engine.pause() }
     }
 
     private fun setFocusHandling(on: Boolean) {

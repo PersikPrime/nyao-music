@@ -64,6 +64,7 @@ jobs:
 
       # Релиз с APK: тег v0.2.17 и т. д. Если в релизе уже есть APK этой сборки — он заменяется
       - name: Релиз
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/nightly'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

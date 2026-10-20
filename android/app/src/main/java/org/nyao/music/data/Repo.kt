@@ -75,7 +75,13 @@ object Repo {
         ya = YandexApi(prefs)
         yt = YtMusicApi(prefs, context.applicationContext.filesDir)
         ytStreams = YtStreams(yt)
-        sc = ScApi(prefs)
+        sc = ScApi(prefs).also { api -> api.onAccount = { uid ->
+            prefs.scToken?.let { token ->
+                val key = java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).hex()
+                scLikes.rebind(key, "uid:$uid")
+                prefs.scIdentity = "$key|$uid"
+            }
+        } }
         vk = VkApi(prefs).also { it.appContext = context.applicationContext }
         // сессия vk.com живёт, пока сайт сам обновляет cookie — продлеваем её тихо раз в 12 часов
         if (vk.loggedIn && System.currentTimeMillis() - prefs.vkRefreshedAt > 12 * 3600_000L) {
@@ -404,9 +410,12 @@ object Repo {
 
     /** Трек из чужого сервиса → тот, что можно включить здесь (свой сервис или найденный похожий) */
     suspend fun playable(t: Track): Track? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        if (usable(t.source)) return@withContext t.also { rememberTrack(it) }
+        if (usable(t.source)) {
+            val direct = t.source != SOURCE_SP || runCatching { sp.account().plus == true }.getOrDefault(false)
+            if (direct) return@withContext t.also { rememberTrack(it) }
+        }
         for (s in listOf(SOURCE_YA, SOURCE_VK, SOURCE_YT, SOURCE_SC).filter { usable(it) }) {
-            Match.find(t) { q -> searchIn(s, q) }?.let { rememberTrack(it); return@withContext it }
+            Match.find(t, minScore = 0.85) { q -> searchIn(s, q) }?.let { rememberTrack(it); return@withContext it }
         }
         null
     }
@@ -454,19 +463,30 @@ object Repo {
     suspend fun waveStart(): List<Track> = remember(wave.start())
     suspend fun waveMore(queueIds: List<String>): List<Track> = remember(wave.more(queueIds))
 
+    private val scLikes by lazy {
+        PendingLikes(
+            read = { prefs.scPendingLikes }, write = { prefs.scPendingLikes = it },
+            account = { prefs.scToken?.let {
+                val key = java.security.MessageDigest.getInstance("SHA-256").digest(it.toByteArray()).hex()
+                val identity = prefs.scIdentity?.split('|')
+                if (identity?.getOrNull(0) == key) "uid:${identity?.getOrNull(1)}" else key
+            } },
+        )
+    }
+
     suspend fun like(track: Track, on: Boolean) {
         wave.invalidateLikes()
         when (track.source) {
             SOURCE_YA -> ya.like(track, on)
             SOURCE_VK -> vk.like(track, on)
             SOURCE_SP -> sp.like(track.srcId, on)
-            SOURCE_SC -> try {
-                sc.like(track.srcId, on)
-                flushScLikes()
-            } catch (e: Exception) {
-                // защита SoundCloud не пустила — в Nyao лайк ставим сразу, в SoundCloud дошлём позже
-                prefs.scPendingLikes = prefs.scPendingLikes.filterNot { it.startsWith("${track.srcId}:") }.toSet() + "${track.srcId}:${if (on) 1 else 0}"
-                org.nyao.music.playback.PlaybackEvents.emit("SoundCloud пока не принял лайк — отправлю позже сам")
+            SOURCE_SC -> {
+                scLikes.enqueue(track.srcId, on)
+                val result = flushScLikes(interactive = true)
+                if (result.left > 0) org.nyao.music.playback.PlaybackEvents.emit(
+                    if ((result.error as? ApiException)?.code == 401) "SoundCloud ждёт повторного входа — лайк сохранён"
+                    else "SoundCloud пока не принял изменение — оно сохранено"
+                )
             }
             else -> yt.like(track.srcId, on)
         }
@@ -475,22 +495,11 @@ object Repo {
     }
 
     /** Досылает отложенные лайки SoundCloud */
-    suspend fun flushScLikes() {
-        if (!sc.loggedIn) return
-        val list = prefs.scPendingLikes
-        if (list.isEmpty()) return
-        val left = LinkedHashSet<String>()
-        for (item in list) {
-            val (id, on) = item.split(":").let { it[0] to (it.getOrNull(1) == "1") }
-            try {
-                sc.like(id, on)
-            } catch (_: Exception) {
-                left += item
-            }
-        }
-        prefs.scPendingLikes = left
-        val sent = list.size - left.size
-        if (sent > 0) org.nyao.music.playback.PlaybackEvents.emit("SoundCloud: отложенные лайки доставлены ($sent)")
+    suspend fun flushScLikes(interactive: Boolean = false): PendingLikes.Result {
+        if (!sc.loggedIn) return PendingLikes.Result(0, 0)
+        val result = scLikes.flush { item -> sc.like(item.id, item.on, interactive) }
+        if (result.sent > 0) org.nyao.music.playback.PlaybackEvents.emit("SoundCloud: отправлено изменений — ${result.sent}")
+        return result
     }
 
     // ---------- Воспроизведение ----------

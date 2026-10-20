@@ -158,6 +158,14 @@ export class YandexProvider {
     return (res.sequence || []).map((s) => mapTrack(s.track)).filter(Boolean);
   }
 
+  async radioFeedback(type, track, playedSeconds = 0) {
+    const radio = this.radio;
+    if (!radio || !track || track.source !== 'ya' || !['trackStarted', 'trackFinished', 'skip', 'like', 'dislike'].includes(type)) return;
+    const event = { type, timestamp: new Date().toISOString(), from: 'desktop-radio-track', trackId: track.albumId ? `${track.srcId}:${track.albumId}` : track.srcId };
+    if (['trackFinished', 'skip', 'dislike'].includes(type)) event.totalPlayedSeconds = Math.max(0, Number(playedSeconds) || 0);
+    await this.request('POST', `/rotor/session/${radio.sessionId}/feedback`, { json: { event, batchId: radio.batchId } });
+  }
+
   async waveMore(queueIds = []) {
     if (!this.wave) return this.waveStart(this.waveOpts || {});
     const ids = queueIds.filter((id) => id.startsWith('ya:')).map((id) => id.slice(3)).slice(-10);
