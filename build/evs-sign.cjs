@@ -1,19 +1,27 @@
-// Подпись VMP (castlabs EVS) после упаковки, до подписи macOS.
-// Electron от castlabs несёт Widevine; без VMP-подписи на Windows и macOS сервисы с защитой
-// (в том числе Spotify Web Playback SDK) обычно отказываются играть.
-// Учётка EVS — в секретах GitHub (NYAO_EVS_ACCOUNT / NYAO_EVS_PASSWD), CI заранее выполняет вход.
-// Без входа подпись пропускается: сборка соберётся, но Spotify на ней, скорее всего, не заиграет.
+// macOS: VMP must precede Apple code signing. Windows is signed by windows.cjs
+// AFTER electron-builder has finished editing/signing the executable.
 const { execFileSync } = require('node:child_process');
 
-exports.default = async function evsSign(context) {
-  const { electronPlatformName, appOutDir } = context;
-  if (electronPlatformName !== 'win32' && electronPlatformName !== 'darwin') return;
-  if (!process.env.NYAO_EVS_READY) {
-    console.warn('[evs] вход в castlabs EVS не выполнен — VMP-подпись пропущена');
+function requireEvs() {
+  if (process.env.NYAO_EVS_READY !== '1') {
+    throw new Error('[evs] EVS authentication is required; refusing to package an unsigned Spotify player');
+  }
+}
+function vmp(command, appOutDir) {
+  requireEvs();
+  const py = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+  execFileSync(py, ['-m', 'castlabs_evs.vmp', '-n', command, appOutDir], { stdio: 'inherit' });
+}
+exports.vmp = vmp;
+exports.default = async function evsSign({ electronPlatformName, appOutDir }) {
+  if (!['win32', 'darwin'].includes(electronPlatformName)) return;
+  requireEvs();
+  if (electronPlatformName === 'win32') {
+    if (process.env.NYAO_WINDOWS_STAGED_BUILD !== '1') {
+      throw new Error('[evs] Use npm run dist: Windows requires VMP signing after executable editing');
+    }
     return;
   }
-  const py = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
-  console.log(`[evs] VMP-подпись ${appOutDir}`);
-  execFileSync(py, ['-m', 'castlabs_evs.vmp', '-n', 'sign-pkg', appOutDir], { stdio: 'inherit' });
-  execFileSync(py, ['-m', 'castlabs_evs.vmp', '-n', 'verify-pkg', appOutDir], { stdio: 'inherit' });
+  vmp('sign-pkg', appOutDir);
+  vmp('verify-pkg', appOutDir);
 };
