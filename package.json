@@ -57,7 +57,9 @@
       ],
       "category": "public.app-category.music",
       "icon": "build/icon-mac.png",
-      "identity": "-"
+      "identity": "-",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "nsis": {
       "oneClick": false,

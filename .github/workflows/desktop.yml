@@ -21,7 +21,7 @@ jobs:
           - os: windows-latest
             args: --win nsis zip --x64
             files: dist/*.exe dist/*.zip
-          - os: macos-latest
+          - os: macos-15-intel
             args: --mac dmg --arm64 --x64
             files: dist/*.dmg
     runs-on: ${{ matrix.os }}
@@ -76,7 +76,9 @@ jobs:
         run: npx electron-builder ${{ matrix.args }} --publish never
       - name: Проверка финальных VMP-подписей macOS
         if: runner.os == 'macOS'
-        run: python -m castlabs_evs.vmp -n verify-pkg dist/mac dist/mac-arm64
+        run: |
+          python build/verify-mac.py dist/mac dist/mac-arm64
+          python -m castlabs_evs.vmp -n verify-pkg dist/mac dist/mac-arm64
       - name: Артефакты проверочной сборки
         if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/nightly'
         uses: actions/upload-artifact@v4
