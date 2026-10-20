@@ -134,7 +134,10 @@ export class SpotifyEngine {
 
   start() {
     if (this.started) return Promise.resolve();
-    if (!this.startPromise) this.startPromise = this.open().finally(() => { this.startPromise = null; });
+    if (!this.startPromise) {
+      const running = this.open().finally(() => { if (this.startPromise === running) this.startPromise = null; });
+      this.startPromise = running;
+    }
     return this.startPromise;
   }
 
@@ -182,6 +185,7 @@ export class SpotifyEngine {
 
   release() {
     this.generation++;
+    this.startPromise = null;
     for (const waiter of this.readyWaiters.splice(0)) waiter({ state: 'failed', message: 'Плеер Spotify остановлен' });
     if (this.started) {
       this.exec("window.__engine && window.__engine.call(0, 'disconnect', '[]')");

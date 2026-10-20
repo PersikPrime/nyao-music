@@ -8,7 +8,7 @@ import { YandexProvider } from '../src/main/providers/yandex.js';
 import { SoundCloudProvider } from '../src/main/providers/soundcloud.js';
 import { findMatch, similarity } from '../src/main/match.js';
 import { SpotifySync } from '../src/renderer/spotify-sync.js';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -161,4 +161,37 @@ test('all shipped desktop JavaScript parses in Node', () => {
     const result = spawnSync(process.execPath, ['--check', path], { encoding: 'utf8' });
     assert.equal(result.status, 0, path + ': ' + result.stderr);
   }
+});
+
+
+// Isolate the production class from Electron's native host for lifecycle tests.
+function engineClass() {
+  const source = readFileSync('src/main/spotify/spotify-engine.js', 'utf8');
+  const start = source.indexOf('export class SpotifyEngine');
+  const end = source.indexOf('/** «', start);
+  return new Function('safeDiagnostic', source.slice(start, end).replace('export class', 'class') + '\nreturn SpotifyEngine;')(safeDiagnostic);
+}
+test('Spotify readiness deadline includes a stalled engine start and removes its waiter', async () => {
+  const Engine = engineClass();
+  const engine = new Engine({ sp: {}, widevine: Promise.resolve({ ok: true }) });
+  engine.open = () => new Promise(() => {});
+  await assert.rejects(engine.awaitReady(20), /не ответил/);
+  assert.equal(engine.readyWaiters.length, 0);
+});
+
+test('Spotify concurrent readiness requests share startup and release rejects pending waiters', async () => {
+  const Engine = engineClass();
+  const engine = new Engine({ sp: {}, widevine: Promise.resolve({ ok: true }) });
+  let starts = 0;
+  engine.open = () => { starts++; return new Promise(() => {}); };
+  const a = engine.awaitReady(1000), b = engine.awaitReady(1000);
+  engine.setStatus({ state: 'ready', deviceId: 'device' });
+  assert.deepEqual(await Promise.all([a, b]), ['device', 'device']);
+  assert.equal(starts, 1);
+  assert.equal(engine.readyWaiters.length, 0);
+  engine.setStatus({ state: 'loading' });
+  const pending = engine.awaitReady(1000);
+  engine.release();
+  await assert.rejects(pending, /остановлен/);
+  assert.equal(engine.readyWaiters.length, 0);
 });

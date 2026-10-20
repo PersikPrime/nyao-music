@@ -355,7 +355,7 @@ class PlaybackService : MediaSessionService() {
         Log.w("Nyao", org.nyao.music.data.Diagnostics.safe("ошибка ${item.mediaId}: ${error.errorCodeName} ${http?.responseCode ?: ""} ${error.cause?.message}"))
         val api = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<org.nyao.music.data.ApiException>().firstOrNull()
         val code = http?.responseCode ?: api?.code ?: 0
-        if (uri != null && (http != null || api != null)) Repo.forgetStream(uri)
+        if (uri != null && (http != null || api != null)) Repo.forgetStream(uri, blocked = code == 403)
         // 403 от googlevideo — берём ссылку у другого клиента; 404 от SoundCloud — берём трек заново.
         // Продолжаем с того же места.
         val now = android.os.SystemClock.elapsedRealtime()

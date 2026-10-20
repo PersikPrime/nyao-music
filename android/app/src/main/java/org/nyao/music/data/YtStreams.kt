@@ -61,8 +61,8 @@ class YtStreams(private val yt: YtMusicApi) {
         Log.w(TAG, "клиент $client получил 403 — пропускаю его 10 минут")
     }
 
-    fun invalidate(videoId: String) {
-        cache.remove(videoId)
+    fun invalidate(videoId: String, denied: Boolean = false) {
+        cache.remove(videoId)?.let { if (denied) reportBlocked(it.client, videoId) }
     }
 
     private fun order(videoId: String): List<Client> {

@@ -549,14 +549,14 @@ object Repo {
         }
     }
 
-    fun forgetStream(uri: Uri) {
+    fun forgetStream(uri: Uri, blocked: Boolean = false) {
         val id = uri.pathSegments.firstOrNull() ?: return
         when (uri.host) {
             SOURCE_YA -> yaStreamCache.remove(id)
             SOURCE_SC -> sc.forget(id)
             SOURCE_VK -> vk.forget(id)
             SOURCE_SP -> {}
-            else -> ytStreams.invalidate(id)
+            else -> ytStreams.invalidate(id, blocked)
         }
     }
 }

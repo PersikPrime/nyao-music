@@ -406,9 +406,9 @@ class VkApi(private val prefs: Prefs) {
                 .post(FormBody.Builder().add("version", "1").add("app_id", "6287487").build())
                 .header("Origin", base).header("Referer", "$base/"),
         )
-        val j = runCatching { JSONObject(text) }.getOrElse { throw ApiException("web_token: HTTP $code, не JSON: ${text.take(300)}") }
+        val j = runCatching { JSONObject(text) }.getOrElse { throw ApiException("web_token: HTTP $code, не JSON: [ответ скрыт]") }
         val data = j.optJSONObject("data")
-        val t = data?.str("access_token") ?: throw ApiException("web_token: нет токена: ${text.take(300)}")
+        val t = data?.str("access_token") ?: throw ApiException("web_token: нет токена: [ответ скрыт]")
         val exp = data.optLong("expires")
         token = t to (if (exp > 1_000_000_000L) exp * 1000 - 60_000 else System.currentTimeMillis() + 30 * 60_000)
         return t

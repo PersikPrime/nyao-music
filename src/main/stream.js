@@ -275,7 +275,7 @@ export class StreamService {
         console.warn(`[stream] ${trackId}: источник ответил ${upstream.status}, обновляю ссылку`);
         this.errors.set(trackId, `источник ответил HTTP ${upstream.status}`);
         this.cache.delete(trackId);
-        if (entry.source === 'yt' && entry.client) {
+        if (entry.source === 'yt' && entry.client && upstream.status === 403) {
           // этот клиент YouTube больше не пускают — для трека берём другой
           const failure = this.failedClients.get(trackId);
           const list = failure && failure.until > Date.now() ? failure.clients : [];

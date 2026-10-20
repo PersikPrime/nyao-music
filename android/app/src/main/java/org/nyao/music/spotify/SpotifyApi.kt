@@ -1,5 +1,7 @@
 package org.nyao.music.spotify
 
+import org.nyao.music.data.Diagnostics
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl

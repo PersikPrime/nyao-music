@@ -384,7 +384,7 @@ export class VKProvider {
     try {
       j = JSON.parse(text);
     } catch {
-      throw new Error(`web_token: HTTP ${res.status}, не JSON: ${text.slice(0, 300)}`);
+      throw new Error(`web_token: HTTP ${res.status}, не JSON: [ответ скрыт]`);
     }
     const t = j && j.data && j.data.access_token;
     if (!t) throw new Error(`web_token: нет токена: ${text.slice(0, 300)}`);

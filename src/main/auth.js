@@ -154,7 +154,9 @@ export async function logoutSoundCloud() {
 
 /** fetch через сессию окна входа SoundCloud (cookie DataDome + сетевой стек Chromium) */
 export function scSessionFetch(url, opts) {
-  return session.fromPartition(SC_PARTITION).fetch(url, opts);
+  const ses = session.fromPartition(SC_PARTITION);
+  ses.setUserAgent(FIREFOX_UA);
+  return ses.fetch(url, opts);
 }
 
 /**
