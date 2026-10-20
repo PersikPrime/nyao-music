@@ -12,7 +12,7 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "yt-test": "node scripts/yt-test.mjs",
-    "dist": "electron-builder --win",
+    "dist": "node build/windows.cjs",
     "dist:mac": "electron-builder --mac",
     "bump": "node scripts/bump.mjs"
   },
@@ -57,7 +57,9 @@
       ],
       "category": "public.app-category.music",
       "icon": "build/icon-mac.png",
-      "identity": "-"
+      "identity": "-",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "nsis": {
       "oneClick": false,

@@ -21,7 +21,7 @@ jobs:
           - os: windows-latest
             args: --win nsis zip --x64
             files: dist/*.exe dist/*.zip
-          - os: macos-latest
+          - os: macos-15-intel
             args: --mac dmg --arm64 --x64
             files: dist/*.dmg
     runs-on: ${{ matrix.os }}
@@ -32,6 +32,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Проверка порядка VMP-подписи
+        run: node --test build/evs-sign.test.cjs
       # Electron от castlabs несёт Widevine; VMP-подпись — через castlabs EVS (учётка в секретах)
       - uses: actions/setup-python@v5
         with:
@@ -44,14 +46,15 @@ jobs:
         run: |
           python -m pip install --quiet --upgrade castlabs-evs
           if [ -z "$EVS_ACCOUNT" ] || [ -z "$EVS_PASSWD" ]; then
-            echo "::warning::Нет секретов NYAO_EVS_ACCOUNT / NYAO_EVS_PASSWD — сборка без VMP-подписи, Spotify на ней может не играть"
-            exit 0
+            echo "::error::Нет секретов NYAO_EVS_ACCOUNT / NYAO_EVS_PASSWD — сборка без VMP-подписи, Spotify на ней может не играть"
+            exit 1
           fi
           if python -m castlabs_evs.account -n reauth -A "$EVS_ACCOUNT" -P "$EVS_PASSWD"; then
             echo "NYAO_EVS_READY=1" >> "$GITHUB_ENV"
             echo "PYTHON=python" >> "$GITHUB_ENV"
           else
-            echo "::warning::Вход в castlabs EVS не удался — сборка без VMP-подписи"
+            echo "::error::Вход в castlabs EVS не удался"
+            exit 1
           fi
       - name: Ключи Last.fm
         shell: bash
@@ -60,12 +63,34 @@ jobs:
           LASTFM_SECRET: ${{ secrets.NYAO_LASTFM_SECRET }}
         run: |
           node -e "require('fs').writeFileSync('src/main/lastfm-keys.json', JSON.stringify({ key: process.env.LASTFM_KEY || '', secret: process.env.LASTFM_SECRET || '' }))"
-      - name: Сборка
+      - name: "Сборка Windows: EXE → VMP → NSIS/ZIP"
+        if: runner.os == 'Windows'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist
+      - name: Сборка macOS
+        if: runner.os == 'macOS'
         env:
           # Подписи разработчика нет — сборка неподписанная (на Mac — ad-hoc подпись)
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npx electron-builder ${{ matrix.args }} --publish never
+      - name: Проверка финальных VMP-подписей macOS
+        if: runner.os == 'macOS'
+        run: |
+          python build/verify-mac.py dist/mac dist/mac-arm64
+          python -m castlabs_evs.vmp -n verify-pkg dist/mac dist/mac-arm64
+      - name: Артефакты проверочной сборки
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/nightly'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.dmg
+          if-no-files-found: error
       - name: Релиз
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/nightly'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
