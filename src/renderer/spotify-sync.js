@@ -230,10 +230,6 @@ export class SpotifySync {
     if (!this.audio.paused && this.audio.currentTime * 1000 - this.startPos > 800) this.audio.currentTime = this.startPos / 1000;
   }
 
-  skip() {
-    this.player.next(true);
-  }
-
   stopSp() {
     this.loaded = null;
     this.confirmed = false;

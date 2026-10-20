@@ -267,10 +267,6 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
         scope.launch { runCatching { block() }.onFailure { Log.w(TAG, "command: ${it.message}") } }
     }
 
-    private fun skip() {
-        if (player.hasNextMediaItem()) player.seekToNextMediaItem() else player.pause()
-    }
-
     private fun stopSp() {
         loaded = null
         confirmed = false

@@ -75,8 +75,8 @@ object Repo {
         ya = YandexApi(prefs)
         yt = YtMusicApi(prefs, context.applicationContext.filesDir)
         ytStreams = YtStreams(yt)
-        sc = ScApi(prefs).also { api -> api.onAccount = { uid ->
-            prefs.scToken?.let { token ->
+        sc = ScApi(prefs).also { api -> api.onAccount = { uid, verifiedToken ->
+            verifiedToken?.let { token ->
                 val key = java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).hex()
                 scLikes.rebind(key, "uid:$uid")
                 prefs.scIdentity = "$key|$uid"
@@ -497,7 +497,8 @@ object Repo {
     /** Досылает отложенные лайки SoundCloud */
     suspend fun flushScLikes(interactive: Boolean = false): PendingLikes.Result {
         if (!sc.loggedIn) return PendingLikes.Result(0, 0)
-        val result = scLikes.flush { item -> sc.like(item.id, item.on, interactive) }
+        val token = prefs.scToken
+        val result = scLikes.flush { item -> sc.like(item.id, item.on, interactive, expectedToken = token) }
         if (result.sent > 0) org.nyao.music.playback.PlaybackEvents.emit("SoundCloud: отправлено изменений — ${result.sent}")
         return result
     }

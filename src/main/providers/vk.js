@@ -520,7 +520,7 @@ export class VKProvider {
         data = await this.post('reload_audio', { ids: full });
         found = collectAudios(data).find((x) => `${x[I.owner]}_${x[I.id]}` === String(srcId)) || collectAudios(data)[0];
       } catch (e) {
-        this.debug(`reload_audio ${full}: ${e.message}`);
+        this.debug(`reload_audio: ${e.message}`);
       }
       if (!found || !found[I.url]) {
         // трек пришёл из api.vk.com без хешей — спрашиваем ссылку там же

@@ -45,7 +45,7 @@ class SpotifyApi(private val auth: SpotifyAuth) {
     private val log = ArrayDeque<String>()
     fun debugText(): String = synchronized(log) { log.joinToString("\n") }
     private fun note(s: String) = synchronized(log) {
-        log.addLast(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + s)
+        log.addLast(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + Diagnostics.safe(s))
         while (log.size > 60) log.removeFirst()
     }
 

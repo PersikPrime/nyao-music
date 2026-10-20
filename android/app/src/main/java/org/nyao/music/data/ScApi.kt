@@ -49,8 +49,8 @@ class ScApi(private val prefs: Prefs) {
     @Volatile private var captchaShownAt = 0L
 
     @Volatile private var clientId: String? = null
-    private var account: Account? = null
-    var onAccount: (String) -> Unit = {}
+    @Volatile private var account: Pair<String?, Account>? = null
+    var onAccount: (String, String?) -> Unit = { _, _ -> }
     private val raw = ConcurrentHashMap<String, JSONObject>()
 
     fun reset() {
@@ -76,8 +76,8 @@ class ScApi(private val prefs: Prefs) {
         throw ApiException("SoundCloud: не удалось получить client_id")
     }
 
-    private suspend fun request(method: String, path: String, query: Map<String, String> = emptyMap(), retry: Boolean = true, interactive: Boolean = false): Any? {
-        val token = prefs.scToken
+    private suspend fun request(method: String, path: String, query: Map<String, String> = emptyMap(), retry: Boolean = true, interactive: Boolean = false, expectedToken: String? = prefs.scToken): Any? {
+        val token = expectedToken
         val base = if (path.startsWith("http")) path else API + path
         val url = base.toHttpUrl().newBuilder().apply {
             setQueryParameter("client_id", clientId())
@@ -99,7 +99,7 @@ class ScApi(private val prefs: Prefs) {
         val (code, text) = Net.call(rb.build())
         if ((code == 401 || code == 403) && retry && !loggedIn) {
             clientId(force = true)
-            return request(method, path, query, retry = false, interactive = interactive)
+            return request(method, path, query, retry = false, interactive = interactive, expectedToken = token)
         }
         if (code == 403 && text.contains("captcha-delivery.com")) {
             // ссылка на проверку DataDome — окно с ней откроется в приложении
@@ -126,11 +126,11 @@ class ScApi(private val prefs: Prefs) {
     }
 
     suspend fun account(): Account {
-        account?.let { return it }
         val token = prefs.scToken
+        account?.takeIf { it.first == token }?.let { return it.second }
         val me = obj("/me")
         if (token != prefs.scToken) throw ApiException("Аккаунт SoundCloud изменился — повтори запрос")
-        return Account(me.str("username") ?: "SoundCloud", uid = me.opt("id")?.toString()).also { account = it; it.uid?.let(onAccount) }
+        return Account(me.str("username") ?: "SoundCloud", uid = me.opt("id")?.toString()).also { account = token to it; it.uid?.let { uid -> onAccount(uid, token) } }
     }
 
     private suspend fun uid(): String = account().uid ?: throw ApiException("SoundCloud не вернул id пользователя")
@@ -184,11 +184,12 @@ class ScApi(private val prefs: Prefs) {
 
     suspend fun related(srcId: String): List<Track> = remember(obj("/tracks/$srcId/related", mapOf("limit" to "30")).arr("collection").objects())
 
-    suspend fun like(srcId: String, on: Boolean, interactive: Boolean = false) {
-        val token = prefs.scToken
+    suspend fun like(srcId: String, on: Boolean, interactive: Boolean = false, expectedToken: String? = prefs.scToken) {
+        val token = expectedToken
+        if (token != prefs.scToken) throw ApiException("Аккаунт SoundCloud изменился — повтори запрос")
         val me = uid()
         if (token != prefs.scToken) throw ApiException("Аккаунт SoundCloud изменился — повтори запрос")
-        request(if (on) "PUT" else "DELETE", "/users/$me/track_likes/$srcId", interactive = interactive)
+        request(if (on) "PUT" else "DELETE", "/users/$me/track_likes/$srcId", interactive = interactive, expectedToken = token)
     }
 
     /** Пул для «Моей волны»: «похожие» на случайные лайки */

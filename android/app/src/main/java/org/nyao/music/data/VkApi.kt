@@ -527,7 +527,7 @@ class VkApi(private val prefs: Prefs) {
                 found = all.firstOrNull { "${it.opt(I_OWNER)}_${it.opt(I_ID)}" == srcId } ?: all.firstOrNull()
                 if (found?.optString(I_URL).isNullOrEmpty()) debug("reload_audio: ссылки нет (ответ скрыт)")
             } catch (e: Exception) {
-                debug("reload_audio $full: ${e.message}")
+                debug("reload_audio: ${e.message}")
             }
             if (found?.optString(I_URL).isNullOrEmpty()) {
                 // трек пришёл из api.vk.com без хешей — спрашиваем ссылку там же
