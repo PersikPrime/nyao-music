@@ -1,7 +1,7 @@
 {
   "name": "nyao-music",
   "productName": "Nyao Music",
-  "version": "0.8.71",
+  "version": "0.8.72",
   "description": "Единый плеер для Яндекс Музыки и YouTube Music с общей «Моей волной»",
   "author": "Takko",
   "license": "UNLICENSED",
@@ -14,7 +14,8 @@
     "yt-test": "node scripts/yt-test.mjs",
     "dist": "node build/windows.cjs",
     "dist:mac": "electron-builder --mac",
-    "bump": "node scripts/bump.mjs"
+    "bump": "node scripts/bump.mjs",
+    "test": "node --test test/*.test.js build/evs-sign.test.cjs"
   },
   "dependencies": {
     "youtubei.js": "^18.1.0"

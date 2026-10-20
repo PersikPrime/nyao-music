@@ -1,260 +1,214 @@
 package org.nyao.music.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
+import org.json.JSONObject
+import org.nyao.music.spotify.SpotifyApi
+import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * Общая «Моя волна»: основа — поток Яндекса, в него подмешиваются треки YouTube Music.
- * Доля YT — ytmShare в процентах. Если вошли только в один сервис — волна из него одного.
- * Перенос src/main/wave.js.
- */
+/** One wave across all catalogs. Selection policy mirrors the desktop implementation. */
 class WaveMixer(
-    private val ya: YandexApi,
-    private val yt: YtMusicApi,
-    private val sc: ScApi,
-    private val vk: VkApi,
-    private val prefs: Prefs,
-    /** id треков, звучавших недавно на всех устройствах — волна их пропускает */
+    private val ya: YandexApi, private val yt: YtMusicApi, private val sc: ScApi,
+    private val vk: VkApi, private val prefs: Prefs,
     private val recentProvider: suspend () -> Set<String> = { emptySet() },
-    /** Сервис временно лежит (статус с сервера Nyao) — пропускаем его */
     private val isDown: (String) -> Boolean = { false },
-    /** Любимые исполнители (сердечко на странице исполнителя) */
     private val favorites: () -> List<FavArtist> = { emptyList() },
+    private val sp: SpotifyApi? = null,
+    private val historyProvider: suspend () -> List<Track> = { emptyList() },
 ) {
-
     companion object {
-        /** Чередование: на каждый трек основы — share/(1-share) треков extra */
+        const val DAY = 86400000L
+        // Radio still uses this helper; the wave uses WavePolicy session quotas.
         fun <T> interleave(base: List<T>, extra: List<T>, sharePercent: Int): Pair<List<T>, Int> {
             val share = sharePercent.coerceIn(0, 100) / 100.0
-            if (base.isEmpty() || share >= 1.0) return extra to extra.size
-            if (share <= 0.0 || extra.isEmpty()) return base to 0
-            val perBase = share / (1 - share)
-            val out = ArrayList<T>()
-            var credit = 0.0
-            var used = 0
-            for (t in base) {
-                out += t
-                credit += perBase
-                while (credit >= 1 && used < extra.size) {
-                    out += extra[used++]
-                    credit -= 1
-                }
-            }
+            if (base.isEmpty() || share >= 1) return extra to extra.size
+            if (extra.isEmpty() || share <= 0) return base to 0
+            val out = ArrayList<T>(); var credit = 0.0; var used = 0
+            for (t in base) { out += t; credit += share / (1 - share); while (credit >= 1 && used < extra.size) { out += extra[used++]; credit-- } }
             return out to used
         }
     }
-
+    private data class Session(val generation: Int, val policy: WavePolicy = WavePolicy(),
+        val candidates: MutableList<WaveCandidate> = ArrayList(), var libraries: List<WaveCandidate> = emptyList(),
+        var recent: Set<String> = emptySet(), val history: MutableList<Track> = ArrayList(),
+        var loads: Int = 0, var hydrated: Boolean = false, val excludedIds: MutableSet<String> = HashSet(), val seedHistory: MutableList<Track> = ArrayList())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Mutex()
-    private val pool = ArrayList<Track>()
-    private val seen = HashSet<String>()
-    @Volatile private var recent: Set<String> = emptySet()
-    private var refill: Job? = null
-    /** Подмес: треки любимых исполнителей и похожее на свежие лайки — чтобы волна была про «сейчас» */
-    private val boost = ArrayList<Track>()
-    private var boosting: Job? = null
-    private val likedCache = HashMap<String, List<Track>>()
+    private val feedbackLock = Any()
+    private val epoch = AtomicInteger()
+    val generation: Int get() = epoch.get()
+    @Volatile private var session: Session? = null
+    private val libraryCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<Track>>>()
+    private val state: JSONObject = runCatching { JSONObject(prefs.waveProfile) }.getOrDefault(JSONObject())
 
-    /** Есть ли что подмешивать: YouTube Music и/или SoundCloud */
-    private val ytOn get() = yt.loggedIn && !isDown(SOURCE_YT)
-    private val scOn get() = sc.loggedIn && !isDown(SOURCE_SC)
-    private val vkOn get() = vk.loggedIn && !isDown(SOURCE_VK)
-    private val yaOn get() = ya.loggedIn && !isDown(SOURCE_YA)
-    private val hasExtras: Boolean get() = ytOn || scOn || vkOn
-
-    private suspend fun refillPool() {
-        if (!hasExtras) return
-        val s = prefs.settings.value
-        val exclude = lock.withLock { HashSet(seen).apply { addAll(recent) } }
-        val a = if (ytOn) runCatching { yt.wavePool(s.diversity, exclude, fresh = s.waveFresh) }.getOrDefault(emptyList()) else emptyList()
-        val b = if (scOn) runCatching { sc.wavePool(s.diversity, exclude, fresh = s.waveFresh) }.getOrDefault(emptyList()) else emptyList()
-        val c = if (vkOn) runCatching { vk.wavePool(s.diversity, exclude, fresh = s.waveFresh) }.getOrDefault(emptyList()) else emptyList()
-        // сервис дал только недавно звучавшее — лучше пара повторов, чем пропасть из волны
-        val lists = listOf(a, b, c).map { l -> l.filter { it.id !in exclude }.ifEmpty { l.filter { it.id !in seen }.take(2) } }
-        val tracks = alternateAll(*lists.toTypedArray())
-        lock.withLock { tracks.forEach { t -> if (t.id !in seen && pool.none { it.id == t.id }) pool += t } }
+    private suspend fun <T> bounded(fallback: T, work: suspend () -> T): T {
+        val task = scope.async { try { work() } catch (e: CancellationException) { throw e } catch (_: Exception) { fallback } }
+        return try { withTimeoutOrNull(8000) { task.await() } ?: fallback } finally { task.cancel() }
     }
+    private fun sources(): List<String> = listOfNotNull(
+        SOURCE_YA.takeIf { ya.loggedIn && !isDown(it) }, SOURCE_YT.takeIf { yt.loggedIn && !isDown(it) },
+        SOURCE_SC.takeIf { sc.loggedIn && !isDown(it) }, SOURCE_VK.takeIf { vk.loggedIn && !isDown(it) },
+        SOURCE_SP.takeIf { sp?.loggedIn == true && !sp.regionBlocked && !isDown(it) })
+    private fun ensure(s: Session) { check(session === s && s.generation == epoch.get()) { "Настройки волны изменились — предыдущий подбор отменён" } }
+    private fun save() { prefs.waveProfile = state.toString() }
+    fun invalidateLikes() { libraryCache.clear(); session?.hydrated = false }
+    private fun profileTracks(key: String): List<Track> = state.optJSONArray(key).objects().mapNotNull { trackFromJson(it) }
 
-    private suspend fun likedOf(id: String, load: suspend () -> List<Track>): List<Track> =
-        lock.withLock { likedCache[id] } ?: runCatching { load() }.getOrDefault(emptyList()).also { l -> lock.withLock { likedCache[id] = l } }
-
-    private suspend fun artistTop(ref: String): List<Track> {
-        val id = ref.substringAfter(':')
-        return when {
-            ref.startsWith("ya:") && yaOn -> ya.artistTracks(id).take(30)
-            ref.startsWith("yt:") && ytOn -> yt.artist(id).popular
-            else -> emptyList()
-        }
-    }
-
-    /** Подмес: 1) любимые исполнители; 2) свежий лайк и похожее на него (Яндекс и YouTube Music) */
-    private suspend fun refillBoost() {
-        val s = prefs.settings.value
-        val exclude = lock.withLock { HashSet(seen).apply { addAll(recent) } }
-        fun ok(t: Track) = t.available && t.id !in exclude
-        val found = ArrayList<Track>()
-        for (a in Freshness.recencyPick(favorites(), 2, 40)) {
-            found += runCatching { artistTop(a.refYa ?: a.refYt ?: a.ref) }.getOrDefault(emptyList()).take(25).filter { ok(it) }.shuffled().take(3)
-        }
-        if (s.waveFresh > 0) {
-            if (yaOn) {
-                val liked = likedOf(SOURCE_YA) { ya.likedTracks(80) }
-                for (seed in Freshness.recencyPick(liked, 1, s.waveFresh)) {
-                    if (ok(seed) && s.waveFresh >= 50) found += seed
-                    found += runCatching { ya.similarTracks(seed.srcId) }.getOrDefault(emptyList()).filter { ok(it) }.shuffled().take(3)
-                }
+    suspend fun start(queueIds: List<String> = emptyList()): List<Track> {
+        val generation = epoch.incrementAndGet()
+        return lock.withLock {
+            val s = Session(generation); s.excludedIds += queueIds; session = s
+            synchronized(feedbackLock) { profileTracks("disliked").forEach { s.policy.block(it) } }
+            s.recent = bounded(emptySet()) { recentProvider() }
+            s.history += bounded(emptyList()) { historyProvider() }
+            val now = System.currentTimeMillis()
+            synchronized(feedbackLock) {
+                state.optJSONArray("played").objects().filter { now - it.optLong("at") < (if (it.optBoolean("skipped")) 30 else 14) * DAY }
+                    .mapNotNull { it.optJSONObject("track")?.let { t -> trackFromJson(t) } }.forEach { s.history += it }
             }
-            if (ytOn) {
-                val liked = likedOf(SOURCE_YT) { yt.likedTracksForWave() }
-                for (seed in Freshness.recencyPick(liked, 1, s.waveFresh)) {
-                    if (ok(seed) && s.waveFresh >= 50) found += seed
-                    found += runCatching { yt.radio(seed.srcId) }.getOrDefault(emptyList()).filter { ok(it) }.shuffled().take(3)
-                }
+            ensure(s); batch(s, true)
+        }
+    }
+    private suspend fun libraries(s: Session) {
+        val now = System.currentTimeMillis()
+        val lists = coroutineScope { sources().map { source -> async {
+            var cached = libraryCache[source]
+            if (cached == null || now - cached.first > 120000) {
+                val tracks = bounded(emptyList()) { when (source) {
+                    SOURCE_YA -> ya.likedTracks(300); SOURCE_YT -> yt.likedTracksForWave()
+                    SOURCE_SC -> sc.likedTracks(300); SOURCE_VK -> vk.likedTracks(300)
+                    else -> sp!!.likedTracks(300)
+                } }
+                ensure(s)
+                if (tracks.isNotEmpty()) { cached = now to tracks; libraryCache[source] = cached!! }
             }
-        }
-        lock.withLock { found.shuffled().forEach { t -> if (t.id !in seen && boost.none { it.id == t.id }) boost += t } }
-    }
-
-    private fun boostInBackground() {
-        if (boosting?.isActive == true) return
-        boosting = scope.launch { runCatching { refillBoost() } }
-    }
-
-    /** Подмешать подмес в готовую пачку (под замком) */
-    private fun withBoost(out: List<Track>): List<Track> {
-        val s = prefs.settings.value
-        val share = Freshness.boostShare(s.waveFresh, favorites().size)
-        if (boost.isEmpty() || share <= 0 || out.isEmpty()) return out
-        val ids = out.map { it.id }.toSet()
-        val src = boost.filter { it.id !in seen && it.id !in ids }
-        val (mixed, used) = interleave(out, src, share)
-        val usedTracks = src.take(used)
-        boost.removeAll(usedTracks.toSet())
-        usedTracks.forEach { seen += it.id; remember(it.id) }
-        return mixed
-    }
-
-    private fun refillInBackground() {
-        if (refill?.isActive == true) return
-        refill = scope.launch { refillPool() }
-    }
-
-    /**
-     * Из пачки Яндекса берём новое. Ступени, чтобы волна не обрывалась:
-     * 1) не звучало ни в этом запуске, ни недавно; 2) недавно звучало, но не в этом запуске;
-     * 3) повтор из этого запуска, но не из последних 30 треков.
-     */
-    private fun pickFresh(base: List<Track>, strict: Boolean): List<Track> {
-        val a = base.filter { it.id !in seen && it.id !in recent }
-        if (a.isNotEmpty() || strict) return a
-        val b = base.filter { it.id !in seen }
-        if (b.isNotEmpty()) return b.take(4)
-        val last = lastPlayed.toSet()
-        return base.filter { it.id !in last }.take(3)
-    }
-
-    private suspend fun batch(yaCall: suspend () -> List<Track>, retryCall: suspend () -> List<Track> = yaCall): List<Track> {
-        val s = prefs.settings.value
-        val useYt = hasExtras && s.ytmShare > 0
-        if (useYt && lock.withLock { pool.size } < 6) {
-            refill?.join()
-            if (lock.withLock { pool.size } < 6) refillPool()
-        }
-        var fresh: List<Track> = emptyList()
-        var gotAny = false
-        var lastList: List<Track> = emptyList()
-        if (yaOn && s.ytmShare < 100) {
-            // Яндекс прислал только уже звучавшее — просим следующую пачку, а не сдаёмся
-            // Яндекс охотно повторяет знакомое — просим новые пачки дольше, прежде чем согласиться на повтор
-            for (attempt in 0 until 6) {
-                val base = try {
-                    if (attempt == 0) yaCall() else retryCall()
-                } catch (e: Exception) {
-                    if (!useYt && attempt == 0) throw e
-                    break
+            val tracks = cached?.second ?: emptyList()
+            synchronized(feedbackLock) {
+                val libs = state.optJSONObject("libraries") ?: JSONObject().also { state.put("libraries", it) }
+                val previous = libs.optJSONObject(source); val observed = JSONObject()
+                val result = tracks.mapIndexed { index, track ->
+                    val likedAt = track.likedAt.takeIf { it > 0 } ?: (previous?.optLong(track.id) ?: 0L).takeIf { it > 0 }
+                        ?: (if (previous != null && !previous.has(track.id)) now else 0L)
+                    observed.put(track.id, likedAt)
+                    val t = track.copy(likedAt = likedAt)
+                    WaveCandidate(t, true, WavePolicy.recentAffinity(t, index, tracks.size, now), 1.0 + (state.optJSONObject("taste")?.optDouble(WavePolicy.artistKey(t), 0.0) ?: 0.0) / 5)
                 }
-                if (base.isNotEmpty()) {
-                    gotAny = true
-                    lastList = (lastList + base).distinctBy { it.id }
-                }
-                fresh = lock.withLock { pickFresh(base, strict = attempt < 4) }
-                if (fresh.isNotEmpty()) break
+                if (tracks.isNotEmpty()) libs.put(source, observed)
+                result
             }
-            // новых пачек не дали — лучше повтор из того, что есть, чем тишина
-            if (fresh.isEmpty() && lastList.isNotEmpty()) fresh = lock.withLock { pickFresh(lastList, strict = false) }
+        } }.awaitAll() }
+        ensure(s); synchronized(feedbackLock) { save() }
+        s.libraries = lists.flatten()
+        s.history += s.libraries.filter { it.track.id in s.recent }.map { it.track }
+        s.candidates.removeAll { it.liked }
+        s.policy.selected += s.libraries.filter { it.track.id in s.excludedIds }.map { it.track }
+        add(s, s.libraries)
+    }
+    private fun add(s: Session, candidates: List<WaveCandidate>) {
+        ensure(s)
+        for (c in candidates) {
+            if (!c.track.available || c.track.id in s.excludedIds) continue
+            val i = s.candidates.indexOfFirst { it.track.id == c.track.id }
+            if (i < 0) s.candidates += c else if (c.liked) s.candidates[i] = c
         }
-        val result = lock.withLock {
-            fresh.forEach { seen += it.id; remember(it.id) }
-            val extraSource = if (!useYt) emptyList() else if (fresh.isEmpty()) pool.take(6) else pool.toList()
-            val (out, used) = interleave(fresh, extraSource, if (fresh.isEmpty()) 100 else s.ytmShare)
-            val usedTracks = extraSource.take(used)
-            pool.removeAll(usedTracks.toSet())
-            usedTracks.forEach { seen += it.id; remember(it.id) }
-            withBoost(out)
+        s.candidates.removeAll { c -> s.policy.selected.any { WavePolicy.sameRecording(it, c.track) } }
+        while (s.candidates.size > 1600) s.candidates.removeAt(0)
+    }
+    private suspend fun search(source: String, query: String): List<Track> = when (source) {
+        SOURCE_YA -> ya.search(query); SOURCE_YT -> yt.search(query); SOURCE_SC -> sc.search(query)
+        SOURCE_VK -> vk.search(query); else -> sp!!.search(query)
+    }
+    private suspend fun recommendations(s: Session, first: Boolean) {
+        val settings = prefs.settings.value
+        val seeds = s.libraries.filter { it.track.available }.sortedByDescending { it.recency }
+        val availableSeeds = seeds.filter { c -> s.seedHistory.none { WavePolicy.sameRecording(it, c.track) } }
+        val seed = Freshness.recencyPick(availableSeeds.ifEmpty { seeds }.take(100), 1, settings.waveFresh).firstOrNull()?.track
+        if (seed != null) { s.seedHistory += seed; while (s.seedHistory.size > 5) s.seedHistory.removeAt(0) }
+        val favoriteNames = favorites().map { WavePolicy.normal(it.name) }.toSet()
+        val lists = coroutineScope { sources().map { source -> async {
+            val tasks = ArrayList<kotlinx.coroutines.Deferred<List<Track>>>()
+            fun task(load: suspend () -> List<Track>) { tasks += async { bounded(emptyList(), load) } }
+            when (source) {
+                SOURCE_YA -> task { if (first) ya.waveStart(settings.diversity, settings.mood) else ya.waveMore(s.policy.selected.map { it.id }, settings.diversity, settings.mood) }
+                SOURCE_VK -> task { vk.recommendations() }
+                SOURCE_YT -> if (seed?.source == source) task { yt.radio(seed.srcId) }
+                SOURCE_SC -> if (seed?.source == source) task { sc.related(seed.srcId) }
+            }
+            if (seed?.source == SOURCE_YA && source == SOURCE_YA) task { ya.similarTracks(seed.srcId) }
+            if (seed != null && WavePolicy.artistKey(seed).isNotEmpty()) task {
+                search(source, seed.artist.split(Regex(",| feat\\.? ", RegexOption.IGNORE_CASE))[0]).filter { WavePolicy.artistKey(it) == WavePolicy.artistKey(seed) }
+            }
+            if (tasks.isEmpty() && source == SOURCE_YT) task { yt.home().flatMap { it.tracks } }
+            tasks.awaitAll().flatten().map { track ->
+                val liked = s.libraries.filter { WavePolicy.sameRecording(it.track, track) }
+                val related = seed != null && WavePolicy.artistKey(track) == WavePolicy.artistKey(seed)
+                val affinity = (if (related) 0.8 else 0.2) + (if (WavePolicy.artistKey(track) in favoriteNames) 0.2 else 0.0) + synchronized(feedbackLock) { (state.optJSONObject("taste")?.optDouble(WavePolicy.artistKey(track), 0.0) ?: 0.0) / 5 }
+                WaveCandidate(track, liked.isNotEmpty(), liked.maxOfOrNull { it.recency } ?: 0.0, affinity,
+                    if (related) "Исполнитель из твоих лайков: ${seed?.artist}" else "Рекомендация сервиса")
+            }
+        } }.awaitAll() }
+        ensure(s); add(s, lists.flatten()); s.loads++
+    }
+    private suspend fun batch(s: Session, first: Boolean = false): List<Track> {
+        ensure(s)
+        if (!s.hydrated) { libraries(s); s.hydrated = true }
+        if (first || s.candidates.count { !it.liked } < 12 || s.loads % 3 == 0) recommendations(s, first)
+        ensure(s)
+        fun select(): List<Track> {
+            val connected = sources().toSet()
+            s.candidates.removeAll { it.track.source !in connected }
+            val settings = prefs.settings.value
+            return synchronized(feedbackLock) { s.policy.select(s.candidates, settings.diversity, settings.waveFresh, settings.ytmShare, recentIds = s.recent, history = s.history) }
         }
-        if (useYt) refillInBackground()
-        if (lock.withLock { boost.size } < 4) boostInBackground()
-        if (result.isEmpty()) throw ApiException(
-            if (yaOn || hasExtras) (if (gotAny) "Сервисы прислали только уже сыгранное — нажми ещё раз, попробую снова" else "Сервисы не прислали треков — проверь интернет и попробуй ещё раз")
-            else "Волна пустая: войди хотя бы в один сервис в настройках",
-        )
+        var result = select()
+        if (result.isEmpty()) { recommendations(s, false); result = select() }
+        if (result.isEmpty()) throw ApiException(if (sources().isEmpty()) "Войди хотя бы в один сервис для волны" else "Новых подходящих треков пока нет. Измени настройки волны или добавь лайки.")
+        add(s, emptyList())
+        if (first && ya.loggedIn) bounded(Unit) { ya.waveFeedback("radioStarted", null); Unit }
         return result
     }
-
-    /** Последние сыгранные — их не повторяем даже в крайнем случае */
-    private val lastPlayed = ArrayDeque<String>()
-
-    private fun remember(id: String) {
-        lastPlayed.addLast(id)
-        while (lastPlayed.size > 30) lastPlayed.removeFirst()
-    }
-
-    suspend fun start(): List<Track> {
-        lock.withLock {
-            pool.clear()
-            seen.clear()
-            lastPlayed.clear()
-            boost.clear()
-            likedCache.clear()
-        }
-        recent = runCatching { recentProvider() }.getOrDefault(emptySet())
-        // подмес готовим, но ждём не дольше пары секунд — первый трек важнее
-        boostInBackground()
-        kotlinx.coroutines.withTimeoutOrNull(2500) { boosting?.join() }
-        val s = prefs.settings.value
-        val tracks = freshStart(batch({ ya.waveStart(s.diversity, s.mood) }, { ya.waveMore(seen.toList(), s.diversity, s.mood) }))
-        if (ya.loggedIn) ya.waveFeedback("radioStarted", null)
-        return tracks
-    }
-
-    /** Начало волны каждый раз новое: перемешиваем первые треки и не начинаем с того же, что в прошлые разы */
-    private fun freshStart(tracks: List<Track>): List<Track> {
-        if (tracks.size < 2) return tracks
-        val n = minOf(12, tracks.size)
-        val out = (tracks.take(n).shuffled() + tracks.drop(n)).toMutableList()
-        val firsts = prefs.waveFirsts
-        val i = out.indexOfFirst { it.id !in firsts }
-        if (i > 0) out.add(0, out.removeAt(i))
-        prefs.waveFirsts = (listOf(out[0].id) + firsts.filter { it != out[0].id }).take(40)
-        return out
-    }
-
     suspend fun more(queueIds: List<String>): List<Track> {
-        val s = prefs.settings.value
-        // волна восстановлена после перезапуска (start не вызывался) — всё равно не повторяем недавнее
-        if (recent.isEmpty()) {
-            recent = runCatching { recentProvider() }.getOrDefault(emptySet())
-            lock.withLock { queueIds.forEach { seen += it } }
+        if (session == null) return start(queueIds)
+        return lock.withLock {
+            val s = session ?: throw ApiException("Запусти волну ещё раз")
+            s.excludedIds += queueIds
+            s.candidates.removeAll { it.track.id in queueIds }
+            batch(s)
         }
-        return batch({ ya.waveMore(queueIds, s.diversity, s.mood) }, { ya.waveMore(queueIds + seen.toList().takeLast(10), s.diversity, s.mood) })
     }
-
     suspend fun feedback(type: String, track: Track?, played: Int) {
-        if (track != null && track.isYa) ya.waveFeedback(type, track, played)
+        track ?: return
+        synchronized(feedbackLock) {
+            if (type == "dislike") {
+                val tracks = (listOf(track) + profileTracks("disliked").filterNot { WavePolicy.sameRecording(it, track) }).take(500)
+                state.put("disliked", JSONArray().apply { tracks.forEach { put(trackToJson(it)) } })
+                session?.policy?.block(track)
+            }
+            if (type in listOf("trackStarted", "trackFinished", "skip", "dislike")) {
+                val item = JSONObject().put("track", trackToJson(track)).put("at", System.currentTimeMillis())
+                    .put("skipped", type == "dislike" || (type == "skip" && played < 30))
+                val old = state.optJSONArray("played").objects().filterNot { p -> p.optJSONObject("track")?.let { trackFromJson(it) }?.let { WavePolicy.sameRecording(it, track) } == true }
+                state.put("played", JSONArray().put(item).apply { old.take(1499).forEach { put(it) } })
+            }
+            val artist = WavePolicy.artistKey(track)
+            val delta = when { type == "dislike" -> -3.0; type == "like" -> 2.0; type == "skip" && played < 30 -> -1.0; type == "trackFinished" && played >= 30 -> 1.0; else -> 0.0 }
+            if (artist.isNotEmpty() && delta != 0.0) {
+                val taste = state.optJSONObject("taste") ?: JSONObject().also { state.put("taste", it) }
+                taste.put(artist, (taste.optDouble(artist, 0.0) * 0.95 + delta).coerceIn(-5.0, 5.0))
+                if (taste.length() > 1500) taste.remove(taste.keys().next())
+            }
+            if (type == "like") invalidateLikes()
+            save()
+        }
+        if (track.isYa) bounded(Unit) { ya.waveFeedback(type, track, played); Unit }
     }
 }

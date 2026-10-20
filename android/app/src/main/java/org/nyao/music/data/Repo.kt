@@ -90,7 +90,7 @@ object Repo {
         mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
         radio = Radio(ya, yt, sc, vk) { !up(it) }
         _favArtists.value = FavArtist.listFromJson(runCatching { org.json.JSONArray(prefs.favArtists) }.getOrNull())
-        wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) }, favorites = { _favArtists.value })
+        wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) }, favorites = { _favArtists.value }, sp = sp, historyProvider = { cloud.waveHistory() })
     }
 
     fun track(id: String): Track? = tracks[id]
@@ -455,6 +455,7 @@ object Repo {
     suspend fun waveMore(queueIds: List<String>): List<Track> = remember(wave.more(queueIds))
 
     suspend fun like(track: Track, on: Boolean) {
+        wave.invalidateLikes()
         when (track.source) {
             SOURCE_YA -> ya.like(track, on)
             SOURCE_VK -> vk.like(track, on)

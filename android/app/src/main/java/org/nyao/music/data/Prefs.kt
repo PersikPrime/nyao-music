@@ -169,6 +169,10 @@ class Prefs(context: Context) {
         set(v) = sp.edit().apply { if (v == null) remove("nyaoUser") else putString("nyaoUser", v) }.apply()
 
     /** С каких треков начинались последние запуски волны — чтобы не начинать с одного и того же */
+    var waveProfile: String
+        get() = sp.getString("waveProfileV2", "{}") ?: "{}"
+        set(v) = sp.edit().putString("waveProfileV2", v).apply()
+
     var waveFirsts: List<String>
         get() = sp.getString("waveFirsts", "")!!.split(",").filter { it.isNotEmpty() }
         set(v) = sp.edit().putString("waveFirsts", v.joinToString(",")).apply()

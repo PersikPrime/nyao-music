@@ -6,7 +6,7 @@ on:
   push:
     # все ветки, включая nightly: на nightly пробуем Electron от castlabs (Widevine для Spotify)
     branches: ['**']
-    paths: ['src/**', 'build/**', 'package.json', 'package-lock.json', 'version.json', '.github/workflows/desktop.yml', '.github/scripts/**']
+    paths: ['test/**', 'src/**', 'build/**', 'package.json', 'package-lock.json', 'version.json', '.github/workflows/desktop.yml', '.github/scripts/**']
   workflow_dispatch:
 
 permissions:
@@ -34,6 +34,8 @@ jobs:
       - run: npm ci
       - name: Проверка порядка VMP-подписи
         run: node --test build/evs-sign.test.cjs
+      - name: Проверка общей волны
+        run: node --test test/*.test.js
       # Electron от castlabs несёт Widevine; VMP-подпись — через castlabs EVS (учётка в секретах)
       - uses: actions/setup-python@v5
         with:

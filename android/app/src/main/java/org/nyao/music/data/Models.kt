@@ -16,6 +16,9 @@ data class Track(
     val loud: Double? = null,
     /** id основного исполнителя в сервисе (Яндекс — число, YouTube — UC…), для страницы исполнителя */
     val artistId: String? = null,
+    val likedAt: Long = 0L,
+    val isrc: String? = null,
+    val waveReason: String? = null,
 ) {
     val isYa: Boolean get() = source == SOURCE_YA
 }

@@ -296,8 +296,10 @@ class PlaybackService : MediaSessionService() {
             try {
                 val ids = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
                 val radio = Repo.mode.value == Repo.Mode.RADIO
+                val generation = Repo.wave.generation.let { if (it == 0) 1 else it }
+                val mode = Repo.mode.value
                 val more = withContext(Dispatchers.IO) { if (radio) Repo.radioMore(ids) else Repo.waveMore(ids) }
-                if ((Repo.mode.value == Repo.Mode.WAVE || Repo.mode.value == Repo.Mode.RADIO) && more.isNotEmpty()) {
+                if (Repo.mode.value == mode && (radio || Repo.wave.generation == generation) && more.isNotEmpty()) {
                     val wasEnded = player.playbackState == Player.STATE_ENDED
                     player.addMediaItems(more.map { Repo.mediaItem(it) })
                     if (wasEnded) {

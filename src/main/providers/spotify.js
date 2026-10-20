@@ -35,6 +35,7 @@ export function mapTrack(o) {
     duration: Math.round((o.duration_ms || 0) / 1000),
     cover: (album.images && album.images[0] && album.images[0].url) || null,
     url: `https://open.spotify.com/track/${o.id}`,
+    isrc: o.external_ids?.isrc || null,
     available: o.is_playable !== false && !o.is_local
   };
 }
@@ -252,8 +253,11 @@ export class SpotifyProvider {
     return ((r && r.tracks && r.tracks.items) || []).map(mapTrack).filter(Boolean);
   }
 
-  async likedTracks() {
-    return (await this.pages('me/tracks', 20)).map((it) => mapTrack(it.track || it.item)).filter(Boolean);
+  async likedTracks(limit = 1000) {
+    return (await this.pages('me/tracks', Math.ceil(limit / 50))).slice(0, limit).map(it => {
+      const t = mapTrack(it.track || it.item);
+      return t ? { ...t, likedAt: Date.parse(it.added_at || '') || 0 } : null;
+    }).filter(Boolean);
   }
 
   async playlists() {

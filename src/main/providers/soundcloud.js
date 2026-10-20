@@ -134,11 +134,12 @@ export class SoundCloudProvider {
     let res = await this.request('GET', `/users/${uid}/track_likes`, { query: { limit: 200 } });
     const out = [];
     for (let page = 0; res && page < 30; page++) {
-      out.push(...(res.collection || []).map((x) => x.track).filter(Boolean));
+      out.push(...(res.collection || []).filter(x => x.track).map(x => ({ ...x.track, nyaoLikedAt: Date.parse(x.created_at || '') || 0 })));
       if (out.length >= limit || !res.next_href) break;
       res = await this.request('GET', res.next_href);
     }
-    return this.remember(out.slice(0, limit));
+    const dates = new Map(out.map(t => [String(t.id), t.nyaoLikedAt || 0]));
+    return this.remember(out.slice(0, limit)).map(t => ({ ...t, likedAt: dates.get(String(t.srcId)) || 0 }));
   }
 
   async playlists() {

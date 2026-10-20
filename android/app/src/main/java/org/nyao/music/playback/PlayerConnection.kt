@@ -21,6 +21,7 @@ import org.nyao.music.data.Track
 
 /** Связь интерфейса с фоновым плеером через MediaController. */
 object PlayerConnection {
+    private var queueGeneration = 0
     private var controller: MediaController? = null
     private var future: ListenableFuture<MediaController>? = null
     private val pending = ArrayList<(MediaController) -> Unit>()
@@ -242,6 +243,7 @@ object PlayerConnection {
 
     /** Список с нужного трека и места (команда с другого устройства, «Слушать вместе») */
     fun playListAt(list: List<Track>, index: Int, label: String, positionMs: Long, play: Boolean = true) {
+        queueGeneration++
         if (list.isEmpty()) return
         list.forEach { Repo.rememberTrack(it) }
         Repo.mode.value = Repo.Mode.LIST
@@ -283,6 +285,7 @@ object PlayerConnection {
 
     /** «Продолжить с другого устройства»: включает трек с нужного места */
     fun resume(t: Track, positionMs: Long, label: String) {
+        queueGeneration++
         Repo.rememberTrack(t)
         Repo.mode.value = Repo.Mode.LIST
         Repo.queueLabel.value = label
@@ -381,7 +384,9 @@ object PlayerConnection {
     }
 
     suspend fun startWave() {
+        val generation = ++queueGeneration
         val tracks = withContext(Dispatchers.IO) { Repo.waveStart() }
+        if (queueGeneration != generation) return
         Repo.mode.value = Repo.Mode.WAVE
         Repo.queueLabel.value = "Моя волна"
         withController { c ->
@@ -396,7 +401,9 @@ object PlayerConnection {
     /** Настройки волны поменялись — заменяем всё, что после текущего трека */
     suspend fun refreshWave() {
         if (Repo.mode.value != Repo.Mode.WAVE) return
+        val generation = ++queueGeneration
         val tracks = withContext(Dispatchers.IO) { Repo.waveStart() }
+        if (queueGeneration != generation || Repo.mode.value != Repo.Mode.WAVE) return
         withController { c ->
             val i = c.currentMediaItemIndex
             if (c.mediaItemCount > i + 1) c.removeMediaItems(i + 1, c.mediaItemCount)

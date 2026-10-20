@@ -143,14 +143,20 @@ class ScApi(private val prefs: Prefs) {
 
     suspend fun likedTracks(limit: Int = 5000): List<Track> {
         val out = ArrayList<JSONObject>()
+        val dates = HashMap<String, Long>()
         var res = obj("/users/${uid()}/track_likes", mapOf("limit" to "200"))
         for (page in 0 until 30) {
-            res.arr("collection").objects().mapNotNullTo(out) { it.obj("track") }
+            res.arr("collection").objects().forEach { item ->
+                item.obj("track")?.let { track ->
+                    out += track
+                    dates[track.opt("id").toString()] = runCatching { java.time.Instant.parse(item.optString("created_at")).toEpochMilli() }.getOrDefault(0L)
+                }
+            }
             val next = res.str("next_href")
             if (out.size >= limit || next == null) break
             res = obj(next)
         }
-        return remember(out.take(limit))
+        return remember(out.take(limit)).map { it.copy(likedAt = dates[it.srcId] ?: 0L) }
     }
 
     suspend fun playlists(): List<Playlist> =

@@ -189,7 +189,7 @@ const NAV = [
 // «Друзья», «Вместе» и «Статистика» живут внутри «Профиля» (как на Android)
 const SETTINGS_ICON = 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1';
 
-const DIVERSITY = [['any', 'Всё', 'Без ограничений: и любимое, и новое, и популярное — как обычная «Моя волна».'], ['favorite', 'Любимое', 'В основном твои лайки и похожее на них. Если лайков немного, треки будут повторяться.'], ['discover', 'Незнакомое', 'Только новое: в поток не попадёт ничего из твоих лайков.'], ['popular', 'Популярное', 'Хиты и то, что сейчас слушают чаще всего.']];
+const DIVERSITY = [['any', 'Всё', 'Без ограничений: и любимое, и новое, и популярное — как обычная «Моя волна».'], ['favorite', 'Любимое', 'В основном твои лайки из всех сервисов. Свежесть задаёт долю недавнего.'], ['discover', 'Незнакомое', 'Только новое: в поток не попадёт ничего из твоих лайков.'], ['popular', 'Популярное', 'Больше рекомендаций сервисов, меньше личных лайков.']];
 const MOODS = [['active', 'Бодрое', '#FFB86B', 'M13 22h18M22 13v18'], ['fun', 'Весёлое', '#E8F06B', 'M14 25c3 4 13 4 16 0'], ['calm', 'Спокойное', '#7CE0C3', 'M13 22c3-3 6 3 9 0s6 3 9 0'], ['sad', 'Грустное', '#8FB4FF', 'M14 28c3-4 13-4 16 0']];
 
 function balanceTrack(share) {
@@ -198,8 +198,8 @@ function balanceTrack(share) {
   return `linear-gradient(90deg, #FFD60A 0%, #FFD60A ${Math.max(0, mid - 9)}%, var(--accent) ${mid}%, ${ytc} ${Math.min(100, mid + 9)}%, ${ytc} 100%)`;
 }
 function shareLabel(share) {
-  const extra = [state.status.yt && 'YT', state.status.sc && 'SC', state.status.vk && 'VK'].filter(Boolean).join('+');
-  if (!extra) return 'YouTube Music и SoundCloud не подключены';
+  const extra = [state.status.yt && 'YT', state.status.sc && 'SC', state.status.vk && 'VK', state.status.sp && 'Spotify'].filter(Boolean).join('+');
+  if (!extra) return 'Другие сервисы не подключены';
   if (!state.status.ya) return `только ${extra}`;
   if (share === 0) return 'только Яндекс';
   if (share === 100) return `только ${extra}`;
@@ -207,7 +207,7 @@ function shareLabel(share) {
 }
 function freshLabel(v) {
   v = Number(v);
-  if (v >= 80) return 'Почти только недавние лайки';
+  if (v >= 80) return 'Приоритет недавних лайков';
   if (v >= 50) return 'Недавнее чаще';
   if (v >= 20) return 'Немного свежее';
   return 'Все лайки поровну';
@@ -233,8 +233,8 @@ function waveControlsHtml(compact = false) {
   </div>
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="eyebrow">Баланс источников</span><span style="font-size:12px;color:var(--accent)" id="share-label">${shareLabel(share)}</span></div>
-    <div class="balance"><div class="track" id="share-track" style="background:${balanceTrack(share)}"></div><input type="range" min="0" max="100" step="5" value="${share}" data-input="share" aria-label="Доля YouTube Music"></div>
-    <div class="balance-legend"><span>${badge('ya')}<b id="share-ya">${100 - share}%</b></span><span><b id="share-yt">${share}%</b>${badge('yt')}${state.status.sc ? badge('sc') : ''}${state.status.vk ? badge('vk') : ''}</span></div>
+    <div class="balance"><div class="track" id="share-track" style="background:${balanceTrack(share)}"></div><input type="range" min="0" max="100" step="5" value="${share}" data-input="share" aria-label="Доля других сервисов"></div>
+    <div class="balance-legend"><span>${badge('ya')}<b id="share-ya">${100 - share}%</b></span><span><b id="share-yt">${share}%</b>${badge('yt')}${state.status.sc ? badge('sc') : ''}${state.status.vk ? badge('vk') : ''}${state.status.sp ? badge('sp') : ''}</span></div>
   </div>`;
 }
 
@@ -421,7 +421,7 @@ function greeting() {
 
 function renderHome() {
   if (layout() === 'player') return renderHomePlayer();
-  const loggedAny = state.status.ya || state.status.yt;
+  const loggedAny = SERVICES.some(x => state.status[x.id]);
   const name = (state.status.ya && state.status.ya.name) || '';
   const h = state.home;
   const ytSection = h && h.ytHome.find((s) => s.tracks.length);
@@ -433,7 +433,7 @@ function renderHome() {
       <form class="search-field" data-form="home-search">${ICONS.search}<input name="q" type="search" placeholder="Поиск в Яндексе, YouTube Music и SoundCloud" aria-label="Поиск"></form>
     </div>
     ${continueHtml()}
-    ${!loggedAny ? `<div class="card"><div class="field"><label>Подключи сервисы</label><div class="hint">Войди в Яндекс Музыку и/или YouTube Music — после этого здесь появятся волна, плейлисты и лайки.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Открыть настройки</button></div></div>` : ''}
+    ${!loggedAny ? `<div class="card"><div class="field"><label>Подключи сервисы</label><div class="hint">Подключи любой музыкальный сервис — здесь появятся волна, плейлисты и лайки.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Открыть настройки</button></div></div>` : ''}
     <div class="hero">
       <section class="wave-card">
         <canvas id="home-ribbon"></canvas>
@@ -488,7 +488,7 @@ function homeName() {
   return n.split(' ')[0];
 }
 function renderHomePlayer() {
-  const loggedAny = state.status.ya || state.status.yt || state.status.sc || state.status.vk;
+  const loggedAny = SERVICES.some(x => state.status[x.id]);
   const waveOn = player.mode === 'wave' && player.playing;
   const lists2 = (state.lib.lists || []).slice(0, 12);
   const tiles = [
@@ -613,12 +613,12 @@ function renderWave() {
   const next = waveOn ? player.queue.slice(player.index + 1, player.index + 6) : [];
   const animate = !state.waveShown;
   state.waveShown = true;
-  const extra = [state.status.yt && ['yt', 'YouTube Music'], state.status.sc && ['sc', 'SoundCloud'], state.status.vk && ['vk', 'VK']].filter(Boolean);
+  const extra = [state.status.yt && ['yt', 'YouTube Music'], state.status.sc && ['sc', 'SoundCloud'], state.status.vk && ['vk', 'VK'], state.status.sp && ['sp', 'Spotify']].filter(Boolean);
   view.innerHTML = `<div class="wave-view">
     <section class="wave-hero">
       ${waveShapesHtml(animate)}
       <div class="top">
-        <span class="glass-cap srcs"><span class="dotsrc ya"></span>Яндекс${extra.map(([k, n]) => `<span class="plus">+</span><span class="dotsrc ${k}"></span>${n}`).join('')}<span class="plus">→</span><span class="one">одна волна</span></span>
+        <span class="glass-cap srcs">${state.status.ya ? '<span class="dotsrc ya"></span>Яндекс' : ''}${extra.map(([k, n]) => `<span class="plus">+</span><span class="dotsrc ${k}"></span>${n}`).join('')}<span class="plus">→</span><span class="one">одна волна</span></span>
         <span class="glass-cap" id="wave-summary">${esc(waveSummary())}</span>
       </div>
       <div class="center">
@@ -631,7 +631,8 @@ function renderWave() {
       </div>
     </section>
     <section class="next-up">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><h2 class="sec" style="font-size:17px">Дальше в волне</h2><span class="hint">дослушанные и пропущенные треки учат ленту Яндекса</span></div>
+      ${waveOn && t && t.waveReason ? `<p class="hint">${esc(t.waveReason)}</p>` : ''}
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><h2 class="sec" style="font-size:17px">Дальше в волне</h2><span class="hint">лайки и прослушивания улучшают общую волну</span></div>
       ${next.length ? `<div class="next-grid">${next.map((n, i) => `<button class="next-card" data-action="q-play" data-i="${player.index + 1 + i}">${coverHtml(n, 'xs')}<span class="meta"><span class="t" style="display:block">${esc(n.title)}</span><span class="s" style="display:block">${esc(n.artist)}</span></span><span class="dotsrc ${n.source}"></span></button>`).join('')}</div>` : '<div class="hint">Запусти волну — здесь появятся следующие треки.</div>'}
     </section>
   </div>

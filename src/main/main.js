@@ -234,7 +234,6 @@ function initProviders() {
     log: (m) => console.log(m)
   });
   live.start();
-  const waveMemFile = path.join(app.getPath('userData'), 'wave-memory.json');
   const lk = lastfmKeys();
   lastfm = new LastFm({
     key: lk.key || '',
@@ -254,21 +253,16 @@ function initProviders() {
   radio = new Radio({ ya, yt, sc, vk, isDown: (id) => svcStatus.outages.includes(id) });
 
   wave = new WaveMixer({
-    ya, yt, sc, vk,
+    ya, yt, sc, vk, sp,
     isDown: (id) => svcStatus.outages.includes(id),
     getSettings: () => settings.get(),
     getRecent: () => cloud.recentIds(),
-    getFavorites: async () => readFav(),
-    memory: {
-      get: () => {
-        try {
-          return JSON.parse(fs.readFileSync(waveMemFile, 'utf8'));
-        } catch {
-          return [];
-        }
-      },
-      set: (v) => fs.writeFileSync(waveMemFile, JSON.stringify(v))
-    }
+    getHistory: () => cloud.history(),
+    profile: {
+      get: () => { try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'wave-profile.json'), 'utf8')); } catch { return {}; } },
+      set: (value) => { const file = path.join(app.getPath('userData'), 'wave-profile.json'); fs.writeFileSync(file + '.tmp', JSON.stringify(value)); fs.renameSync(file + '.tmp', file); }
+    },
+    getFavorites: async () => readFav()
   });
   streams = new StreamService({ ya, yt, sc, vk, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch, vk: vkSessionFetch } });
   catalog = new Catalog({ ya, yt });
@@ -878,6 +872,7 @@ function registerIpc() {
     }
   }));
   handle('like', async (track, on) => {
+    wave.invalidateLikes();
     if (track.source === 'ya') await ya.like(track, on);
     else if (track.source === 'yt') await yt.like(track, on);
     else if (track.source === 'sc') return likeSoundCloud(track, on);

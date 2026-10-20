@@ -195,6 +195,14 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         return ids
     }
 
+    /** Metadata is needed to suppress the same recording across services. */
+    suspend fun waveHistory(): List<Track> {
+        val now = System.currentTimeMillis()
+        return fileLock.withLock { readArr(historyFile) }.objects()
+            .filter { now - it.optLong("playedAt") < (if (it.optBoolean("skipped")) 30 else 14) * DAY }
+            .mapNotNull { playToTrack(it) }
+    }
+
     /** Недавно слушал: уникальные треки из своей истории, без пропущенных */
     suspend fun recent(limit: Int = 12): List<Track> {
         val hist = fileLock.withLock { readArr(historyFile) }

@@ -125,6 +125,7 @@ export class YandexProvider {
   }
 
   async waveStart(opts = {}) {
+    this.waveOpts = opts;
     const body = { seeds: this.waveSeeds(opts), includeTracksInResponse: true, includeWaveModel: false, interactive: true };
     let session;
     try {
@@ -158,7 +159,7 @@ export class YandexProvider {
   }
 
   async waveMore(queueIds = []) {
-    if (!this.wave) return this.waveStart();
+    if (!this.wave) return this.waveStart(this.waveOpts || {});
     const ids = queueIds.filter((id) => id.startsWith('ya:')).map((id) => id.slice(3)).slice(-10);
     try {
       const res = await this.request('POST', `/rotor/session/${this.wave.sessionId}/tracks`, { json: { queue: ids } });
@@ -167,7 +168,7 @@ export class YandexProvider {
     } catch (e) {
       // Сессия могла протухнуть — стартуем заново
       this.wave = null;
-      return this.waveStart();
+      return this.waveStart(this.waveOpts || {});
     }
   }
 
@@ -204,8 +205,13 @@ export class YandexProvider {
   async likedTracks(limit = 10000) {
     const { uid } = await this.getAccount();
     const res = await this.request('GET', `/users/${uid}/likes/tracks`);
-    const ids = ((res.library && res.library.tracks) || []).slice(0, limit).map((t) => (t.albumId ? `${t.id}:${t.albumId}` : t.id));
-    return this.tracksByIds(ids);
+    const entries = ((res.library && res.library.tracks) || []).map((t, i) => ({ ...t, order: i, at: Date.parse(t.timestamp || '') || 0 }));
+    // Sort only when dates are supplied; never assume /tracks preserves request order.
+    if (entries.length && entries.every(t => t.at > 0)) entries.sort((a, b) => b.at - a.at);
+    const picked = entries.slice(0, limit);
+    const tracks = await this.tracksByIds(picked.map(t => t.albumId ? `${t.id}:${t.albumId}` : t.id));
+    const byId = new Map(tracks.map(t => [String(t.srcId), t]));
+    return picked.map(t => { const track = byId.get(String(t.id)); return track ? { ...track, likedAt: t.at } : null; }).filter(Boolean);
   }
 
   async playlists() {

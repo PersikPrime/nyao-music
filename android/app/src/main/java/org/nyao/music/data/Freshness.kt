@@ -6,6 +6,7 @@ import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.ln
 
 /**
  * «Свежесть» волны: вчерашние лайки весят больше прошлогодних (перенос src/main/freshness.js).
@@ -18,7 +19,7 @@ object Freshness {
         val f = fresh.coerceIn(0, 100) / 100.0
         val tau = max(5.0, list.size * (1 - f).pow(2) + 5 * f)
         // ключ Эфраимидиса — Спиракиса: random^(1/вес)
-        return list.mapIndexed { i, x -> x to Math.random().pow(1 / exp(-i / tau)) }
+        return list.mapIndexed { i, x -> x to ln(Math.random().coerceAtLeast(Double.MIN_VALUE)) * exp(min(700.0, i / tau)) }
             .sortedByDescending { it.second }
             .take(n)
             .map { it.first }

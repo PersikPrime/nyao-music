@@ -66,7 +66,9 @@ class SpotifyApi(private val auth: SpotifyAuth) {
     }
 
     /** «Любимые треки» — до 1000 последних */
-    suspend fun likedTracks(): List<Track> = pages("me/tracks", 20).mapNotNull { track(it.obj("track") ?: it.obj("item")) }
+    suspend fun likedTracks(limit: Int = 1000): List<Track> = pages("me/tracks", (limit + 49) / 50).take(limit).mapNotNull { item ->
+        track(item.obj("track") ?: item.obj("item"))?.copy(likedAt = runCatching { java.time.Instant.parse(item.optString("added_at")).toEpochMilli() }.getOrDefault(0L))
+    }
 
     suspend fun playlists(): List<Playlist> = pages("me/playlists", 6).map { p ->
         val id = p.optString("id")
@@ -149,6 +151,7 @@ class SpotifyApi(private val auth: SpotifyAuth) {
             cover = album?.arr("images").objects().firstOrNull()?.str("url"),
             available = o.optBoolean("is_playable", true) && !o.optBoolean("is_local", false),
             artistId = artists.firstOrNull()?.str("id"),
+            isrc = o.obj("external_ids")?.str("isrc"),
         )
     }
 

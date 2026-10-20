@@ -32,6 +32,7 @@ export class Player extends EventTarget {
     this.errors = 0;
     this.startedAt = 0;
     this.continueSimilar = true; // список доиграл — продолжать похожим
+    this.queueGeneration = 0;
     this.forceContinue = false; // трек из поиска в режиме «дальше похожее»
 
     audio.addEventListener('ended', () => {
@@ -77,10 +78,13 @@ export class Player extends EventTarget {
   }
 
   async startWave() {
+    const generation = ++this.queueGeneration;
+    this.loadingMore = false;
     this.reportLeave(true);
     this.emit('loading', true);
     try {
       const tracks = await api.wave.start();
+      if (generation !== this.queueGeneration) return;
       this.mode = 'wave';
       if (this.repeat === 'all') this.repeat = 'off'; // у волны нет конца — повтор плейлиста не имеет смысла
       this.label = 'Моя волна';
@@ -95,7 +99,10 @@ export class Player extends EventTarget {
   // Перезапуск волны после смены настроек: текущий трек доигрывает, хвост очереди меняется
   async refreshWave() {
     if (this.mode !== 'wave') return;
+    const generation = ++this.queueGeneration;
+    this.loadingMore = false;
     const tracks = await api.wave.start();
+    if (generation !== this.queueGeneration || this.mode !== 'wave') return;
     const cur = this.current;
     this.queue = cur ? [cur, ...tracks.filter((t) => t.id !== cur.id)] : tracks;
     this.index = 0;
@@ -106,6 +113,8 @@ export class Player extends EventTarget {
   playList(tracks, startIndex = 0, label = '') {
     const playable = tracks.filter((t) => t.available !== false);
     if (!playable.length) return;
+    ++this.queueGeneration;
+    this.loadingMore = false;
     this.reportLeave(true);
     this.forceContinue = false;
     const start = Math.max(0, playable.indexOf(tracks[startIndex]));
@@ -228,10 +237,13 @@ export class Player extends EventTarget {
 
   /** Радио по треку: сам трек и бесконечное «похожее» */
   async startRadio(track) {
+    const generation = ++this.queueGeneration;
+    this.loadingMore = false;
     this.reportLeave(true);
     this.emit('loading', true);
     try {
       const tracks = await api.radio.start(track);
+      if (generation !== this.queueGeneration) return;
       this.mode = 'radio';
       if (this.repeat === 'all') this.repeat = 'off';
       this.label = `Радио: ${track.title}`;
@@ -248,16 +260,18 @@ export class Player extends EventTarget {
     if ((this.mode !== 'wave' && this.mode !== 'radio') || this.loadingMore) return;
     if (this.queue.length - this.index > 3) return;
     this.loadingMore = true;
+    const generation = this.queueGeneration;
     try {
       const ids = this.queue.map((t) => t.id);
       const more = this.mode === 'radio' ? await api.radio.more(ids) : await api.wave.more(ids);
+      if (generation !== this.queueGeneration) return;
       const have = new Set(this.queue.map((t) => t.id));
       this.queue.push(...more.filter((t) => !have.has(t.id)));
       this.emit('queue');
     } catch (e) {
       this.emit('error', e.message);
     } finally {
-      this.loadingMore = false;
+      if (generation === this.queueGeneration) this.loadingMore = false;
     }
   }
 
@@ -427,7 +441,7 @@ export class Player extends EventTarget {
       this.emit('error', `Не играет «${t.title}»${why}${stop ? '' : ' — пропускаю'}`);
     });
     // После трёх ошибок подряд останавливаемся, чтобы не пролистать всю очередь
-    if (!stop) setTimeout(() => this.next(true), 1500);
+    if (!stop) { const startedAt = this.startedAt; setTimeout(() => { if (this.current === t && this.startedAt === startedAt) this.next(true); }, 1500); }
     else this.emit('state');
   }
 
