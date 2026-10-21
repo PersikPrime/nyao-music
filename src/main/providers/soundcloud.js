@@ -268,7 +268,9 @@ export class SoundCloudProvider {
           return { url: res.url, hls, mime: hls ? (/mpeg/.test(best.format.mime_type) ? 'audio/mpeg' : 'audio/mp4') : 'audio/mpeg', headers: { 'User-Agent': UA }, ttl: 20 * 60_000 };
         } catch (e) {
           last = e;
-          if (e instanceof CaptchaError || !/: (40[134]|429|5\d\d)\b/.test(e.message)) throw e;
+          // по коду ответа (текст ошибки менялся — проверка по нему уже ломалась)
+          const st = e.status || Number((/\b(?:HTTP |: )(\d{3})\b/.exec(e.message || '') || [])[1]) || 0;
+          if (e instanceof CaptchaError || !(st === 401 || st === 403 || st === 404 || st === 429 || st >= 500)) throw e;
         }
       }
     }

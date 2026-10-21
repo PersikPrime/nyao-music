@@ -38,7 +38,8 @@ export class SpotifySync {
       if ('snapshot' in st) this.snap = st.snapshot;
       if (st.error && isSp(p.current)) {
         this.msg(st.error.message);
-        if (['account', 'init', 'auth', 'engine', 'playback'].includes(st.error.kind)) this.stopSp();
+        if (['account', 'init', 'auth', 'engine'].includes(st.error.kind)) this.stopSp();
+        else if (st.error.kind === 'playback') this.skipSp();
       }
     });
     setInterval(() => {
@@ -228,6 +229,15 @@ export class SpotifySync {
   /** Пока Spotify грузит трек, ползунок Nyao не убегает вперёд */
   holdStart() {
     if (!this.audio.paused && this.audio.currentTime * 1000 - this.startPos > 800) this.audio.currentTime = this.startPos / 1000;
+  }
+
+  /** Не играет один трек — переходим к следующему (волна не должна вставать из-за одного трека) */
+  skipSp() {
+    this.loaded = null;
+    this.confirmed = false;
+    this.starting++;
+    this.command(() => this.api.pause());
+    this.player.next(true);
   }
 
   stopSp() {

@@ -56,7 +56,9 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
             engine.errors.collect { (kind, msg) ->
                 if (!isSp(player.currentMediaItem)) return@collect
                 PlaybackEvents.emit(msg)
-                if (kind in setOf("account", "init", "auth", "engine", "playback")) stopSp()
+                if (kind in setOf("account", "init", "auth", "engine")) stopSp()
+                // не играет один трек — дальше по очереди, волна не должна вставать из-за одного трека
+                else if (kind == "playback") skipSp()
             }
         }
         // раз в полсекунды сверяем позицию и следим, чтобы Spotify не играл, когда не должен
@@ -265,6 +267,14 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
     private fun command(block: suspend () -> Unit) {
         lastCommand = SystemClock.elapsedRealtime()
         scope.launch { runCatching { block() }.onFailure { Log.w(TAG, "command: ${it.message}") } }
+    }
+
+    private fun skipSp() {
+        loaded = null
+        confirmed = false
+        starting?.cancel()
+        command { engine.pause() }
+        if (player.hasNextMediaItem()) player.seekToNextMediaItem() else player.pause()
     }
 
     private fun stopSp() {

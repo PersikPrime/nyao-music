@@ -42,6 +42,32 @@ test('outbox: failures survive restart and never go to another account', async (
   assert.deepEqual(x.box.list().map(i => i.srcId), ['43']);
 });
 
+test('outbox: a hopeless like (track gone) is dropped and does not block the rest', async () => {
+  const sent = [];
+  const x = outbox(async item => { if (item.srcId === 'gone') throw Object.assign(new Error('HTTP 404'), { status: 404 }); sent.push(item.srcId); });
+  x.box.enqueue({ srcId: 'gone' }, true); x.box.enqueue({ srcId: 'ok' }, true);
+  const r = await x.box.flush();
+  assert.deepEqual(sent, ['ok']);
+  assert.equal(r.dropped, 1);
+  assert.equal(r.left, 0);
+});
+
+test('SoundCloud: stream link 404 is retried with a fresh track', async () => {
+  let n = 0, tracks = 0;
+  const track = () => ({ id: 5, title: 'x', track_authorization: 'auth' + (++tracks), media: { transcodings: [{ url: 'https://api-v2.soundcloud.com/media/5/hls', format: { protocol: 'hls', mime_type: 'audio/mpeg' } }] } });
+  const res = (status, body) => ({ status, ok: status < 300, text: async () => JSON.stringify(body) });
+  const sc = new SoundCloudProvider({ fetch: async url => {
+    if (url.includes('/media/5/hls')) { n++; return n < 3 ? res(404, {}) : res(200, { url: 'https://cdn/ok.m3u8?' + new URL(url).searchParams.get('track_authorization') }); }
+    if (url.includes('/tracks')) return res(200, [track()]);
+    throw new Error(url);
+  } });
+  sc.clientId = 'c'.repeat(32);
+  sc.getClientId = async () => sc.clientId;
+  const s = await sc.streamUrl('5');
+  assert.equal(n, 3);
+  assert.match(s.url, /ok\.m3u8\?auth3/);
+});
+
 test('outbox: account switch during sending stops further old operations', async () => {
   const gate = deferred(), entered = deferred(), ids = [];
   const x = outbox(async item => { ids.push(item.srcId); entered.resolve(); await gate.promise; });

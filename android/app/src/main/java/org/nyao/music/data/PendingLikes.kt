@@ -43,7 +43,10 @@ class PendingLikes(
             val item = synchronized(state) { entries().firstOrNull { it.account == owner } } ?: break
             try { send(item) }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { failure = e; break }
+            catch (e: Exception) {
+                // трек удалён или запрос заведомо неверный — повторять бессмысленно, иначе застрянет вся очередь
+                if ((e as? ApiException)?.code !in setOf(400, 404, 410, 422)) { failure = e; break }
+            }
             synchronized(state) { persist(entries().filterNot { it.revision == item.revision }) }
             sent++
         }
