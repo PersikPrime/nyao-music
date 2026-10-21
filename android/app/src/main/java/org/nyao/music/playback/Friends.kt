@@ -67,6 +67,10 @@ object Friends {
     val inviteLinks = MutableStateFlow<String?>(null)
     /** (код комнаты, кто позвал) — вход только после подтверждения */
     val roomLinks = MutableStateFlow<Pair<String, String?>?>(null)
+    /** Профиль по нику из ссылки music.withnyao.app/share/u/… или nyao://u/… */
+    val profileLinks = MutableStateFlow<String?>(null)
+    /** Трек из ссылки «Поделиться» */
+    val trackLinks = MutableStateFlow<org.nyao.music.data.Track?>(null)
 
     /** «Отправить другу» из любого списка треков — шторку выбора друга рисует интерфейс */
     val shareRequest = MutableStateFlow<Track?>(null)

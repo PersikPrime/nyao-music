@@ -80,6 +80,17 @@ test('вход, синхронизация, история, продолжени
     const h = await call('GET', '/history?days=3', { token: b.token });
     assert.equal(h.json.plays.length, 2);
     assert.ok(h.json.plays.some((p) => p.trackId === 'ya:1' && p.artist === 'Кино'));
+    // из «недавно прослушанного» Spotify: то, что Nyao уже записал, и повторную отправку не дублируем
+    const t0 = Date.now() - 3600_000;
+    await call('POST', '/history', { token: a.token, body: { plays: [{ trackId: 'sp:abc', source: 'sp', title: 'X', duration: 180, playedAt: t0 }] } });
+    await call('POST', '/history', { token: a.token, body: { plays: [
+      { trackId: 'sp:abc', source: 'sp', title: 'X', duration: 180, playedAt: t0 + 170_000, imported: true },
+      { trackId: 'sp:new', source: 'sp', title: 'Y', duration: 200, playedAt: t0 + 400_000, imported: true }
+    ] } });
+    await call('POST', '/history', { token: a.token, body: { plays: [{ trackId: 'sp:new', source: 'sp', title: 'Y', duration: 200, playedAt: t0 + 400_000, imported: true }] } });
+    const h2 = await call('GET', '/history?days=1', { token: a.token });
+    assert.equal(h2.json.plays.filter((p) => p.trackId === 'sp:abc').length, 1);
+    assert.equal(h2.json.plays.filter((p) => p.trackId === 'sp:new').length, 1);
 
     // now playing: телефон видит ПК, но не себя
     await call('PUT', '/now', { token: a.token, body: { track: { id: 'ya:1', source: 'ya', srcId: '1', title: 'Пачка сигарет', artist: 'Кино', duration: 270 }, position: 133, playing: true } });

@@ -1,4 +1,5 @@
 // HTTP API сервера Nyao Music. Без фреймворков: маршрутов мало, зависимостей меньше — меньше дыр.
+import { sharePage, shareRoutes } from './share.js';
 import crypto from 'node:crypto';
 import { normalizeStatus } from './status.js';
 import fs from 'node:fs';
@@ -96,7 +97,7 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '' }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [] }) {
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
   setInterval(() => {
     const now = Date.now();
@@ -140,7 +141,8 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     Object.assign(login, { status: 'done', token, user: publicUser(user) });
   }
 
-  const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl });
+  const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl, webUrl, sharePage: (o) => sharePage({ ...o, mirror }) });
+  const share = shareRoutes({ q, mirror, androidCerts, webHosts });
   const routes = [
     ['GET', /^\/health$/, async () => ({ ok: true, minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
     // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)
@@ -216,6 +218,16 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         if (!p || !p.trackId) continue;
         const at = new Date(p.playedAt || Date.now());
         if (Number.isNaN(at.getTime())) continue;
+        // прослушивание из истории самого сервиса (Spotify «недавно прослушанное»): то же, что уже
+        // записал Nyao (или другое устройство уже прислало), не дублируем — ищем этот трек рядом по времени
+        if (p.imported) {
+          const win = Math.max(0, Math.round(Number(p.duration) || 0)) + 600;
+          const { rows } = await q(
+            'SELECT 1 FROM plays WHERE user_id = $1 AND track_id = $2 AND played_at BETWEEN $3 AND $4 LIMIT 1',
+            [s.uid, clip(p.trackId, 128), new Date(at.getTime() - win * 1000), new Date(at.getTime() + win * 1000)]
+          );
+          if (rows.length) continue;
+        }
         await q(
           `INSERT INTO plays (user_id, session_id, track_id, source, title, artist, cover, duration, listened, skipped, played_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
@@ -384,10 +396,6 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       if (!hub.react(m[1].toUpperCase(), s.sid, body.emoji)) throw new HttpError(400, 'Не получилось отправить реакцию');
       return { ok: true };
     }, true],
-    ['GET', /^\/join\/([A-Za-z0-9]{6})$/, async ({ m }) => {
-      const code = m[1].toUpperCase();
-      return page(`Код комнаты: ${code}`, 'Открой Nyao Music → «Слушать вместе» → «Войти по коду» и введи этот код. Музыка будет играть у тебя в том сервисе, где ты вошёл.');
-    }],
 
     // ---------- Итоги ----------
     ['GET', /^\/stats$/, async ({ s, url }) => {
@@ -409,7 +417,8 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       if (!rel) throw new HttpError(503, 'Сервер ещё не знает о релизах');
       return { ...rel, min_build: minBuild };
     }],
-    ...social
+    ...social,
+    ...share
   ];
 
   return async function handler(req, res) {

@@ -85,6 +85,8 @@ h2.sec { margin: 0; font-size: 20px; font-weight: 600; }
 .back:hover { color: var(--text); border-color: #3a3a40; }
 
 /* ---------- Общие элементы ---------- */
+.badge-sub { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
+.badge-sub i { font-style: normal; font-size: 10px; color: var(--muted, #9a97a6); }
 .badge { flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 5px; line-height: 1.4; }
 .badge.ya { background: var(--ya); color: #000; }
 .badge.yt { background: var(--yt); color: #fff; }

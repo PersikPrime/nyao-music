@@ -57,6 +57,16 @@ class SpotifyApi(private val auth: SpotifyAuth) {
         return Account(name, me.str("product")?.let { it == "premium" }, me.str("id"))
     }
 
+    /** «Недавно прослушанное» в самом Spotify (до 50 последних), новее [after] (мс) → трек и время */
+    suspend fun recentlyPlayed(after: Long = 0): List<Pair<Track, Long>> {
+        val q = buildMap { put("limit", "50"); if (after > 0) put("after", after.toString()) }
+        return JSONObject(request("GET", "me/player/recently-played", q)).arr("items").objects().mapNotNull { it ->
+            val t = track(it.obj("track")) ?: return@mapNotNull null
+            val at = runCatching { java.time.Instant.parse(it.optString("played_at")).toEpochMilli() }.getOrNull() ?: return@mapNotNull null
+            t to at
+        }
+    }
+
     suspend fun search(q: String): List<Track> {
         val text = try {
             request("GET", "search", mapOf("q" to q, "type" to "track", "limit" to "20"))

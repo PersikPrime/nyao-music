@@ -3,7 +3,10 @@
 // работают как у остальных сервисов, а здесь всё повторяется на устройстве Spotify,
 // и позиция <audio> подстраивается под настоящую позицию Spotify.
 
-const isSp = (t) => !!t && t.source === 'sp';
+import { spMode } from './sp-mode.js';
+
+// трек Spotify, который играет сам Spotify (а не копия из другого сервиса)
+const isSp = (t) => !!t && t.source === 'sp' && !spMode.fallback && !spMode.subs.has(t.id);
 
 export class SpotifySync {
   constructor(player, api, { onMessage } = {}) {
@@ -37,8 +40,13 @@ export class SpotifySync {
       if (st.status) this.status = st.status;
       if ('snapshot' in st) this.snap = st.snapshot;
       if (st.error && isSp(p.current)) {
+        // нет Premium или плеер не запустился — дальше треки Spotify играют копиями из других сервисов
+        if (st.error.kind === 'account' || st.error.kind === 'init') {
+          this.toCopy(st.error.kind === 'account' ? 'Spotify без Premium — играю те же треки из других сервисов' : 'Плеер Spotify не запустился — играю те же треки из других сервисов');
+          return;
+        }
         this.msg(st.error.message);
-        if (['account', 'init', 'auth', 'engine'].includes(st.error.kind)) this.stopSp();
+        if (['auth', 'engine'].includes(st.error.kind)) this.stopSp();
         else if (st.error.kind === 'playback') this.skipSp();
       }
     });
@@ -238,6 +246,17 @@ export class SpotifySync {
     this.starting++;
     this.command(() => this.api.pause());
     this.player.next(true);
+  }
+
+  /** Переключить текущий трек Spotify на копию из другого сервиса, с того же места */
+  toCopy(note) {
+    spMode.fallback = true;
+    this.loaded = null;
+    this.confirmed = false;
+    this.starting++;
+    this.command(() => this.api.pause());
+    if (note) this.msg(note);
+    if (this.player.current) this.player.reload();
   }
 
   stopSp() {

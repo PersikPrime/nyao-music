@@ -93,6 +93,22 @@ fun SourceTag(source: String, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Значок сервиса трека. Если трек Spotify играет копией из другого сервиса (нет Premium) —
+ * два значка со стрелкой: «SP → Я»
+ */
+@Composable
+fun TrackSourceTag(track: Track, modifier: Modifier = Modifier) {
+    val subs by org.nyao.music.data.Repo.substitutes.collectAsState()
+    val sub = subs[track.id]
+    if (sub == null) return SourceTag(track.source, modifier)
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        SourceTag(track.source)
+        Text("→", color = NyaoColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        SourceTag(sub.source)
+    }
+}
+
 @Composable
 fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     Text(text, style = MaterialTheme.typography.titleLarge, modifier = modifier.padding(horizontal = 20.dp, vertical = 10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -167,7 +183,7 @@ fun TrackRow(
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 DownloadedMark(track)
-                SourceTag(track.source)
+                TrackSourceTag(track)
                 Text(
                     track.artist + if (track.duration > 0) " · ${formatTime(track.duration)}" else "",
                     maxLines = 1,

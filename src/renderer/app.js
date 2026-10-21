@@ -1,4 +1,5 @@
 import { Player } from './player.js';
+import { spMode } from './sp-mode.js';
 import { SpotifySync } from './spotify-sync.js';
 import { Ribbon } from './ribbon.js';
 import { Onboarding } from './onboarding.js';
@@ -9,7 +10,7 @@ import { ACCENTS, paletteFor, applyAccent } from './accent.js';
 import { releaseAgo } from './releases.js';
 import { arrangeSearch } from './search.js';
 import { createFriends } from './friends.js';
-import { handoffPlan, queueSnapshot, REACTIONS, JOIN_BASE, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
+import { handoffPlan, queueSnapshot, REACTIONS, JOIN_BASE, trackLink, profileLink, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
 
 const api = window.nyao;
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -78,6 +79,12 @@ function badge(source, extra = '') {
   if (source === 'mix') return '<span class="badge mix">Я+YT</span>';
   return '';
 }
+/** Значок трека; трек Spotify, играющий копией из другого сервиса, — «SP → Я» */
+function trackBadge(t) {
+  const sub = t && t.source === 'sp' && spMode.subs.get(t.id);
+  if (!sub) return badge(t && t.source);
+  return `<span class="badge-sub" title="Spotify сам не играет — звучит копия из другого сервиса">${badge('sp')}<i>→</i>${badge(sub.source)}</span>`;
+}
 const RING = { ya: '#FFD60A', yt: '#FF6A5C', sc: '#FF8A3D', vk: '#5AA9FF', sp: '#1ED760', mix: '#C6B8FF' };
 function coverHtml(item, cls = '', withBadge = false) {
   const src = item && item.source;
@@ -96,7 +103,7 @@ function rowHtml(t, i, key, opts = {}) {
     ${opts.num === false ? '' : `<span class="n">${cur ? '▶' : i + 1}</span>`}
     ${coverHtml(t, 'xs')}
     <div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${artistLink(t)}</div></div>
-    ${badge(t.source)}
+    ${trackBadge(t)}
     <span class="dur">${t.duration ? fmt(t.duration) : ''}</span>
     <button class="more" data-action="row-more" data-list="${key}" data-i="${i}" aria-label="Действия с треком"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
   </div>`;
@@ -625,7 +632,7 @@ function renderWave() {
         <h1 class="wave-title">Моя волна</h1>
         <button class="wave-play" data-action="wave-toggle" aria-label="${playing ? 'Пауза' : 'Слушать волну'}">${playing ? ICONS.pauseBig : ICONS.playBig}</button>
         <div class="wave-row">
-          ${waveOn && t ? `<button class="now-pill" data-action="fullscreen" title="Полный экран">${coverHtml(t, '')}<span class="ttl">${esc(t.title)}</span><span class="muted">${esc(t.artist)}</span>${badge(t.source)}</button>` : ''}
+          ${waveOn && t ? `<button class="now-pill" data-action="fullscreen" title="Полный экран">${coverHtml(t, '')}<span class="ttl">${esc(t.title)}</span><span class="muted">${esc(t.artist)}</span>${trackBadge(t)}</button>` : ''}
           <button class="wave-tune-btn" data-action="wave-tune" aria-haspopup="dialog" aria-expanded="${!!state.waveTune}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4"/></svg>Настроить волну</button>
         </div>
       </div>
@@ -704,7 +711,7 @@ function renderDrawer(scrollToCur) {
     </div>` : '<div class="empty">Ничего не играет.<br><br><button class="btn primary" data-action="wave-toggle">' + ICONS.play + 'Моя волна</button></div>'}
     <div class="np-card">
       <div class="h"><span>Далее</span><button class="link" data-action="drawer-queue">Открыть очередь</button></div>
-      ${nx ? `<div class="np-next" data-action="q-play" data-i="${player.index + 1}">${coverHtml(nx, 'xs')}<div style="flex:1;min-width:0"><div class="np-next-t">${esc(nx.title)}</div><div class="muted" style="font-size:12px">${esc(nx.artist)}</div></div>${badge(nx.source)}</div>` : '<span class="muted" style="font-size:13px">Дальше пусто</span>'}
+      ${nx ? `<div class="np-next" data-action="q-play" data-i="${player.index + 1}">${coverHtml(nx, 'xs')}<div style="flex:1;min-width:0"><div class="np-next-t">${esc(nx.title)}</div><div class="muted" style="font-size:12px">${esc(nx.artist)}</div></div>${trackBadge(nx)}</div>` : '<span class="muted" style="font-size:13px">Дальше пусто</span>'}
     </div>
     ${t ? `<div class="np-card"><div class="h"><span>Об этом треке</span></div><div class="facts">
       <span>Название</span><span>${esc(t.title)}</span>
@@ -1532,6 +1539,14 @@ const friends = createFriends({
 const RENDER = { friends: () => friends.renderFriends(), user: () => friends.renderUser(), profile: () => friends.renderProfile(), home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList };
 
 // ---------- Загрузка данных ----------
+/** Может ли Spotify играть сам; если нет — треки Spotify играют копиями из других сервисов */
+function syncSpMode() {
+  const s = state.spotify;
+  const a = s && s.account;
+  const was = spMode.fallback;
+  spMode.fallback = !(s && s.loggedIn && !s.regionBlocked && a && !a.error && a.premium !== false);
+  if (was !== spMode.fallback && player.current && player.current.source === 'sp') player.reload();
+}
 async function loadStatus() {
   state.status = await api.auth.status().catch(() => ({ ya: null, yt: null, sc: null, vk: null }));
   // Spotify — отдельно: вход со своим Client ID, свой экран в настройках
@@ -1539,6 +1554,7 @@ async function loadStatus() {
     state.spotify = await api.spotify.status().catch(() => null);
     state.status.sp = state.spotify && state.spotify.loggedIn ? state.spotify.account || { name: 'Spotify' } : null;
   }
+  syncSpMode();
   renderAccounts();
 }
 function releasesHtml() {
@@ -1705,6 +1721,7 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
     ${inQueue ? '<button data-m="remove">Убрать из очереди</button>' : ''}
     <button data-m="radio">Похожее · радио по треку</button>
     ${state.cloud.loggedIn ? '<button data-m="share">Отправить другу</button>' : ''}
+    <button data-m="link">Скопировать ссылку</button>
     <button data-m="like">${player.liked.has(track.id) ? 'Убрать из «Мне нравится»' : 'В «Мне нравится»'}</button>
     ${track.artistRef ? '<button data-m="artist">Открыть исполнителя</button>' : ''}
     ${track.albumRef ? '<button data-m="album">Открыть альбом</button>' : ''}
@@ -1734,6 +1751,9 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
       } else if (b.dataset.m === 'share') {
         if (!state.social || !state.social.loaded) await friends.load();
         friends.sharePicker(track, x, y);
+      } else if (b.dataset.m === 'link') {
+        copyText(trackLink(track));
+        toast('Ссылка скопирована — откроется в Nyao Music');
       } else if (b.dataset.m === 'like') {
         await player.toggleLike(track);
       } else if (b.dataset.m === 'artist') {
@@ -1763,6 +1783,50 @@ document.addEventListener('mousedown', (e) => {
 });
 
 // Простое окно ввода (prompt() в Electron не работает)
+/** Подтверждение: «Да» → true, «Отмена» или клик мимо → false */
+function askConfirm(label, okLabel = 'Да') {
+  return new Promise((resolve) => {
+    const menu = $('#menu');
+    menu.innerHTML = `<div style="padding:10px;display:flex;flex-direction:column;gap:10px;max-width:280px"><div style="white-space:normal">${esc(label)}</div>
+      <div style="display:flex;gap:8px"><button class="btn primary" data-c="1" style="flex:1;justify-content:center">${esc(okLabel)}</button><button class="btn" data-c="0" style="flex:1;justify-content:center">Отмена</button></div></div>`;
+    menu.hidden = false;
+    menu.style.left = `${innerWidth / 2 - 140}px`;
+    menu.style.top = `${innerHeight / 2 - 60}px`;
+    menu.onclick = (e) => {
+      const b = e.target.closest('[data-c]');
+      if (!b) return;
+      menu.hidden = true;
+      resolve(b.dataset.c === '1');
+    };
+  });
+}
+
+/**
+ * Ссылка снаружи (nyao://… или music.withnyao.app/share/…): приглашение, комната, профиль, трек.
+ * Такую ссылку может прислать кто угодно — поэтому дружба и вход в комнату только после подтверждения.
+ */
+async function openDeepLink(link) {
+  if (!link) return;
+  try {
+    if (link.kind === 'user') {
+      friends.openUser(link.value);
+    } else if (link.kind === 'add') {
+      if (!state.cloud.loggedIn) return toast('Чтобы добавить друга, войди в аккаунт Nyao', true);
+      if (await askConfirm('Принять приглашение в друзья по ссылке?', 'Принять')) await friends.useInvite(link.value);
+    } else if (link.kind === 'join') {
+      if (!state.cloud.loggedIn) return toast('Чтобы слушать вместе, войди в аккаунт Nyao', true);
+      if (await askConfirm(`Войти в комнату «Слушать вместе» ${link.value}?`, 'Войти')) { go('together'); joinRoom(link.value); }
+    } else if (link.kind === 'track') {
+      const t = await api.matchPlayable(link.track).catch(() => null);
+      if (!t) return toast(`Не нашёл «${link.track.title}» в подключённых сервисах`, true);
+      player.playList([t], 0, 'По ссылке');
+      if (t.source !== link.track.source) toast(`Играет из ${srcName(t.source, true)} — исходный сервис не подключён`);
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 function askText(label, value = '', btnLabel = 'Создать') {
   return new Promise((resolve) => {
     const menu = $('#menu');
@@ -2678,6 +2742,7 @@ async function handleAction(el, e) {
       toast('Открыл вход Spotify в браузере — подтверди доступ');
       try {
         state.spotify = await api.spotify.login();
+      syncSpMode();
         toast('Spotify подключён');
         api.spotify.prewarm().catch(() => {});
       } catch (err) {
@@ -2687,6 +2752,7 @@ async function handleAction(el, e) {
       break;
     case 'sp-logout':
       state.spotify = await api.spotify.logout();
+      syncSpMode();
       await afterAuthChange();
       break;
     case 'sp-debug': {
@@ -2830,7 +2896,7 @@ function renderBar() {
   const title = $('#pb-title');
   title.textContent = t ? t.title : 'Ничего не играет';
   title.title = t && t.albumRef ? 'Открыть альбом' : '';
-  $('#pb-sub').innerHTML = t ? `${badge(t.source)}${artistLink(t)}${player.label ? ' · ' + esc(player.label) : ''}` : 'Запусти «Мою волну»';
+  $('#pb-sub').innerHTML = t ? `${trackBadge(t)}${artistLink(t)}${player.label ? ' · ' + esc(player.label) : ''}` : 'Запусти «Мою волну»';
   $('#pb-play').innerHTML = player.playing ? ICONS.pause : ICONS.play;
   $('#pb-play').setAttribute('aria-label', player.playing ? 'Пауза' : 'Играть');
   const liked = t && player.liked.has(t.id);
@@ -3434,6 +3500,21 @@ function openMixBuilder() {
     if (state.route === 'settings') renderSettings();
   }).catch(() => {});
   if (api.onOutdated) api.onOutdated((min) => showOutdated(min));
+  // трек Spotify заиграл копией из другого сервиса — показываем «SP → Я»
+  if (api.spotify && api.spotify.onSubstitute) {
+    api.spotify.onSubstitute(({ id, track } = {}) => {
+      if (!id || !track) return;
+      spMode.subs.set(id, track);
+      renderBar();
+      if (state.drawer === 'queue') renderDrawer();
+      if (state.route === 'wave') RENDER.wave();
+    });
+  }
+  // ссылки, которыми открыли Nyao (и пришедшие, пока окно грузилось)
+  if (api.deepLinks) {
+    api.deepLinks.on((link) => openDeepLink(link));
+    api.deepLinks.take().then((link) => link && openDeepLink(link)).catch(() => {});
+  }
   // прошлый трек и очередь — на месте, на паузе
   try {
     const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');

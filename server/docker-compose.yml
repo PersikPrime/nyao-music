@@ -25,6 +25,9 @@ services:
       TG_RELAY: ${TG_RELAY:-}
       MIN_BUILD: ${MIN_BUILD:-0}
       FCM_SERVICE_ACCOUNT: ${FCM_SERVICE_ACCOUNT:-}
+      WEB_URL: https://${WEB_DOMAIN:-music.withnyao.app}
+      WEB_HOSTS: ${WEB_DOMAIN:-music.withnyao.app}
+      ANDROID_CERT_SHA256: ${ANDROID_CERT_SHA256:-}
       MIRROR_DIR: /data/releases
       STATUS_FILE: /data/status/status.json
     volumes:
@@ -42,6 +45,8 @@ services:
       - "443:443/udp"
     environment:
       DOMAIN: ${DOMAIN}
+      API_DOMAIN: ${API_DOMAIN:-api.music.withnyao.app}
+      WEB_DOMAIN: ${WEB_DOMAIN:-music.withnyao.app}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

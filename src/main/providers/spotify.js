@@ -12,7 +12,8 @@ const TOKEN = 'https://accounts.spotify.com/api/token';
 const BASE = 'https://api.spotify.com/v1';
 const SCOPES = [
   'streaming', 'user-read-email', 'user-read-private', 'user-read-playback-state', 'user-modify-playback-state',
-  'user-library-read', 'user-library-modify', 'playlist-read-private', 'playlist-read-collaborative'
+  'user-library-read', 'user-library-modify', 'playlist-read-private', 'playlist-read-collaborative',
+  'user-read-recently-played'
 ];
 const CLIENT_RE = /^[0-9a-fA-F]{32}$/;
 export const REGION_MSG = 'Spotify недоступен из этой страны — без VPN он не отвечает';
@@ -236,6 +237,14 @@ export class SpotifyProvider {
       offset += items.length;
     }
     return out;
+  }
+
+  /** «Недавно прослушанное» в самом Spotify (до 50 последних), новее after (мс) → [{ track, playedAt }] */
+  async recentlyPlayed(after = 0) {
+    const r = await this.request('GET', 'me/player/recently-played', { limit: '50', ...(after ? { after: String(after) } : {}) });
+    return ((r && r.items) || [])
+      .map((it) => ({ track: mapTrack(it.track), playedAt: Date.parse(it.played_at) }))
+      .filter((x) => x.track && x.playedAt);
   }
 
   async getAccount() {

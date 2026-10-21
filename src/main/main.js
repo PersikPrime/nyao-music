@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { PendingLikes } from './pending-likes.js';
+import { parseDeepLink } from './deeplink.js';
 import { safeDiagnostic } from './diagnostics.js';
 import { fileURLToPath } from 'node:url';
 import { settings, secrets } from './store.js';
@@ -44,6 +45,33 @@ function readVersion() {
   }
 }
 
+// ---------- Ссылки nyao:// (приглашения, комнаты, профили, треки) открывают это приложение ----------
+let pendingLink = null;
+function deepLink(raw) {
+  const link = parseDeepLink(raw);
+  if (!link) return;
+  if (win && !win.isDestroyed() && !win.webContents.isLoading()) {
+    showWindow();
+    win.webContents.send('deeplink', link);
+  } else pendingLink = link;
+}
+// одна копия приложения: ссылка, открытая вторым запуском, уходит в уже открытое окно
+if (!process.env.NYAO_MULTI && !app.requestSingleInstanceLock()) app.quit();
+app.on('second-instance', (_e, argv) => {
+  showWindow();
+  const url = (argv || []).find((a) => String(a).startsWith('nyao://'));
+  if (url) deepLink(url);
+});
+// macOS присылает ссылки событием, в том числе до готовности приложения
+app.on('open-url', (e, url) => {
+  e.preventDefault();
+  deepLink(url);
+});
+{
+  const first = process.argv.find((a) => String(a).startsWith('nyao://'));
+  if (first) pendingLink = parseDeepLink(first);
+}
+
 protocol.registerSchemesAsPrivileged([
   { scheme: 'nyao', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } }
 ]);
@@ -54,7 +82,7 @@ const fetchFn = (url, opts) => net.fetch(url, opts);
 let svcStatus = { maintenance: { active: false }, outages: [] };
 async function pollStatus() {
   try {
-    const res = await net.fetch(`${API_BASE}/status`, { headers: { 'X-Nyao-Build': String(readVersion().build || 0) } });
+    const res = await net.fetch(`${cloud ? cloud.base : API_BASE}/status`, { headers: { 'X-Nyao-Build': String(readVersion().build || 0) } });
     if (!res.ok) return svcStatus;
     const s = await res.json();
     svcStatus = { maintenance: s.maintenance || { active: false }, outages: Array.isArray(s.outages) ? s.outages : [] };
@@ -94,6 +122,8 @@ function spSafe(promise, fallback) {
   return Promise.race([safe(promise, fallback), new Promise((r) => setTimeout(() => r(fallback), 6000))]);
 }
 const spOn = () => sp && sp.loggedIn && !sp.regionBlocked;
+/** Копия трека Spotify из другого сервиса (настраивается при запуске, см. protocol.handle) */
+let spSubstitute = async () => null;
 
 /** Ключи Last.fm кладёт сборка (из секретов GitHub) в lastfm-keys.json рядом; без него Last.fm выключен */
 function lastfmKeys() {
@@ -118,10 +148,33 @@ function send(channel, payload) {
 }
 
 /** Сверка миксов и настроек волны с сервером Nyao */
+/**
+ * «Недавно прослушанное» Spotify (что слушал в самом Spotify, не в Nyao) → в итоги Nyao.
+ * Раз в 30 минут; сначала отправляем свои прослушивания, чтобы сервер не посчитал их дважды
+ */
+let spRecentAt = 0;
+async function importSpotifyRecent() {
+  if (!spOn() || Date.now() - spRecentAt < 30 * 60_000) return;
+  spRecentAt = Date.now();
+  const after = Math.max(Number(settings.get().spRecentAfter) || 0, Date.now() - 14 * 86_400_000);
+  let items;
+  try {
+    items = await sp.recentlyPlayed(after);
+  } catch (e) {
+    // вход до этой версии — без разрешения на историю; заработает после повторного входа в Spotify
+    if (e.code === 401 || e.code === 403) return;
+    throw e;
+  }
+  if (!items.length) return;
+  await cloud.importPlays(items.map((x) => ({ track: x.track, at: x.playedAt })));
+  settings.set({ spRecentAfter: Math.max(...items.map((x) => x.playedAt)) });
+}
+
 async function syncCloud() {
   if (!cloud || !cloud.loggedIn) return;
   try {
     await cloud.flush();
+    await importSpotifyRecent().catch((e) => console.warn(`[spotify] недавно прослушанное: ${e.message}`));
     const changed = await cloud.syncState({
       mixes: {
         get: () => readMixes(),
@@ -391,6 +444,11 @@ async function likeSoundCloud(track, on) {
 
 function registerIpc() {
   handle('win:minimize', () => win.minimize());
+  handle('deeplink:take', () => {
+    const l = pendingLink;
+    pendingLink = null;
+    return l;
+  });
   handle('win:maximize', () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   handle('win:close', () => win.close());
   handle('status:get', (force) => (force ? pollStatus() : svcStatus));
@@ -914,6 +972,13 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // ссылки nyao:// в системе ведут в Nyao Music (в собранном приложении это прописывает и установщик)
+  try {
+    if (process.defaultApp && process.argv.length >= 2) app.setAsDefaultProtocolClient('nyao', process.execPath, [path.resolve(process.argv[1])]);
+    else app.setAsDefaultProtocolClient('nyao');
+  } catch {
+    // не страшно: останется кнопка «Открыть» на странице ссылки
+  }
   // При запуске через npm start показываем нашу иконку в доке (в собранном .app она и так своя)
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
     try {
@@ -923,13 +988,50 @@ app.whenReady().then(() => {
     }
   }
   initProviders();
+  // копии треков Spotify из других сервисов: id трека Spotify → трек (значок «SP → Я»)
+  const spSubs = new Map();
+  const spFinding = new Map();
+  spSubstitute = (id, params) => {
+    if (spSubs.has(id)) return Promise.resolve(spSubs.get(id));
+    if (spFinding.has(id)) return spFinding.get(id);
+    const track = {
+      id,
+      source: 'sp',
+      srcId: id.slice(3),
+      title: String(params.get('t') || '').slice(0, 200),
+      artist: String(params.get('a') || '').slice(0, 200),
+      duration: Number(params.get('d')) || 0
+    };
+    const job = (async () => {
+      if (!track.title) return null;
+      const ok = (s) => up(s) && (s === 'yt' || s === 'sc' || (s === 'ya' && ya.loggedIn) || (s === 'vk' && vk.loggedIn));
+      for (const s of ['ya', 'yt', 'vk', 'sc'].filter(ok)) {
+        const m = await findMatch(track, (q) => ({ ya, yt, sc, vk })[s].search(q), { minScore: 0.8 }).catch(() => null);
+        if (m) {
+          spSubs.set(id, m.track);
+          while (spSubs.size > 500) spSubs.delete(spSubs.keys().next().value);
+          send('stream:substitute', { id, track: m.track });
+          return m.track;
+        }
+      }
+      return null;
+    })().finally(() => spFinding.delete(id));
+    spFinding.set(id, job);
+    return job;
+  };
   protocol.handle('nyao', async (request) => {
     const u = new URL(request.url);
     // трек Spotify: в <audio> — тишина той же длины, звук даёт устройство Spotify (см. renderer/spotify-sync.js)
-    if (u.host === 'stream' && decodeURIComponent(u.pathname.slice(1)).startsWith('sp:')) {
-      return silenceResponse(Number(u.searchParams.get('d')) || 0, request.headers.get('range'));
+    let req = request;
+    const sid = u.host === 'stream' ? decodeURIComponent(u.pathname.slice(1)) : '';
+    if (sid.startsWith('sp:')) {
+      // Spotify сам играть не может (нет Premium, регион, не вошли) — играем копию из другого сервиса
+      if (u.searchParams.get('x') !== '1' && spOn()) return silenceResponse(Number(u.searchParams.get('d')) || 0, request.headers.get('range'));
+      const sub = await spSubstitute(sid, u.searchParams).catch(() => null);
+      if (!sub) return new Response('Не нашёл этот трек в других сервисах — без Premium Spotify сам не играет', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+      req = new Request(`nyao://stream/${encodeURIComponent(sub.id)}`, { headers: request.headers });
     }
-    const res = await streams.handle(request);
+    const res = await streams.handle(req);
     // эквалайзер (Web Audio) читает звук только с разрешением CORS
     try {
       res.headers.set('access-control-allow-origin', '*');

@@ -61,6 +61,8 @@ const val SOURCE_SC = "sc"
 const val SOURCE_VK = "vk"
 /** Spotify: звук из официального Web Playback SDK, нужен Premium и свой Client ID */
 const val SOURCE_SP = "sp"
+/** Внутренний адрес nyao://spx/… — трек Spotify, который играет копией из другого сервиса */
+const val SOURCE_SPX = "spx"
 
 val ALL_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC, SOURCE_VK)
 

@@ -139,7 +139,16 @@ object Together {
     private var beat: Job? = null
 
     val REACTIONS = listOf("🔥", "❤️", "😂", "😮", "👏", "🎶")
-    const val JOIN_BASE = "https://api.nmusic.bixtl.cc/join/"
+    /** Сайт и ссылки «Поделиться» */
+    const val WEB_BASE = "https://music.withnyao.app"
+    const val JOIN_BASE = "$WEB_BASE/share/room/"
+    fun profileLink(nick: String) = "$WEB_BASE/share/u/${android.net.Uri.encode(nick)}"
+    /** Ссылка на трек: откроется в Nyao (или найдёт копию в другом сервисе) */
+    fun trackLink(t: org.nyao.music.data.Track): String = android.net.Uri.parse("$WEB_BASE/share/track/${t.id}").buildUpon()
+        .apply { if (t.title.isNotBlank()) appendQueryParameter("t", t.title.take(200)) }
+        .apply { if (t.artist.isNotBlank()) appendQueryParameter("a", t.artist.take(200)) }
+        .apply { if (t.duration > 0) appendQueryParameter("d", t.duration.toString()) }
+        .build().toString()
 
     fun parseCode(input: String): String? {
         val m = Regex("join/([A-Za-z0-9]{6})\\b").find(input)

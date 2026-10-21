@@ -55,8 +55,14 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
         scope.launch {
             engine.errors.collect { (kind, msg) ->
                 if (!isSp(player.currentMediaItem)) return@collect
+                // нет Premium или Widevine — дальше треки Spotify играют копиями из других сервисов
+                if (kind == "account" || kind == "init") {
+                    Spotify.blocked = kind
+                    switchToCopy(if (kind == "account") "Spotify без Premium — играю те же треки из Яндекса или YouTube Music" else "Плеер Spotify не запустился — играю те же треки из других сервисов")
+                    return@collect
+                }
                 PlaybackEvents.emit(msg)
-                if (kind in setOf("account", "init", "auth", "engine")) stopSp()
+                if (kind in setOf("auth", "engine")) stopSp()
                 // не играет один трек — дальше по очереди, волна не должна вставать из-за одного трека
                 else if (kind == "playback") skipSp()
             }
@@ -70,7 +76,30 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
         }
     }
 
-    private fun isSp(item: MediaItem?) = item?.mediaId?.startsWith("$SOURCE_SP:") == true
+    /** Трек Spotify, который играет сам Spotify (в ExoPlayer — тишина). Копия из другого сервиса сюда не относится */
+    private fun isSp(item: MediaItem?) = item?.mediaId?.startsWith("$SOURCE_SP:") == true &&
+        item?.localConfiguration?.uri?.scheme == SilenceDataSource.SCHEME
+
+    private var lastFallbackNote = 0L
+
+    /** Spotify не может играть сам — меняем текущий трек на найденную копию и играем дальше */
+    private fun switchToCopy(reason: String?) {
+        val idx = player.currentMediaItemIndex
+        val t = player.currentMediaItem?.mediaId?.let { org.nyao.music.data.Repo.track(it) } ?: return
+        loaded = null
+        confirmed = false
+        starting?.cancel()
+        if (engine.started) command { engine.pause() }
+        val now = SystemClock.elapsedRealtime()
+        if (reason != null && now - lastFallbackNote > 10 * 60_000L) {
+            lastFallbackNote = now
+            PlaybackEvents.emit(reason)
+        }
+        val play = player.playWhenReady
+        player.replaceMediaItem(idx, org.nyao.music.data.Repo.mediaItem(t))
+        player.prepare()
+        if (play) player.play()
+    }
     private fun idOf(item: MediaItem?) = item?.mediaId?.removePrefix("$SOURCE_SP:")
 
     /** Текущий трек и идущие за ним подряд треки Spotify (с учётом перемешивания), до 20 */
@@ -133,9 +162,9 @@ class SpotifySync(private val player: ExoPlayer, private val scope: CoroutineSco
             if (confirmed) command { engine.resume() } else pendingSince = SystemClock.elapsedRealtime()
             return
         }
-        if (!Spotify.loggedIn) {
-            PlaybackEvents.emit("Чтобы играли треки Spotify, войди в Spotify в настройках")
-            stopSp()
+        if (!org.nyao.music.data.Repo.spotifyPlayable()) {
+            // трек поставили в очередь, когда Spotify ещё мог играть, — теперь играем копию
+            switchToCopy(if (!Spotify.loggedIn) "Spotify не подключён — играю тот же трек из другого сервиса" else null)
             return
         }
         val prev = loaded

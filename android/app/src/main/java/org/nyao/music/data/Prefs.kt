@@ -137,6 +137,11 @@ class Prefs(context: Context) {
         set(v) = sp.edit().apply { if (v == null) remove("scToken") else putString("scToken", v) }.apply()
 
     /** VK: id вошедшего пользователя и адрес сайта (vk.com или vk.ru). Сама сессия — cookie WebView */
+    /** До какого момента «недавно прослушанное» Spotify уже перенесено в итоги Nyao */
+    var spRecentAfter: Long
+        get() = sp.getLong("spRecentAfter", 0L)
+        set(v) = sp.edit().putLong("spRecentAfter", v).apply()
+
     var vkUid: Long?
         get() = sp.getLong("vkUid", 0L).takeIf { it != 0L }
         set(v) = sp.edit().apply { if (v == null) remove("vkUid") else putLong("vkUid", v) }.apply()

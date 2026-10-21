@@ -1,5 +1,6 @@
 // Плеер: очередь, режимы «волна» и «список», перемотка, Media Session (медиаклавиши Windows).
 const api = window.nyao;
+import { spMode } from './sp-mode.js';
 
 // Честное перемешивание (Фишер — Йетс): sort(() => Math.random() - 0.5) даёт перекос
 function shuffled(arr) {
@@ -11,10 +12,14 @@ function shuffled(arr) {
   return a;
 }
 
+
 /** Ссылка на поток. Трек Spotify — тишина его длины (звук даёт устройство Spotify, см. spotify-sync.js) */
 export function streamSrc(t) {
   const base = `nyao://stream/${encodeURIComponent(t.id)}`;
-  return t.source === 'sp' ? `${base}?d=${Math.round(t.duration || 0)}` : base;
+  if (t.source !== 'sp') return base;
+  const q = new URLSearchParams({ d: String(Math.round(t.duration || 0)), t: t.title || '', a: t.artist || '' });
+  if (spMode.fallback) q.set('x', '1'); // x=1 — сыграть копию из другого сервиса
+  return `${base}?${q}`;
 }
 
 export class Player extends EventTarget {
@@ -197,6 +202,23 @@ export class Player extends EventTarget {
     this.queue.splice(to, 0, t);
     this.index = this.queue.indexOf(cur);
     this.emit('queue');
+  }
+
+  /** Тот же трек заново с того же места (например, переключились на копию из другого сервиса) */
+  reload() {
+    const t = this.current;
+    if (!t) return;
+    const pos = this.audio.currentTime;
+    const play = !this.audio.paused;
+    this.audio.src = streamSrc(t);
+    if (pos > 1) {
+      const once = () => {
+        this.audio.removeEventListener('loadedmetadata', once);
+        this.seek(pos);
+      };
+      this.audio.addEventListener('loadedmetadata', once);
+    }
+    if (play) this.audio.play().catch(() => {});
   }
 
   load() {

@@ -191,8 +191,14 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    SourceTag(t.source)
-                    Text("из ${org.nyao.music.data.sourceName(t.source, genitive = true)}", style = MaterialTheme.typography.bodySmall, color = pal.onContainer)
+                    val subs by org.nyao.music.data.Repo.substitutes.collectAsState()
+                    val sub = subs[t.id]
+                    org.nyao.music.ui.components.TrackSourceTag(t)
+                    Text(
+                        if (sub != null) "из ${org.nyao.music.data.sourceName(t.source, genitive = true)} → ${org.nyao.music.data.sourceName(sub.source)}"
+                        else "из ${org.nyao.music.data.sourceName(t.source, genitive = true)}",
+                        style = MaterialTheme.typography.bodySmall, color = pal.onContainer,
+                    )
                 }
             }
         }
@@ -366,7 +372,7 @@ private fun QueueRow(
             Text(q.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = pal.sub.copy(alpha = if (past) 0.7f else 1f))
         }
         org.nyao.music.ui.components.DownloadedMark(q)
-        SourceTag(q.source)
+        org.nyao.music.ui.components.TrackSourceTag(q)
         IconButton(onClick = { model.like(q, !liked) }, modifier = Modifier.size(40.dp)) {
             Icon(if (liked) NyaoIcons.Favorite else NyaoIcons.FavoriteBorder, if (liked) "Убрать из «Мне нравится»" else "Нравится", tint = if (liked) pal.accent else pal.sub, modifier = Modifier.size(20.dp))
         }
@@ -442,6 +448,17 @@ private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClos
                     onClose()
                     org.nyao.music.playback.Friends.shareRequest.value = t
                 }) { Text("Другу") }
+                androidx.compose.material3.OutlinedButton(onClick = {
+                    // ссылка на сайт: у кого есть Nyao — откроется сразу, нет нужного сервиса — найдёт копию
+                    val link = org.nyao.music.playback.Together.trackLink(t)
+                    runCatching {
+                        ctx.startActivity(android.content.Intent.createChooser(
+                            android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                                .putExtra(android.content.Intent.EXTRA_TEXT, "${t.artist} — ${t.title}\n$link"),
+                            "Поделиться треком",
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }) { Text("Ссылка") }
                 model.albumOf(t)?.let { al ->
                     androidx.compose.material3.OutlinedButton(onClick = {
                         onClose()

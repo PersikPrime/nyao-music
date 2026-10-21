@@ -45,6 +45,16 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="nyao" android:host="add" />
+                <data android:scheme="nyao" android:host="join" />
+                <data android:scheme="nyao" android:host="u" />
+                <data android:scheme="nyao" android:host="track" />
+            </intent-filter>
+            <!-- ссылки «Поделиться» на сайте: подтверждённые App Links открывают приложение сразу -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="music.withnyao.app" android:pathPrefix="/share/" />
             </intent-filter>
             <!-- ответ входа в Spotify (OAuth PKCE): Redirect URI в Spotify Dashboard -->
             <intent-filter>

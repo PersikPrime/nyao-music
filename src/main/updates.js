@@ -27,18 +27,21 @@ export function pickAsset(assets, platform = process.platform, arch = process.ar
   return null;
 }
 
-export const MIRROR = 'https://api.nmusic.bixtl.cc/updates/latest';
+export const MIRROR = 'https://api.music.withnyao.app/updates/latest';
+const LEGACY_MIRROR = 'https://api.nmusic.bixtl.cc/updates/latest';
 
-/** Сначала зеркало на сервере Nyao (быстрее из РФ), если оно молчит — GitHub */
+/** Сначала зеркало на сервере Nyao (быстрее из РФ; новый адрес, потом прежний), если оно молчит — GitHub */
 async function latestRelease(fetchFn) {
-  try {
-    const res = await fetchFn(MIRROR, { headers: { 'User-Agent': 'NyaoMusic' }, signal: AbortSignal.timeout(6000) });
-    if (res.ok) {
-      const rel = await res.json();
-      if (rel && rel.tag_name) return rel;
+  for (const url of [MIRROR, LEGACY_MIRROR]) {
+    try {
+      const res = await fetchFn(url, { headers: { 'User-Agent': 'NyaoMusic' }, signal: AbortSignal.timeout(6000) });
+      if (res.ok) {
+        const rel = await res.json();
+        if (rel && rel.tag_name) return rel;
+      }
+    } catch {
+      // сервер недоступен — не беда
     }
-  } catch {
-    // сервер недоступен — не беда
   }
   const res = await fetchFn(`https://api.github.com/repos/${REPO}/releases/latest`, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'NyaoMusic' }

@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   openExternal: (url) => call('open:external', url),
   vkLog: () => call('vk:openLog'),
+  // ссылки nyao:// и music.withnyao.app/share/…: приглашение, комната, профиль, трек
+  deepLinks: {
+    take: () => call('deeplink:take'),
+    on: (fn) => on('deeplink', fn)
+  },
   // Spotify: вход со своим Client ID, плеер — Web Playback SDK в скрытом окне главного процесса
   spotify: {
     status: () => call('spotify:status'),
@@ -55,7 +60,9 @@ contextBridge.exposeInMainWorld('nyao', {
     modes: () => call('spotify:modes'),
     snapshot: () => call('spotify:snapshot'),
     debug: () => call('spotify:debug'),
-    onState: (fn) => on('spotify:state', fn)
+    onState: (fn) => on('spotify:state', fn),
+    // трек Spotify играет копией из другого сервиса (нет Premium): { id, track }
+    onSubstitute: (fn) => on('stream:substitute', fn)
   },
   ytLog: () => call('yt:openLog'),
   version: () => call('app:version'),

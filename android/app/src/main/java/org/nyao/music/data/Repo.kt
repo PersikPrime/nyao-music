@@ -52,6 +52,29 @@ object Repo {
     private val tracks = ConcurrentHashMap<String, Track>()
     private val yaStreamCache = ConcurrentHashMap<String, Pair<String, Long>>()
 
+    // ---------- Spotify без Premium: тот же трек из другого сервиса ----------
+    private val _substitutes = MutableStateFlow<Map<String, Track>>(emptyMap())
+    /** id трека Spotify → найденная копия, которая играет вместо него (для значка «SP → Я») */
+    val substitutes: StateFlow<Map<String, Track>> = _substitutes
+
+    /** Может ли Spotify сейчас играть сам: вход, Premium (если известен), регион, рабочий плеер */
+    fun spotifyPlayable(): Boolean =
+        sp.loggedIn && !sp.regionBlocked && org.nyao.music.spotify.Spotify.blocked == null && _accounts.value[SOURCE_SP]?.plus != false
+
+    /** Копия трека Spotify в Яндексе или YouTube Music (там поток обычный, без HLS) */
+    private fun substituteFor(spId: String): Track {
+        _substitutes.value["$SOURCE_SP:$spId"]?.let { return it }
+        val t = tracks["$SOURCE_SP:$spId"] ?: throw ApiException("Нет данных о треке Spotify", 404)
+        val found = runBlocking {
+            listOf(SOURCE_YA, SOURCE_YT).filter { usable(it) }.firstNotNullOfOrNull { s ->
+                runCatching { Match.find(t) { q -> searchIn(s, q) } }.getOrNull()
+            }
+        } ?: throw ApiException("Не нашёл «${t.title}» в Яндексе и YouTube Music — без Premium Spotify сам не играет", 404)
+        tracks[found.id] = found
+        _substitutes.value = _substitutes.value + (t.id to found)
+        return found
+    }
+
     private val _accounts = MutableStateFlow<Map<String, Account?>>(mapOf(SOURCE_YA to null, SOURCE_YT to null, SOURCE_SC to null, SOURCE_VK to null, SOURCE_SP to null))
     val accounts: StateFlow<Map<String, Account?>> = _accounts
 
@@ -149,10 +172,32 @@ object Repo {
         }
     }
 
+    @Volatile private var spRecentAt = 0L
+
+    /**
+     * «Недавно прослушанное» Spotify (что слушал в самом Spotify, не в Nyao) → в итоги Nyao. Раз в 30 минут.
+     * Свои прослушивания к этому моменту уже отправлены (flush), поэтому сервер их не задвоит
+     */
+    private suspend fun importSpotifyRecent() {
+        if (!sp.loggedIn || sp.regionBlocked || System.currentTimeMillis() - spRecentAt < 30 * 60_000L) return
+        spRecentAt = System.currentTimeMillis()
+        val after = maxOf(prefs.spRecentAfter, System.currentTimeMillis() - 14 * 86_400_000L)
+        val items = try {
+            sp.recentlyPlayed(after)
+        } catch (e: org.nyao.music.spotify.SpotifyException) {
+            // вход до этой версии — без разрешения на историю; заработает после повторного входа в Spotify
+            if (e.code == 401 || e.code == 403) return else throw e
+        }
+        if (items.isEmpty()) return
+        cloud.importPlays(items)
+        prefs.spRecentAfter = items.maxOf { it.second }
+    }
+
     /** Сверка с сервером: настройки волны, вид приложения и миксы. Возвращает поменявшиеся ключи */
     suspend fun syncCloud(): List<String> {
         if (!cloud.loggedIn) return emptyList()
         runCatching { cloud.flush() }
+        runCatching { importSpotifyRecent() }
         val handlers = mapOf(
             "wave" to NyaoCloud.StateHandler({ stateData("wave") }, { d ->
                 val o = d as? org.json.JSONObject ?: return@StateHandler
@@ -517,12 +562,19 @@ object Repo {
         return MediaItem.Builder()
             .setMediaId(t.id)
             // Spotify: в ExoPlayer — тишина длиной с трек, звук даёт устройство Spotify (см. SpotifySync)
-            .setUri(if (t.source == SOURCE_SP) org.nyao.music.spotify.SilenceDataSource.uri(t.duration, t.srcId) else "nyao://${t.source}/${Uri.encode(t.srcId)}")
+            .setUri(
+                when {
+                    // Spotify без Premium (или регион/плеер недоступен): играет найденная копия из другого сервиса
+                    t.source == SOURCE_SP && !spotifyPlayable() -> "nyao://$SOURCE_SPX/${Uri.encode(t.srcId)}"
+                    t.source == SOURCE_SP -> org.nyao.music.spotify.SilenceDataSource.uri(t.duration, t.srcId)
+                    else -> "nyao://${t.source}/${Uri.encode(t.srcId)}"
+                },
+            )
             .setMediaMetadata(meta)
             // SoundCloud играет через HLS: тип нужно знать заранее, до получения ссылки
             // VK тоже отдаёт HLS (.m3u8, куски с AES-128 — ExoPlayer расшифровывает сам)
             .apply { if (t.source == SOURCE_SC || t.source == SOURCE_VK) setMimeType(MimeTypes.APPLICATION_M3U8) }
-            .apply { if (t.source == SOURCE_SP) setMimeType(MimeTypes.AUDIO_WAV) }
+            .apply { if (t.source == SOURCE_SP && spotifyPlayable()) setMimeType(MimeTypes.AUDIO_WAV) }
             .build()
     }
 
@@ -535,6 +587,10 @@ object Repo {
     fun resolve(uri: Uri): Resolved {
         val source = uri.host ?: throw ApiException("Плохая ссылка $uri")
         val id = uri.pathSegments.firstOrNull() ?: throw ApiException("Плохая ссылка $uri")
+        if (source == SOURCE_SPX) {
+            val sub = substituteFor(id)
+            return resolve(Uri.parse("nyao://${sub.source}/${Uri.encode(sub.srcId)}"))
+        }
         return if (source == SOURCE_YA) {
             val cached = yaStreamCache[id]
             val url = if (cached != null && cached.second > System.currentTimeMillis()) cached.first
@@ -557,6 +613,7 @@ object Repo {
             SOURCE_SC -> sc.forget(id)
             SOURCE_VK -> vk.forget(id)
             SOURCE_SP -> {}
+            SOURCE_SPX -> _substitutes.value["$SOURCE_SP:$id"]?.let { forgetStream(Uri.parse("nyao://${it.source}/${Uri.encode(it.srcId)}"), blocked) }
             else -> ytStreams.invalidate(id, blocked)
         }
     }

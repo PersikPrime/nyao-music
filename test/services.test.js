@@ -8,6 +8,8 @@ import { YandexProvider } from '../src/main/providers/yandex.js';
 import { SoundCloudProvider } from '../src/main/providers/soundcloud.js';
 import { findMatch, similarity } from '../src/main/match.js';
 import { SpotifySync } from '../src/renderer/spotify-sync.js';
+import { spMode } from '../src/renderer/sp-mode.js';
+spMode.fallback = false; // в этих проверках Spotify играет сам (Premium)
 import { readdirSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
