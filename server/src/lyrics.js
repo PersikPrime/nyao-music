@@ -8,6 +8,35 @@ const MAX_LINES = 500;
 const LRC_LINE = /^\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\](.*)$/;
 const LRC_META = /^\[(ar|ti|al|au|by|length|offset|re|ve|#):.*\]$/i;
 const ROLES = new Set(['specialist', 'admin']);
+/** Части песни для разметки структуры */
+export const SECTION_TYPES = ['intro', 'verse', 'pre-chorus', 'chorus', 'post-chorus', 'hook', 'bridge', 'interlude', 'outro', 'other'];
+
+/** Структура из запроса → [{ from, type }] по возрастанию, или ошибка. lines — число строк текста (без пустых) */
+export function checkStructure(raw, lines) {
+  if (raw == null || raw === '') return [];
+  let arr = raw;
+  if (typeof arr === 'string') {
+    try {
+      arr = JSON.parse(arr);
+    } catch {
+      throw new Error('Структура — не JSON');
+    }
+  }
+  if (!Array.isArray(arr)) throw new Error('Структура — это список частей');
+  if (arr.length > 100) throw new Error('Слишком много частей в структуре');
+  const out = [];
+  for (const it of arr) {
+    const from = Number(it && it.from);
+    const type = String((it && it.type) || '');
+    if (!Number.isInteger(from) || from < 0 || from >= lines) throw new Error('Часть структуры указывает на строку, которой нет');
+    if (!SECTION_TYPES.includes(type)) throw new Error(`Неизвестная часть песни: ${type || '—'}`);
+    if (out.length && from <= out[out.length - 1].from) throw new Error('Части структуры идут не по порядку');
+    out.push({ from, type });
+  }
+  return out;
+}
+
+const textLines = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boolean);
 
 /** Название и исполнитель для поиска: без регистра, скобок с feat/remaster и знаков */
 export function norm(s) {
@@ -49,8 +78,8 @@ const fmtTime = (t) => {
  * Автопроверка перед очередью специалиста. → { plain, synced, instrumental } в чистом виде,
  * или ошибка с понятной причиной (черновик сразу возвращается автору)
  */
-export function checkLyrics({ plain = '', synced = '', instrumental = false, duration = 0 }) {
-  if (instrumental) return { plain: '', synced: '', instrumental: true };
+export function checkLyrics({ plain = '', synced = '', instrumental = false, duration = 0, structure = null }) {
+  if (instrumental) return { plain: '', synced: '', instrumental: true, structure: [] };
   plain = String(plain || '').replace(/\r/g, '');
   synced = String(synced || '').replace(/\r/g, '');
   if (plain.length + synced.length > MAX_TEXT * 2 || plain.length > MAX_TEXT || synced.length > MAX_TEXT) throw new Error('Текст слишком длинный');
@@ -67,8 +96,19 @@ export function checkLyrics({ plain = '', synced = '', instrumental = false, dur
     if (duration > 0 && last > (duration + 3) * 1000) throw new Error('Последняя строка позже конца трека — проверь длительность или время');
     if (!lines.some((l) => l.text)) throw new Error('В синхронизации нет текста');
     synced = lines.map((l) => `${fmtTime(l.at)} ${l.text}`.trimEnd()).join('\n');
-    // обычный текст — из синхронизации, чтобы они не расходились
-    out = lines.map((l) => l.text).join('\n');
+    const sungLines = lines.filter((l) => l.text).map((l) => l.text);
+    if (plain.trim()) {
+      // есть и текст (с разбивкой на куплеты), и синхронизация — строки должны совпадать
+      const pl = textLines(plain);
+      const n = Math.max(pl.length, sungLines.length);
+      for (let i = 0; i < n; i++) {
+        if (pl[i] !== sungLines[i]) throw new Error(`Текст и синхронизация расходятся в строке ${i + 1}: «${pl[i] || '—'}» / «${sungLines[i] || '—'}»`);
+      }
+      out = plain;
+    } else {
+      // только LRC — текст собираем из него, пустые строки LRC — паузы между куплетами
+      out = lines.map((l) => l.text).join('\n');
+    }
   } else {
     synced = '';
     out = plain;
@@ -76,7 +116,7 @@ export function checkLyrics({ plain = '', synced = '', instrumental = false, dur
   out = out.split('\n').map((l) => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   if (!out) throw new Error('Пустой текст — или отметь трек как инструментал');
   if (out.split('\n').length > MAX_LINES) throw new Error('Слишком много строк');
-  return { plain: out, synced, instrumental: false };
+  return { plain: out, synced, instrumental: false, structure: checkStructure(structure, textLines(out).length) };
 }
 
 /** Трек и опубликованная версия → ответ в формате LRCLIB */
@@ -90,8 +130,20 @@ function lrclibShape(r) {
     duration: Number(r.duration) || 0,
     instrumental: !!r.instrumental,
     plainLyrics: r.instrumental ? null : r.plain || null,
-    syncedLyrics: r.instrumental ? null : r.synced || null
+    syncedLyrics: r.instrumental ? null : r.synced || null,
+    // расширение Nyao: части песни (куплет, припев…) по номерам строк текста
+    sections: parseStructure(r.structure),
+    cover: r.cover || null
   };
+}
+
+function parseStructure(s) {
+  try {
+    const a = s ? JSON.parse(s) : [];
+    return Array.isArray(a) ? a : [];
+  } catch {
+    return [];
+  }
 }
 
 const notFound = () => {
@@ -107,7 +159,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
   const catalogLimit = limiter(40);
   const YA_ID = /^\d{1,15}$/;
 
-  const PUBLISHED = `SELECT t.id, t.title, t.artist, t.album, t.duration, v.plain, v.synced, v.instrumental
+  const PUBLISHED = `SELECT t.id, t.title, t.artist, t.album, t.duration, v.plain, v.synced, v.instrumental, v.structure, t.cover
       FROM lyrics_tracks t JOIN lyrics_versions v ON v.id = t.published_version
      WHERE NOT t.hidden`;
 
@@ -240,7 +292,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
     }],
     ['GET', /^\/api\/track\/(\d{1,18})$/, async ({ m }) => {
       const { rows } = await q(
-        `SELECT t.id, t.title, t.artist, t.album, t.duration, t.hidden, t.cover, t.ya_id, v.plain, v.synced, v.instrumental, v.reviewed_at,
+        `SELECT t.id, t.title, t.artist, t.album, t.duration, t.hidden, t.cover, t.ya_id, v.plain, v.synced, v.instrumental, v.structure, v.reviewed_at,
                 a.name AS a_name, a.username AS a_username
            FROM lyrics_tracks t
            LEFT JOIN lyrics_versions v ON v.id = t.published_version
@@ -260,7 +312,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         cover: r.cover || null,
         yaId: r.ya_id || null,
         published: r.reviewed_at
-          ? { plain: r.plain, synced: r.synced, instrumental: !!r.instrumental, reviewedAt: r.reviewed_at, author: user(r, 'a_') }
+          ? { plain: r.plain, synced: r.synced, instrumental: !!r.instrumental, structure: parseStructure(r.structure), reviewedAt: r.reviewed_at, author: user(r, 'a_') }
           : null
       };
     }],
@@ -282,13 +334,13 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
     ['GET', /^\/api\/version\/(\d{1,18})$/, async ({ m, s }) => {
       // свой черновик (возвращённый на доработку) — чтобы поправить и отправить заново
       const { rows } = await q(
-        `SELECT v.*, t.title, t.artist, t.album, t.duration FROM lyrics_versions v JOIN lyrics_tracks t ON t.id = v.track_id WHERE v.id = $1`,
+        `SELECT v.*, t.title, t.artist, t.album, t.duration, t.cover FROM lyrics_versions v JOIN lyrics_tracks t ON t.id = v.track_id WHERE v.id = $1`,
         [m[1]]
       );
       const v = rows[0];
       if (!v) throw new HttpError(404, 'Нет такой версии');
       if (Number(v.author_id) !== s.uid && !['specialist', 'admin'].includes(await roleOf(s))) throw new HttpError(403, 'Это чужой черновик');
-      return { id: Number(v.id), status: v.status, note: v.note, plain: v.plain, synced: v.synced, instrumental: v.instrumental, track: { id: Number(v.track_id), title: v.title, artist: v.artist, album: v.album, duration: Number(v.duration) || 0 } };
+      return { id: Number(v.id), status: v.status, note: v.note, plain: v.plain, synced: v.synced, instrumental: v.instrumental, structure: parseStructure(v.structure), track: { id: Number(v.track_id), title: v.title, artist: v.artist, album: v.album, duration: Number(v.duration) || 0, cover: v.cover || null } };
     }, true],
     ['POST', /^\/api\/submit$/, async ({ req, s, ip }) => {
       writeLimit(ip);
@@ -297,7 +349,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       let duration = 0;
       const check = (d) => {
         try {
-          return checkLyrics({ plain: b.plain, synced: b.synced, instrumental: !!b.instrumental, duration: d });
+          return checkLyrics({ plain: b.plain, synced: b.synced, instrumental: !!b.instrumental, duration: d, structure: b.structure });
         } catch (e) {
           throw new HttpError(422, e.message);
         }
@@ -346,16 +398,16 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       }
       if (!clean) clean = check(duration);
       const cur = await published(trackId);
-      if (cur && cur.plain === clean.plain && cur.synced === clean.synced && !!cur.instrumental === clean.instrumental) throw new HttpError(409, 'Это совпадает с опубликованной версией — менять нечего');
+      if (cur && cur.plain === clean.plain && cur.synced === clean.synced && !!cur.instrumental === clean.instrumental && (cur.structure || '[]') === JSON.stringify(clean.structure)) throw new HttpError(409, 'Это совпадает с опубликованной версией — менять нечего');
       // один черновик на трек от автора: новая отправка заменяет прежнюю, ещё не проверенную
       const prev = await q(`SELECT id FROM lyrics_versions WHERE track_id = $1 AND author_id = $2 AND status IN ('pending', 'returned') ORDER BY id DESC LIMIT 1`, [trackId, s.uid]);
       if (prev.rows.length) {
-        await q(`UPDATE lyrics_versions SET plain = $1, synced = $2, instrumental = $3, status = 'pending', note = '', created_at = now() WHERE id = $4`, [clean.plain, clean.synced, clean.instrumental, prev.rows[0].id]);
+        await q(`UPDATE lyrics_versions SET plain = $1, synced = $2, instrumental = $3, structure = $4, status = 'pending', note = '', created_at = now() WHERE id = $5`, [clean.plain, clean.synced, clean.instrumental, JSON.stringify(clean.structure), prev.rows[0].id]);
         return { ok: true, id: Number(prev.rows[0].id), trackId, status: 'pending' };
       }
       const { rows } = await q(
-        `INSERT INTO lyrics_versions (track_id, author_id, plain, synced, instrumental) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [trackId, s.uid, clean.plain, clean.synced, clean.instrumental]
+        `INSERT INTO lyrics_versions (track_id, author_id, plain, synced, instrumental, structure) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [trackId, s.uid, clean.plain, clean.synced, clean.instrumental, JSON.stringify(clean.structure)]
       );
       return { ok: true, id: Number(rows[0].id), trackId, status: 'pending' };
     }, true],
@@ -376,7 +428,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
     ['GET', /^\/api\/review\/(\d{1,18})$/, async ({ m, s }) => {
       await need(s, 'specialist', 'admin');
       const { rows } = await q(
-        `SELECT v.*, t.title, t.artist, t.album, t.duration, a.name AS a_name, a.username AS a_username
+        `SELECT v.*, t.title, t.artist, t.album, t.duration, t.cover, a.name AS a_name, a.username AS a_username
            FROM lyrics_versions v JOIN lyrics_tracks t ON t.id = v.track_id LEFT JOIN users a ON a.id = v.author_id WHERE v.id = $1`,
         [m[1]]
       );
@@ -389,10 +441,11 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         plain: v.plain,
         synced: v.synced,
         instrumental: v.instrumental,
+        structure: parseStructure(v.structure),
         own: Number(v.author_id) === s.uid,
         author: user(v, 'a_'),
-        track: { id: Number(v.track_id), title: v.title, artist: v.artist, album: v.album, duration: Number(v.duration) || 0 },
-        current: cur ? { plain: cur.plain, synced: cur.synced, instrumental: !!cur.instrumental } : null
+        track: { id: Number(v.track_id), title: v.title, artist: v.artist, album: v.album, duration: Number(v.duration) || 0, cover: v.cover || null },
+        current: cur ? { plain: cur.plain, synced: cur.synced, instrumental: !!cur.instrumental, structure: parseStructure(cur.structure) } : null
       };
     }, true],
     ['POST', /^\/api\/review\/(\d{1,18})$/, async ({ m, s, req }) => {
@@ -414,15 +467,15 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         return { ok: true, status: action === 'return' ? 'returned' : 'rejected' };
       }
       // специалист может поправить мелочи прямо при проверке
-      let clean = { plain: v.plain, synced: v.synced, instrumental: v.instrumental };
-      if (b.plain !== undefined || b.synced !== undefined || b.instrumental !== undefined) {
+      let clean = { plain: v.plain, synced: v.synced, instrumental: v.instrumental, structure: parseStructure(v.structure) };
+      if (b.plain !== undefined || b.synced !== undefined || b.instrumental !== undefined || b.structure !== undefined) {
         try {
-          clean = checkLyrics({ plain: b.plain ?? v.plain, synced: b.synced ?? v.synced, instrumental: b.instrumental ?? v.instrumental, duration: Number(v.duration) || 0 });
+          clean = checkLyrics({ plain: b.plain ?? v.plain, synced: b.synced ?? v.synced, instrumental: b.instrumental ?? v.instrumental, structure: b.structure ?? v.structure, duration: Number(v.duration) || 0 });
         } catch (e) {
           throw new HttpError(422, e.message);
         }
       }
-      await q(`UPDATE lyrics_versions SET status = 'published', plain = $1, synced = $2, instrumental = $3, note = $4, reviewer_id = $5, reviewed_at = now() WHERE id = $6`, [clean.plain, clean.synced, clean.instrumental, note, s.uid, v.id]);
+      await q(`UPDATE lyrics_versions SET status = 'published', plain = $1, synced = $2, instrumental = $3, structure = $4, note = $5, reviewer_id = $6, reviewed_at = now() WHERE id = $7`, [clean.plain, clean.synced, clean.instrumental, JSON.stringify(clean.structure), note, s.uid, v.id]);
       await q('UPDATE lyrics_tracks SET published_version = $1 WHERE id = $2', [v.id, v.track_id]);
       return { ok: true, status: 'published' };
     }, true],

@@ -160,7 +160,9 @@ export const SCHEMA = [
   // трек из каталога Яндекса: точная привязка (одинаковые названия у разных записей не путаются) и обложка
   `ALTER TABLE lyrics_tracks ADD COLUMN IF NOT EXISTS ya_id TEXT`,
   `ALTER TABLE lyrics_tracks ADD COLUMN IF NOT EXISTS cover TEXT`,
-  `CREATE INDEX IF NOT EXISTS lyrics_tracks_ya ON lyrics_tracks (ya_id)`
+  `CREATE INDEX IF NOT EXISTS lyrics_tracks_ya ON lyrics_tracks (ya_id)`,
+  // структура песни: [{ from: номер строки текста, type: 'verse' | 'chorus' | … }] в JSON
+  `ALTER TABLE lyrics_versions ADD COLUMN IF NOT EXISTS structure TEXT NOT NULL DEFAULT ''`
 ];
 
 export async function migrate(pool) {

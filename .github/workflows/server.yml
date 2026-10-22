@@ -5,8 +5,10 @@
 name: Server deploy
 
 on:
+  # сервер и сайты (тексты, ссылки) выкатываются сами при push в main или nightly — без сборки приложений
+  # (сборки Android и ПК запускаются только от изменений в своих папках)
   push:
-    branches: [main]
+    branches: [main, nightly]
     paths: ['server/**', '.github/workflows/server.yml']
   workflow_dispatch:
 

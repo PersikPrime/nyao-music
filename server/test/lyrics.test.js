@@ -47,7 +47,16 @@ test('тексты: автопроверка и разбор LRC', () => {
   assert.throws(() => checkLyrics({ synced: 'без времени' }), /Строка 1/);
   assert.throws(() => checkLyrics({ plain: 'смотри https://spam.example' }), /Ссылки/);
   assert.throws(() => checkLyrics({ plain: '   ' }), /Пустой/);
-  assert.deepEqual(checkLyrics({ instrumental: true, plain: 'что угодно' }), { plain: '', synced: '', instrumental: true });
+  assert.deepEqual(checkLyrics({ instrumental: true, plain: 'что угодно' }), { plain: '', synced: '', instrumental: true, structure: [] });
+  // текст с куплетами + синхронизация: строки должны совпасть, разбивка на куплеты сохраняется
+  const both = checkLyrics({ plain: 'Первая строка\nВторая строка\n\nТретья', synced: LRC });
+  assert.equal(both.plain, 'Первая строка\nВторая строка\n\nТретья');
+  assert.throws(() => checkLyrics({ plain: 'Первая строка\nДругая\nТретья', synced: LRC }), /расходятся в строке 2/);
+  // структура: по номерам строк текста, по порядку, известные части
+  assert.deepEqual(checkLyrics({ plain: 'а\nб\n\nв', structure: [{ from: 0, type: 'verse' }, { from: 2, type: 'chorus' }] }).structure, [{ from: 0, type: 'verse' }, { from: 2, type: 'chorus' }]);
+  assert.throws(() => checkLyrics({ plain: 'а\nб', structure: [{ from: 5, type: 'verse' }] }), /строку, которой нет/);
+  assert.throws(() => checkLyrics({ plain: 'а\nб', structure: [{ from: 1, type: 'verse' }, { from: 0, type: 'chorus' }] }), /не по порядку/);
+  assert.throws(() => checkLyrics({ plain: 'а', structure: [{ from: 0, type: 'solo' }] }), /Неизвестная/);
   assert.equal(checkLyrics({ plain: 'а\n\n\n\nб' }).plain, 'а\n\nб');
 });
 
@@ -95,6 +104,13 @@ test('тексты: отправка → проверка специалисто
     assert.equal(got.json.albumName, 'Альбом');
     assert.match(got.json.syncedLyrics, /\[00:30\.00\] Четвёртая$/);
     assert.equal(got.json.plainLyrics.split('\n').length, 4);
+    assert.deepEqual(got.json.sections, []);
+    // правка только структуры — тоже правка
+    const st = await t.call('POST', '/api/submit', { token: author.token, body: { trackId: got.json.id, synced: got.json.syncedLyrics, structure: [{ from: 0, type: 'verse' }, { from: 2, type: 'chorus' }] } });
+    assert.equal(st.status, 200);
+    await t.call('POST', `/api/review/${st.json.id}`, { token: spec.token, body: { action: 'accept' } });
+    assert.deepEqual((await t.call('GET', `/api/get/${got.json.id}`)).json.sections, [{ from: 0, type: 'verse' }, { from: 2, type: 'chorus' }]);
+    assert.equal((await t.call('GET', `/api/track/${got.json.id}`)).json.published.structure[1].type, 'chorus');
     assert.equal((await t.call('GET', '/api/get?artist_name=Группа&track_name=Песня&duration=200')).status, 404, 'другая длительность — другая версия трека');
     assert.equal((await t.call('GET', `/api/get/${got.json.id}`)).json.id, got.json.id);
     assert.equal((await t.call('GET', '/api/search?q=груп пес')).json.length, 1);
@@ -103,7 +119,7 @@ test('тексты: отправка → проверка специалисто
     // правка: пока не проверена, в API старая версия; своя правка специалиста — только чужими руками
     const edit = await t.call('POST', '/api/submit', { token: spec.token, body: { trackId: got.json.id, plain: 'Совсем другой текст' } });
     assert.equal(edit.status, 200);
-    assert.equal((await t.call('POST', '/api/submit', { token: spec.token, body: { trackId: got.json.id, synced: got.json.syncedLyrics } })).status, 409, 'без изменений — нечего проверять');
+    assert.equal((await t.call('POST', '/api/submit', { token: spec.token, body: { trackId: got.json.id, synced: got.json.syncedLyrics, structure: [{ from: 0, type: 'verse' }, { from: 2, type: 'chorus' }] } })).status, 409, 'без изменений — нечего проверять');
     assert.match((await t.call('GET', `/api/get/${got.json.id}`)).json.syncedLyrics, /Четвёртая/);
     assert.equal((await t.call('POST', `/api/review/${edit.json.id}`, { token: spec.token, body: { action: 'accept' } })).status, 403);
     const ret = await t.call('POST', `/api/review/${edit.json.id}`, { token: owner.token, body: { action: 'return', note: 'Верни синхронизацию' } });
