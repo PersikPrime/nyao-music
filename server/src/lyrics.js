@@ -6,6 +6,7 @@
 const MAX_TEXT = 20_000;
 const MAX_LINES = 500;
 const LRC_LINE = /^\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\](.*)$/;
+const LRC_TAG = /^\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/;
 const LRC_META = /^\[(ar|ti|al|au|by|length|offset|re|ve|#):.*\]$/i;
 const ROLES = new Set(['specialist', 'admin']);
 /** Части песни для разметки структуры */
@@ -53,11 +54,13 @@ export function norm(s) {
 // ---------- TTML (формат текстов Apple Music): по строкам, с частями песни ----------
 const TTML_PART = { intro: 'Intro', verse: 'Verse', 'pre-chorus': 'PreChorus', chorus: 'Chorus', 'post-chorus': 'PostChorus', hook: 'Hook', bridge: 'Bridge', interlude: 'Interlude', outro: 'Outro', other: 'Other' };
 const xmlEsc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]);
+// время по стандарту TTML (clock-time): чч:мм:сс.ммм
 const ttmlTime = (ms) => {
   ms = Math.max(0, Math.round(ms));
-  const m = Math.floor(ms / 60000);
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
   const s = ((ms % 60000) / 1000).toFixed(3).padStart(6, '0');
-  return `${m}:${s}`;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s}`;
 };
 
 /**
@@ -65,7 +68,8 @@ const ttmlTime = (ms) => {
  * части песни — <div itunes:songPart>. Нужна синхронизация по строкам.
  */
 export function toTtml({ title, artist, duration = 0, plain = '', synced = '', structure = [] }) {
-  const timed = parseLrc(synced).filter((l) => l.text);
+  const all = parseLrc(synced);
+  const timed = all.filter((l) => l.text);
   const lines = textLines(plain);
   if (!timed.length || timed.length !== lines.length) return null;
   const starts = new Map((structure || []).map((s) => [s.from, s.type]));
@@ -79,17 +83,22 @@ export function toTtml({ title, artist, duration = 0, plain = '', synced = '', s
     gap = false;
     i++;
   }
-  const end = (k) => (k + 1 < timed.length ? timed[k + 1].at : duration > 0 ? Math.max(timed[k].at + 1000, duration * 1000) : timed[k].at + 4000);
+  // конец строки — следующая метка LRC, в том числе пустая (пауза, проигрыш): строка не висит на экране весь проигрыш
+  const nextAt = timed.map((l) => {
+    const i = all.indexOf(l);
+    const nx = all.slice(i + 1).find((x) => x.at > l.at);
+    return nx ? nx.at : null;
+  });
+  const end = (k) => nextAt[k] ?? (duration > 0 ? Math.max(timed[k].at + 1000, duration * 1000) : timed[k].at + 4000);
   const divs = [];
   timed.forEach((l, k) => {
     if (!divs.length || gaps.has(k) || starts.has(k)) divs.push({ type: starts.get(k) || null, lines: [] });
     divs[divs.length - 1].lines.push(k);
   });
+  // у <div> времени нет: по стандарту время <p> внутри считалось бы от начала div, а у нас оно от начала трека
   const body = divs.map((d) => {
-    const first = d.lines[0];
-    const last = d.lines[d.lines.length - 1];
     const part = d.type ? ` itunes:songPart="${TTML_PART[d.type] || 'Other'}"` : '';
-    return `    <div begin="${ttmlTime(timed[first].at)}" end="${ttmlTime(end(last))}"${part}>\n${d.lines.map((k) => `      <p begin="${ttmlTime(timed[k].at)}" end="${ttmlTime(end(k))}">${xmlEsc(timed[k].text)}</p>`).join('\n')}\n    </div>`;
+    return `    <div${part}>\n${d.lines.map((k) => `      <p begin="${ttmlTime(timed[k].at)}" end="${ttmlTime(end(k))}">${xmlEsc(timed[k].text)}</p>`).join('\n')}\n    </div>`;
   }).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="Line">
@@ -131,16 +140,26 @@ const ms = (m, s, f = '') => (Number(m) * 60 + Number(s)) * 1000 + (f ? Math.rou
 /** Разбор LRC: строки по времени. Ошибка — с номером строки, чтобы автор понял, где поправить */
 export function parseLrc(text) {
   const lines = [];
+  let multi = false;
   const src = String(text || '').replace(/\r/g, '').split('\n');
   for (let i = 0; i < src.length; i++) {
     const raw = src[i].trim();
     if (!raw || LRC_META.test(raw)) continue;
-    const m = LRC_LINE.exec(raw);
-    if (!m) throw new Error(`Строка ${i + 1}: нет метки времени [мм:сс.xx]`);
-    if (Number(m[2]) > 59) throw new Error(`Строка ${i + 1}: секунд больше 59`);
-    lines.push({ at: ms(m[1], m[2], m[3]), text: m[4].trim() });
+    // сжатый LRC: «[00:10.00][01:20.00] припев» — одна строка на несколько мест
+    const tags = [];
+    let rest = raw;
+    let m;
+    while ((m = LRC_TAG.exec(rest))) {
+      tags.push(m);
+      rest = rest.slice(m[0].length);
+    }
+    if (!tags.length) throw new Error(`Строка ${i + 1}: нет метки времени [мм:сс.xx]`);
+    if (tags.some((t) => Number(t[2]) > 59)) throw new Error(`Строка ${i + 1}: секунд больше 59`);
+    if (tags.length > 1) multi = true;
+    for (const t of tags) lines.push({ at: ms(t[1], t[2], t[3]), text: rest.trim() });
   }
-  return lines;
+  // строки сжатого LRC расставляем по времени (обычный LRC не трогаем — там порядок проверяет автопроверка)
+  return multi ? lines.sort((a, b) => a.at - b.at) : lines;
 }
 
 const fmtTime = (t) => {
@@ -666,29 +685,44 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
     ['POST', /^\/api\/admin\/import-release$/, async ({ s, req }) => {
       await need(s, 'specialist', 'admin');
       const b = await readJson(req);
-      const tracks = Array.isArray(b.tracks) ? b.tracks.slice(0, 200) : [];
-      if (!tracks.length) throw new HttpError(400, 'В релизе нет треков');
+      const all = Array.isArray(b.tracks) ? b.tracks : [];
+      if (!all.length) throw new HttpError(400, 'В релизе нет треков');
+      if (all.length > 200) throw new HttpError(413, 'За раз — до 200 треков: сайт отправляет большой релиз частями');
+      const tracks = all;
       const album = clip(String((b.release && b.release.title) || '').trim(), 200);
       const out = [];
-      for (const t of tracks) {
-        const title = clip(String(t.title || '').trim(), 200);
-        const artist = clip(String(t.artist || '').trim(), 200);
+      for (const raw of tracks) {
+        const t = raw && typeof raw === 'object' ? raw : {};
+        const title = clip(typeof t.title === 'string' ? t.title.trim() : '', 200);
+        const artist = clip(typeof t.artist === 'string' ? t.artist.trim() : '', 200);
         const duration = Math.max(0, Math.min(36000, Math.round(Number(t.duration) || 0)));
-        const isrc = normIsrc(t.isrc);
+        const isrc = normIsrc(typeof t.isrc === 'string' ? t.isrc : '');
         if (!norm(title) || !norm(artist) || !duration || !isrc) {
-          out.push({ title, isrc: t.isrc || null, status: 'error', error: !isrc ? 'нет ISRC' : !duration ? 'нет длительности' : 'нет названия или исполнителя' });
+          out.push({ title, isrc: typeof t.isrc === 'string' ? clip(t.isrc, 20) : null, status: 'error', error: !isrc ? 'нет ISRC' : !duration ? 'нет длительности' : 'нет названия или исполнителя' });
           continue;
         }
-        const ex = await q('SELECT id FROM lyrics_tracks WHERE isrc = $1 ORDER BY id LIMIT 1', [isrc]);
-        if (ex.rows.length) {
-          out.push({ title, isrc, status: 'exists', id: Number(ex.rows[0].id) });
-          continue;
+        try {
+          const ex = await q('SELECT id FROM lyrics_tracks WHERE isrc = $1 ORDER BY id LIMIT 1', [isrc]);
+          if (ex.rows.length) {
+            out.push({ title, isrc, status: 'exists', id: Number(ex.rows[0].id) });
+            continue;
+          }
+          // трек уже заводили без ISRC (вручную или из Яндекса) — привязываем код к нему, а не плодим второй
+          const same = await findTrack(title, artist, duration, false);
+          const known = same ? (await q('SELECT id, isrc FROM lyrics_tracks WHERE id = $1', [same.id])).rows[0] : null;
+          if (known && !known.isrc) {
+            await q('UPDATE lyrics_tracks SET isrc = $1 WHERE id = $2', [isrc, known.id]);
+            out.push({ title, isrc, status: 'exists', id: Number(known.id) });
+            continue;
+          }
+          const { rows } = await q(
+            `INSERT INTO lyrics_tracks (title, artist, album, duration, title_norm, artist_norm, isrc) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+            [title, artist, clip(typeof t.album === 'string' ? t.album.trim() : '', 200) || album, duration, norm(title), norm(artist), isrc]
+          );
+          out.push({ title, isrc, status: 'created', id: Number(rows[0].id) });
+        } catch {
+          out.push({ title, isrc, status: 'error', error: 'не сохранился, попробуй ещё раз' });
         }
-        const { rows } = await q(
-          `INSERT INTO lyrics_tracks (title, artist, album, duration, title_norm, artist_norm, isrc) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-          [title, artist, clip(String(t.album || '').trim(), 200) || album, duration, norm(title), norm(artist), isrc]
-        );
-        out.push({ title, isrc, status: 'created', id: Number(rows[0].id) });
       }
       return { items: out };
     }, true],

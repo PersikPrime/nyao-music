@@ -333,9 +333,12 @@ test('тексты: TTML и импорт релиза DDEX', async () => {
   const { toTtml } = await import('../src/lyrics.js');
   const xml = toTtml({ title: 'Песня & Co', artist: 'Группа', duration: 30, plain: 'Раз\nДва\n\nТри', synced: '[00:01.00] Раз\n[00:02.50] Два\n[00:10.00] Три', structure: [{ from: 0, type: 'verse' }, { from: 2, type: 'chorus' }] });
   assert.match(xml, /<ttm:title>Песня &amp; Co<\/ttm:title>/);
-  assert.match(xml, /<div begin="0:01.000" end="0:10.000" itunes:songPart="Verse">/);
-  assert.match(xml, /<p begin="0:02.500" end="0:10.000">Два<\/p>/);
-  assert.match(xml, /itunes:songPart="Chorus">\n\s+<p begin="0:10.000" end="0:30.000">Три<\/p>/);
+  assert.match(xml, /<div itunes:songPart="Verse">/);
+  assert.match(xml, /<p begin="00:00:02.500" end="00:00:10.000">Два<\/p>/);
+  assert.match(xml, /itunes:songPart="Chorus">\n\s+<p begin="00:00:10.000" end="00:00:30.000">Три<\/p>/);
+  // пауза в LRC (пустая метка) — конец строки перед проигрышем
+  const pause = toTtml({ title: 'x', artist: 'y', plain: 'Раз\nДва', synced: '[00:10.00] Раз\n[00:15.00]\n[00:45.00] Два' });
+  assert.match(pause, /<p begin="00:00:10.000" end="00:00:15.000">Раз<\/p>/);
   assert.equal(toTtml({ title: 'x', artist: 'y', plain: 'a', synced: '' }), null, 'без синхронизации TTML не собрать');
 
   const t = await setup();
@@ -363,6 +366,17 @@ test('тексты: TTML и импорт релиза DDEX', async () => {
     assert.equal(tr.album, 'Дебютный EP');
     assert.equal(tr.published, null);
     assert.deepEqual((await t.call('POST', '/api/admin/import-release', { token: owner.token, body: rel })).json.items.map((x) => x.status), ['exists', 'exists', 'error'], 'повторный импорт ничего не дублирует');
+    // мусор в списке треков не роняет импорт, а длинный «ISRC» обрезается в ответе
+    const junk = (await t.call('POST', '/api/admin/import-release', { token: owner.token, body: { tracks: [null, 1, { title: 'x', isrc: 'Z'.repeat(5000) }] } })).json.items;
+    assert.deepEqual(junk.map((x) => x.status), ['error', 'error', 'error']);
+    assert.ok(junk[2].isrc.length <= 20);
+    assert.equal((await t.call('POST', '/api/admin/import-release', { token: owner.token, body: { tracks: Array.from({ length: 201 }, () => ({})) } })).status, 413);
+    // трек уже заведён без ISRC — импорт привязывает код к нему, а не создаёт второй
+    const manual = await t.call('POST', '/api/submit', { token: author.token, body: { track: { title: 'Третий', artist: 'Лейбл Бэнд, Гость', duration: 150 }, plain: 'Текст третьего' } });
+    const linked = (await t.call('POST', '/api/admin/import-release', { token: owner.token, body: { tracks: [{ title: 'Третий', artist: 'Лейбл Бэнд', duration: 151, isrc: 'RUA122600003' }] } })).json.items[0];
+    assert.equal(linked.status, 'exists');
+    assert.equal(linked.id, manual.json.trackId);
+    assert.equal((await t.call('GET', `/api/track/${manual.json.trackId}`)).json.isrc, 'RUA122600003');
     // текст к импортированному треку — обычной отправкой; находится по ISRC
     const s2 = await t.call('POST', '/api/submit', { token: author.token, body: { trackId: imp[0].id, plain: 'Текст первого' } });
     await t.call('POST', `/api/review/${s2.json.id}`, { token: owner.token, body: { action: 'accept' } });
@@ -370,4 +384,14 @@ test('тексты: TTML и импорт релиза DDEX', async () => {
   } finally {
     t.close();
   }
+});
+
+test('LRC: сжатые строки с несколькими метками и имя файла для скачивания', async () => {
+  const { parseLrc } = await import('../src/lyrics.js');
+  const { contentDisposition } = await import('../src/app.js');
+  assert.deepEqual(parseLrc('[00:10.00][00:30.00] Припев\n[00:20.00] Куплет').map((l) => [l.at, l.text]), [[10000, 'Припев'], [20000, 'Куплет'], [30000, 'Припев']]);
+  const cd = contentDisposition("Don't Stop (Live) — Фролов.ttml");
+  assert.match(cd, /^attachment; filename="Don't Stop \(Live\)  .ttml"|^attachment; filename="[^"]+"; filename\*=UTF-8''/);
+  assert.match(cd, /filename\*=UTF-8''Don%27t%20Stop%20%28Live%29/);
+  assert.doesNotMatch(cd.split("UTF-8''")[1], /['()!*]/);
 });

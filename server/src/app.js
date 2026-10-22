@@ -461,7 +461,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         // файл не-JSON (например, TTML с текстом песни): { __raw: { type, body, filename? } }
         if (out && out.__raw) {
           const r = out.__raw;
-          return send(res, 200, r.body, { 'Content-Type': r.type, ...(r.filename ? { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(r.filename)}` } : {}) });
+          return send(res, 200, r.body, { 'Content-Type': r.type, ...(r.filename ? { 'Content-Disposition': contentDisposition(r.filename) } : {}) });
         }
         return send(res, 200, out);
       }
@@ -473,6 +473,13 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       return send(res, e.status || 500, { error: e instanceof HttpError ? e.message : 'Ошибка сервера', ...(e.extra || {}) });
     }
   };
+}
+
+/** Имя файла для скачивания: ASCII-запасное filename и точное filename* (RFC 5987) */
+export function contentDisposition(name) {
+  const ascii = String(name).normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/["\\]/g, '').trim() || 'download';
+  const star = encodeURIComponent(name).replace(/['()*!]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${star}`;
 }
 
 function serveFile(req, res, file) {

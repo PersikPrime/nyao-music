@@ -318,9 +318,28 @@ function toLines(plain) {
   return out;
 }
 const toPlain = (lines) => lines.map((l, i) => (l.gap && i ? '\n' : '') + l.text).join('\n');
+/** LRC → [{ at, text }]; сжатые строки «[00:10.00][01:20.00] припев» разворачиваются и расставляются по времени */
 function lrcLines(synced) {
-  return String(synced || '').split('\n').map((l) => /^\[(\d+):(\d{2})(?:[.:](\d{1,3}))?\]\s?(.*)$/.exec(l.trim())).filter(Boolean)
-    .map((m) => ({ at: (Number(m[1]) * 60 + Number(m[2])) * 1000 + (m[3] ? Number(m[3].padEnd(3, '0')) : 0), text: m[4].trim() }));
+  const out = [];
+  let multi = false;
+  for (const raw of String(synced || '').split('\n')) {
+    let rest = raw.trim();
+    const tags = [];
+    let m;
+    while ((m = /^\[(\d+):(\d{2})(?:[.:](\d{1,3}))?\]/.exec(rest))) { tags.push(m); rest = rest.slice(m[0].length); }
+    if (tags.length > 1) multi = true;
+    for (const t of tags) out.push({ at: (Number(t[1]) * 60 + Number(t[2])) * 1000 + (t[3] ? Number(t[3].padEnd(3, '0')) : 0), text: rest.trim() });
+  }
+  return multi ? out.sort((a, b) => a.at - b.at) : out;
+}
+/** LRC → строки редактора: пустые метки (паузы) становятся границей куплета */
+function linesFromLrc(text) {
+  const lrc = lrcLines(text);
+  if (!lrc.length) throw new Error('Не нашёл строк с временем');
+  let gap = false;
+  const next = [];
+  for (const l of lrc) { if (!l.text) { gap = next.length > 0; continue; } next.push({ text: l.text, at: l.at, gap }); gap = false; }
+  return next;
 }
 /** Опубликованный текст → строки с временем и куплетами */
 function versionLines(v) {
@@ -342,7 +361,7 @@ function stanzas(lines, structure) {
 }
 
 // ---------- Импорт файлов: LRC, TTML (Apple Music), DDEX ERN ----------
-const byLocal = (root, name) => [...root.getElementsByTagName('*')].filter((e) => e.localName === name);
+const byLocal = (root, name) => [...root.getElementsByTagNameNS('*', name)];
 const firstText = (root, ...names) => { for (const n of names) { const e = byLocal(root, n)[0]; if (e && e.textContent.trim()) return e.textContent.trim(); } return ''; };
 const attrLocal = (el, name) => { for (const a of el.attributes) if (a.localName === name) return a.value; return null; };
 function parseXml(text) {
@@ -350,15 +369,23 @@ function parseXml(text) {
   if (doc.getElementsByTagName('parsererror').length) throw new Error('Файл не похож на XML');
   return doc;
 }
-/** Время TTML: «12.5», «12.5s», «1:02.345», «00:01:02.345», «1500ms» → мс */
-function ttmlMs(v) {
+/**
+ * Время TTML → мс: «12.5», «12.5s», «1.5m», «0.1h», «1500ms», «90f», «1:02.345», «00:01:02.345»,
+ * «00:01:02:12» (кадры, fps из ttp:frameRate, по умолчанию 30)
+ */
+function ttmlMs(v, fps = 30) {
   if (v == null || v === '') return null;
   v = String(v).trim();
   let m;
-  if ((m = /^([\d.]+)ms$/.exec(v))) return Math.round(Number(m[1]));
-  if ((m = /^([\d.]+)s?$/.exec(v))) return Math.round(Number(m[1]) * 1000);
+  if ((m = /^([\d.]+)(h|m|s|ms|f|t)?$/.exec(v))) {
+    const n = Number(m[1]);
+    if (Number.isNaN(n)) return null;
+    const k = { h: 3600000, m: 60000, s: 1000, ms: 1, f: 1000 / fps, t: 1000 / fps }[m[2] || 's'];
+    return Math.round(n * k);
+  }
   const p = v.split(':').map(Number);
-  if (p.some((x) => Number.isNaN(x))) return null;
+  if (p.length < 2 || p.length > 4 || p.some((x) => Number.isNaN(x))) return null;
+  if (p.length === 4) return Math.round((p[0] * 3600 + p[1] * 60 + p[2] + p[3] / fps) * 1000);
   return Math.round((p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1]) * 1000);
 }
 const TTML_TO_SECTION = { intro: 'intro', verse: 'verse', prechorus: 'pre-chorus', 'pre-chorus': 'pre-chorus', chorus: 'chorus', postchorus: 'post-chorus', 'post-chorus': 'post-chorus', hook: 'hook', bridge: 'bridge', interlude: 'interlude', outro: 'outro' };
@@ -368,10 +395,16 @@ function parseTtml(text) {
   const lines = [];
   const structure = new Map();
   let words = false;
+  const fps = Number(attrLocal(doc.documentElement, 'frameRate')) || 30;
   for (const div of byLocal(doc, 'div')) {
     const part = (attrLocal(div, 'songPart') || '').toLowerCase().replace(/[\s_]/g, '');
     let firstInDiv = true;
-    for (const p of byLocal(div, 'p')) {
+    const ps = byLocal(div, 'p');
+    // по стандарту время <p> считается от начала <div>; файлы в стиле Apple пишут абсолютное время.
+    // Если какая-то строка «раньше» своего div — значит, время относительное, прибавляем начало div
+    const divAt = ttmlMs(div.getAttribute('begin'), fps) || 0;
+    const relative = divAt > 0 && ps.some((p) => { const b = ttmlMs(p.getAttribute('begin'), fps); return b != null && b < divAt; });
+    for (const p of ps) {
       const spans = byLocal(p, 'span').filter((sp) => sp.hasAttribute('begin'));
       if (spans.length) words = true;
       // бэк-вокал (ttm:role="x-bg") — в скобках, как обычно пишут в текстах
@@ -379,7 +412,8 @@ function parseTtml(text) {
       for (const bg of byLocal(clone, 'span').filter((sp) => attrLocal(sp, 'role') === 'x-bg')) bg.textContent = ` (${bg.textContent.trim().replace(/^\(|\)$/g, '')}) `;
       const t = clone.textContent.replace(/\s+/g, ' ').trim();
       if (!t) continue;
-      const at = ttmlMs(p.getAttribute('begin')) ?? (spans[0] ? ttmlMs(spans[0].getAttribute('begin')) : null);
+      const own = ttmlMs(p.getAttribute('begin'), fps) ?? (spans[0] ? ttmlMs(spans[0].getAttribute('begin'), fps) : null);
+      const at = own == null ? null : own + (relative ? divAt : 0);
       if (firstInDiv && part && TTML_TO_SECTION[part]) structure.set(lines.length, TTML_TO_SECTION[part]);
       lines.push({ text: t, at, gap: firstInDiv && lines.length > 0 });
       firstInDiv = false;
@@ -703,14 +737,9 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
           state.structure = r.structure;
           toast(r.words ? 'TTML загружен. Пословное время пока сводится к строкам' : `TTML загружен: ${r.lines.length} строк`);
         } else {
-          const lrc = lrcLines(text);
-          if (!lrc.length) throw new Error('Не нашёл строк с временем');
-          let gap = false;
-          const next = [];
-          for (const l of lrc) { if (!l.text) { gap = next.length > 0; continue; } next.push({ text: l.text, at: l.at, gap }); gap = false; }
-          state.lines = next;
+          state.lines = linesFromLrc(text);
           state.structure.clear();
-          toast(`LRC загружен: ${next.length} строк`);
+          toast(`LRC загружен: ${state.lines.length} строк`);
         }
         state.instrumental = false;
         changed();
@@ -720,12 +749,7 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
     $('#paste').onclick = () => {
       const v = prompt('Вставь LRC — строки вида [00:12.30] Текст');
       if (!v) return;
-      const lrc = lrcLines(v);
-      if (!lrc.length) { toast('Не нашёл строк с временем'); return; }
-      let gap = false;
-      const next = [];
-      for (const l of lrc) { if (!l.text) { gap = next.length > 0; continue; } next.push({ text: l.text, at: l.at, gap }); gap = false; }
-      state.lines = next;
+      try { state.lines = linesFromLrc(v); } catch (err) { toast(err.message); return; }
       state.structure.clear();
       changed();
       show('sync');
@@ -1032,7 +1056,13 @@ async function importPage() {
     $('go').onclick = async () => {
       $('go').disabled = true;
       try {
-        const { items } = await api('POST', '/api/admin/import-release', { release: rel.release, tracks: rel.tracks });
+        // большой релиз — частями по 200 треков
+        const items = [];
+        for (let i = 0; i < rel.tracks.length; i += 200) {
+          $('msg').textContent = rel.tracks.length > 200 ? `Импорт: ${i} из ${rel.tracks.length}…` : '';
+          const r = await api('POST', '/api/admin/import-release', { release: rel.release, tracks: rel.tracks.slice(i, i + 200) });
+          items.push(...r.items);
+        }
         const label = { created: ['добавлен', 'ok'], exists: ['уже был', ''], error: ['ошибка', 'bad'] };
         $('prev').innerHTML = `<h2>Готово</h2><div class="list">${items.map((x) => `<div class="item"><div class="grow"><div class="t">${esc(x.title)}</div><div class="muted small">${x.isrc ? 'ISRC ' + esc(x.isrc) : ''}${x.error ? ' · ' + esc(x.error) : ''}</div></div><span class="tag ${label[x.status][1]}">${label[x.status][0]}</span>${x.id ? `<a class="btn sm" href="/edit/${x.id}" data-link>Добавить текст</a>` : ''}</div>`).join('')}</div>`;
       } catch (err) { $('msg').className = 'small err'; $('msg').textContent = err.message; $('go').disabled = false; }
