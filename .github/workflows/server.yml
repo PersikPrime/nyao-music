@@ -133,3 +133,7 @@ jobs:
           else
             echo "::warning::Каталог Яндекса на сайте текстов не отвечает ($code): $(head -c 200 /tmp/cat.json)"
           fi
+          # ссылки Spotify: сервер читает публичную страницу трека; если Spotify не пускает сервер — предупреждение
+          sp="https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"
+          code=$(curl -s -o /tmp/sp.json -w '%{http_code}' "https://$LYRICS_DOMAIN/api/catalog/link?url=$(printf '%s' "$sp" | jq -sRr @uri)")
+          if [ "$code" = "200" ]; then echo "ссылки Spotify работают: $(jq -c '.fallback' /tmp/sp.json)"; else echo "::warning::Ссылки Spotify на сайте текстов не работают ($code): $(head -c 200 /tmp/sp.json)"; fi

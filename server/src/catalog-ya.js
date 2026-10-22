@@ -48,6 +48,34 @@ export class YaCatalog {
     return ((r && r.tracks && r.tracks.results) || []).map(mapYaTrack).filter((t) => t && t.title && t.artist).slice(0, 20);
   }
 
+  /**
+   * Метаданные трека по публичной странице open.spotify.com (og-теги, без входа и ключей).
+   * → { title, artist, album, duration, cover } или null
+   */
+  async spotifyTrack(id) {
+    const key = `sp:${id}`;
+    const hit = this.cache.get(key);
+    if (hit && hit.until > Date.now()) return hit.data;
+    const res = await this.fetch(`https://open.spotify.com/track/${encodeURIComponent(id)}`, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NyaoLyricLabs/1.0)', 'Accept-Language': 'en' }, signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw Object.assign(new Error(`Spotify ответил ${res.status}`), { status: res.status });
+    const html = await res.text();
+    const meta = (name) => {
+      const m = new RegExp(`<meta[^>]+(?:property|name)="${name}"[^>]+content="([^"]*)"`, 'i').exec(html) || new RegExp(`<meta[^>]+content="([^"]*)"[^>]+(?:property|name)="${name}"`, 'i').exec(html);
+      return m ? m[1].replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>') : '';
+    };
+    const title = meta('og:title');
+    // исполнитель: тег music:musician_description, заголовок «Трек - song and lyrics by Исполнитель | Spotify»
+    // или описание вида «Listen to … on Spotify. Song · Исполнитель · 2021»
+    const head = /<title>([^<]*)<\/title>/i.exec(html);
+    const byTitle = head && / - song(?: and lyrics)? by (.+?) \| Spotify\s*$/i.exec(head[1].replace(/&amp;/g, '&'));
+    const parts = meta('og:description').replace(/^Listen to .*? on Spotify\.\s*/i, '').split(' · ').map((x) => x.trim())
+      .filter((x) => x && x !== title && !/^(song|single|album|ep|\d{4})$/i.test(x));
+    const artist = meta('music:musician_description') || (byTitle && byTitle[1]) || parts[0] || '';
+    const data = title && artist ? { title, artist, album: '', duration: Number(meta('music:duration')) || 0, cover: meta('og:image') || null } : null;
+    this.cache.set(key, { data, until: Date.now() + TTL });
+    return data;
+  }
+
   /** Трек по id (для «Добавить текст» по ссылке и проверки метаданных при отправке) */
   async track(id) {
     const r = await this.get(`/tracks/${encodeURIComponent(id)}`);

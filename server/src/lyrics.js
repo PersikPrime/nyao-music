@@ -277,6 +277,36 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       }
       return { items: await withLyrics(items) };
     }],
+    // ссылка на трек: Яндекс Музыка — сразу трек каталога; Spotify — мета со страницы и поиск того же трека в Яндексе
+    ['GET', /^\/api\/catalog\/link$/, async ({ url, ip }) => {
+      catalogLimit(ip);
+      if (!catalog) throw new HttpError(503, 'Каталог недоступен');
+      const link = String(url.searchParams.get('url') || '').trim().slice(0, 300);
+      const ya = /music\.yandex\.(?:ru|com|by|kz|uz)\/(?:album\/\d+\/)?track\/(\d{1,15})/i.exec(link);
+      if (ya) {
+        const t = await catalog.track(ya[1]).catch(() => null);
+        if (!t) throw new HttpError(404, 'Не нашёл этот трек в каталоге Яндекса');
+        return { source: 'ya', items: await withLyrics([t]), fallback: null };
+      }
+      const sp = /open\.spotify\.com\/(?:intl-[a-z-]+\/)?track\/([A-Za-z0-9]{10,40})/i.exec(link) || /^spotify:track:([A-Za-z0-9]{10,40})$/i.exec(link);
+      if (sp) {
+        let meta = null;
+        try {
+          meta = await catalog.spotifyTrack(sp[1]);
+        } catch {
+          throw new HttpError(502, 'Не получилось открыть ссылку Spotify с сервера — найди трек по названию');
+        }
+        if (!meta) throw new HttpError(404, 'По ссылке Spotify не нашёл данных о треке');
+        // тот же трек в Яндексе: совпадает название и длительность (±3 с)
+        const found = await catalog.search(`${meta.artist.split(',')[0]} ${meta.title}`).catch(() => []);
+        const same = found
+          .filter((t) => norm(t.title) === norm(meta.title) || norm(t.title).startsWith(norm(meta.title)))
+          .filter((t) => !meta.duration || !t.duration || Math.abs(t.duration - meta.duration) <= 3)
+          .sort((a, b) => Math.abs(a.duration - meta.duration) - Math.abs(b.duration - meta.duration));
+        return { source: 'sp', items: await withLyrics(same.slice(0, 5)), fallback: meta };
+      }
+      throw new HttpError(400, 'Это не ссылка на трек Яндекс Музыки или Spotify');
+    }],
     ['GET', /^\/api\/catalog\/track\/(\d{1,15})$/, async ({ m, ip }) => {
       catalogLimit(ip);
       if (!catalog) throw new HttpError(503, 'Каталог недоступен');

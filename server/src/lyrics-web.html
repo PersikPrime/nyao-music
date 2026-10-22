@@ -346,7 +346,7 @@ async function home() {
   app.innerHTML = `<section class="hero">
     <h1>Тексты песен с синхронизацией</h1>
     <p class="muted" id="stats">Открытая база: пишут слушатели, проверяют специалисты.</p>
-    <form class="search" id="sf"><input type="search" id="q" placeholder="Исполнитель или название" value="${esc(q)}" autofocus><button class="btn primary">Найти</button></form>
+    <form class="search" id="sf"><input type="search" id="q" placeholder="Исполнитель, название или ссылка на трек" value="${esc(q)}" autofocus><button class="btn primary">Найти</button></form>
   </section><div id="res"></div>`;
   api('GET', '/api/stats').then((s) => { document.getElementById('stats').textContent = `${s.tracks.toLocaleString('ru')} проверенных текстов. Пишут слушатели, проверяют специалисты.`; }).catch(() => {});
   document.getElementById('sf').onsubmit = (e) => {
@@ -361,6 +361,18 @@ async function search(q) {
   const res = document.getElementById('res');
   if (!q) { res.innerHTML = ''; return; }
   res.innerHTML = '<div class="empty">Ищу…</div>';
+  // ссылка на трек — сразу этот трек: есть текст — открываем, нет — предлагаем добавить
+  if (isLink(q)) {
+    try {
+      const r = await catalogFind(q);
+      const pub = r.items.find((t) => t.lyrics && t.lyrics.published);
+      if (pub) { go(`/t/${pub.lyrics.id}`); return; }
+      res.innerHTML = r.items.length
+        ? `<h2>${r.link === 'sp' ? 'Этот трек в Яндекс Музыке' : 'Трек по ссылке'}</h2><div class="list">${r.items.map((t) => catalogRow(t)).join('')}</div>`
+        : fallbackHtml(r.fallback) || '<div class="empty">По ссылке ничего не нашлось.</div>';
+    } catch (e) { res.innerHTML = `<div class="empty err">${esc(e.message)}</div>`; }
+    return;
+  }
   // своя база и каталог Яндекса — параллельно; из каталога показываем треки, у которых текста ещё нет
   const [own, cat] = await Promise.all([
     api('GET', `/api/search?q=${encodeURIComponent(q)}`).catch((e) => ({ error: e.message })),
@@ -373,6 +385,20 @@ async function search(q) {
       : own.error ? `<div class="empty err">${esc(own.error)}</div>` : '<div class="empty">Проверенных текстов не нашлось.</div>')
     + (missing.length ? `<h2>Без текста — можно добавить</h2><p class="muted small" style="margin-top:-4px">Из каталога Яндекс Музыки: выбери трек, и название, альбом и длительность подставятся сами.</p><div class="list">${missing.map((t) => catalogRow(t)).join('')}</div>` : '');
 }
+
+const isLink = (q) => /^(https?:\/\/|spotify:)/i.test(q.trim()) || /(music\.yandex|open\.spotify)\./i.test(q);
+/** Поиск в каталоге: по словам или по ссылке на трек Яндекс Музыки / Spotify → { items, fallback } */
+async function catalogFind(q) {
+  if (isLink(q)) {
+    const r = await api('GET', `/api/catalog/link?url=${encodeURIComponent(q.trim())}`);
+    return { items: r.items || [], fallback: r.fallback, link: r.source };
+  }
+  const r = await api('GET', `/api/catalog?q=${encodeURIComponent(q)}`);
+  return { items: r.items || [], fallback: null };
+}
+/** Трек со страницы Spotify, которого нет в Яндексе, — в редактор вручную, с уже заполненными полями */
+const manualHref = (f) => `/add?${new URLSearchParams({ t: f.title, a: f.artist, al: f.album || '', d: String(f.duration || 0), c: f.cover || '' })}`;
+const fallbackHtml = (f) => f ? `<div class="card"><div class="trk">${coverImg(f.cover)}<div class="grow"><div style="font-weight:700">${esc(f.title)}</div><div class="muted small">${esc(f.artist)} · ${fmtDur(f.duration)} · из Spotify</div></div><a class="btn sm" href="${esc(manualHref(f))}" data-link>Добавить текст</a></div><p class="muted small" style="margin:10px 0 0">В каталоге Яндекса этот трек не нашёлся — текст привяжется по названию, исполнителю и длительности.</p></div>` : '';
 
 /** Строка трека из каталога Яндекса: обложка, название, есть ли у нас текст */
 function catalogRow(t, attrs = '') {
@@ -728,7 +754,7 @@ async function editor({ trackId, draftId }) {
 function pickTrack() {
   app.innerHTML = `<h1>Добавить текст</h1>
     <p class="muted">Найди трек в каталоге Яндекс Музыки — название, альбом, длительность и обложка подставятся сами, и текст привяжется именно к этой записи.</p>
-    <div class="card"><form class="row" id="cf"><input type="search" id="cq" placeholder="Исполнитель и название" style="flex:1;min-width:200px" autofocus><button class="btn primary">Найти</button></form>
+    <div class="card"><form class="row" id="cf"><input type="search" id="cq" placeholder="Исполнитель и название — или ссылка на трек в Яндекс Музыке / Spotify" style="flex:1;min-width:200px" autofocus><button class="btn primary">Найти</button></form>
       <div id="cres"></div>
       <p class="muted small" style="margin:14px 0 0">Нет в каталоге? <a href="#" id="manual">Ввести трек вручную</a></p></div>
     <div class="card" id="mf" style="display:none"><div class="grid4">
@@ -748,8 +774,8 @@ function pickTrack() {
     if (!q) return;
     $('cres').innerHTML = '<div class="empty">Ищу…</div>';
     try {
-      const { items } = await api('GET', `/api/catalog?q=${encodeURIComponent(q)}`);
-      $('cres').innerHTML = items.length ? `<div class="list">${items.map((t, i) => catalogRow(t, `data-pick="${i}"`)).join('')}</div>` : '<div class="empty">В каталоге не нашлось — можно ввести вручную.</div>';
+      const { items, fallback } = await catalogFind(q);
+      $('cres').innerHTML = items.length ? `<div class="list">${items.map((t, i) => catalogRow(t, `data-pick="${i}"`)).join('')}</div>` : fallbackHtml(fallback) || '<div class="empty">В каталоге не нашлось — можно ввести вручную.</div>';
       $('cres').querySelectorAll('[data-pick]').forEach((el) => (el.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); choose(items[Number(el.dataset.pick)]); }));
     } catch (err) { $('cres').innerHTML = `<div class="empty err">${esc(err.message)}</div>`; }
   };
@@ -759,8 +785,14 @@ function pickTrack() {
     if (!t.title || !t.artist || !t.duration) { $('mmsg').textContent = 'Нужны название, исполнитель и длительность'; return; }
     openEditor({ track: t, version: null, trackId: null, note: '', tab: 'text', title: 'Добавить текст' });
   };
-  const ya = new URLSearchParams(location.search).get('ya');
+  const qs = new URLSearchParams(location.search);
+  const ya = qs.get('ya');
   if (ya) api('GET', `/api/catalog/track/${encodeURIComponent(ya)}`).then(choose).catch((e) => toast(e.message));
+  // трек со страницы Spotify (нет в Яндексе): поля уже заполнены
+  else if (qs.get('t') && qs.get('a') && Number(qs.get('d')) > 0) {
+    const c = qs.get('c');
+    openEditor({ track: { title: qs.get('t'), artist: qs.get('a'), album: qs.get('al') || '', duration: Number(qs.get('d')), cover: /^https:\/\//.test(c || '') ? c : null }, version: null, trackId: null, note: '', tab: 'text', title: 'Добавить текст' });
+  }
 }
 
 function openEditor({ track, version, trackId, note, tab, title, pending }) {

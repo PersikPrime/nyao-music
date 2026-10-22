@@ -201,3 +201,40 @@ test('тексты: каталог Яндекса — метаданные от�
     t.close();
   }
 });
+
+test('тексты: трек по ссылке Яндекс Музыки или Spotify', async () => {
+  const cat = {
+    tracks: { 555: { yaId: '555', title: 'Луна', artist: 'Группа', album: 'А', duration: 190, cover: null }, 556: { yaId: '556', title: 'Луна (Live)', artist: 'Группа', album: 'Б', duration: 260, cover: null } },
+    async search() { return Object.values(this.tracks); },
+    async track(id) { return this.tracks[id] || null; },
+    async spotifyTrack(id) { return id === '4uLU6hMCjMI75M1A2tKUQC' ? { title: 'Луна', artist: 'Группа', album: '', duration: 191, cover: 'https://i.scdn.co/x' } : id === '0000000000000000000000' ? { title: 'Нет в Яндексе', artist: 'Кто-то', album: '', duration: 100, cover: null } : null; }
+  };
+  const t = await setup({ yaCatalog: cat });
+  try {
+    const link = (u) => t.call('GET', `/api/catalog/link?url=${encodeURIComponent(u)}`);
+    const ya = await link('https://music.yandex.ru/album/123/track/555?utm=1');
+    assert.equal(ya.json.source, 'ya');
+    assert.equal(ya.json.items[0].yaId, '555');
+    assert.equal((await link('https://music.yandex.com/track/556')).json.items[0].title, 'Луна (Live)');
+    const sp = await link('https://open.spotify.com/intl-ru/track/4uLU6hMCjMI75M1A2tKUQC?si=abc');
+    assert.equal(sp.json.source, 'sp');
+    assert.deepEqual(sp.json.items.map((x) => x.yaId), ['555'], 'тот же трек в Яндексе: название и длительность, live не подходит');
+    const miss = await link('spotify:track:0000000000000000000000');
+    assert.equal(miss.json.items.length, 0);
+    assert.equal(miss.json.fallback.title, 'Нет в Яндексе');
+    assert.equal((await link('https://example.com/x')).status, 400);
+  } finally {
+    t.close();
+  }
+});
+
+test('каталог: метаданные со страницы Spotify', async () => {
+  const { YaCatalog } = await import('../src/catalog-ya.js');
+  const page = (head) => async () => new Response(`<html><head>${head}</head></html>`, { status: 200 });
+  const a = new YaCatalog({ fetch: page('<title>Bara Bada Bastu - song and lyrics by KAJ | Spotify</title><meta property="og:title" content="Bara Bada Bastu"/><meta property="og:description" content="Listen to Bara Bada Bastu on Spotify. Song · KAJ · 2025"/><meta name="music:duration" content="166"/><meta property="og:image" content="https://i.scdn.co/image/x"/>') });
+  assert.deepEqual(await a.spotifyTrack('x1'), { title: 'Bara Bada Bastu', artist: 'KAJ', album: '', duration: 166, cover: 'https://i.scdn.co/image/x' });
+  const b = new YaCatalog({ fetch: page('<meta property="og:title" content="Луна"><meta property="og:description" content="Группа · Song · 2020">') });
+  assert.equal((await b.spotifyTrack('x2')).artist, 'Группа');
+  const c = new YaCatalog({ fetch: async () => new Response('', { status: 403 }) });
+  await assert.rejects(c.spotifyTrack('x3'), /403/);
+});
