@@ -122,3 +122,12 @@ jobs:
             for i in $(seq 1 12); do curl -fsS "https://$d/health" > /dev/null && { ok=1; break; }; sleep 10; done
             if [ -n "$ok" ]; then echo "https://$d — работает"; else echo "::warning::https://$d пока не отвечает (DNS или сертификат ещё не готовы)"; fi
           done
+      - name: Проверка каталога Яндекса для сайта текстов
+        run: |
+          # сервер ищет треки в каталоге Яндекс Музыки без входа; если Яндекс не пускает — только предупреждение
+          code=$(curl -s -o /tmp/cat.json -w '%{http_code}' "https://$LYRICS_DOMAIN/api/catalog?q=$(printf 'кино' | jq -sRr @uri)")
+          if [ "$code" = "200" ] && [ "$(jq '.items | length' /tmp/cat.json)" -gt 0 ]; then
+            echo "каталог работает: $(jq -r '.items[0] | "\(.artist) — \(.title)"' /tmp/cat.json)"
+          else
+            echo "::warning::Каталог Яндекса на сайте текстов не отвечает ($code): $(head -c 200 /tmp/cat.json)"
+          fi
