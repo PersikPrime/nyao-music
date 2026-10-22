@@ -161,6 +161,21 @@ export class FullScreen {
     // колёсико над текстом — развернуть на весь экран и листать самому
     $('.fs-right').addEventListener('wheel', () => this.userScroll(), { passive: true });
     window.addEventListener('resize', () => this.layout());
+    // высота текста меняется анимацией (.35 с) при разворачивании и сворачивании: отступы считаем по
+    // итоговой высоте, а не по промежуточной — иначе после прокрутки текст оставался ниже середины
+    if (typeof ResizeObserver === 'function') {
+      let lastH = 0;
+      new ResizeObserver(() => {
+        const box = this.$('.fs-lyrics');
+        if (!this.open || !box || box.clientHeight === lastH) return;
+        lastH = box.clientHeight;
+        this.layout();
+        if (!this.scrolling) {
+          this.lastLine = -2;
+          this.tick(true);
+        }
+      }).observe($('.fs-lyrics'));
+    }
   }
 
   /** Высота текста = высота левого блока; отступы, чтобы текущая строка вставала посередине */
