@@ -156,7 +156,11 @@ export const SCHEMA = [
     resolved_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     resolved_at TIMESTAMPTZ
-  )`
+  )`,
+  // трек из каталога Яндекса: точная привязка (одинаковые названия у разных записей не путаются) и обложка
+  `ALTER TABLE lyrics_tracks ADD COLUMN IF NOT EXISTS ya_id TEXT`,
+  `ALTER TABLE lyrics_tracks ADD COLUMN IF NOT EXISTS cover TEXT`,
+  `CREATE INDEX IF NOT EXISTS lyrics_tracks_ya ON lyrics_tracks (ya_id)`
 ];
 
 export async function migrate(pool) {

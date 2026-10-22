@@ -1,4 +1,4 @@
-// Тексты песен. Цепочка источников: Яндекс Музыка (лицензированные, по строкам) → Nyao Lyrics (проверенные специалистами)
+// Тексты песен. Цепочка источников: Яндекс Музыка (лицензированные, по строкам) → Nyao LyricLabs (проверенные специалистами)
 // → LRCLIB (открытая база) → YouTube Music.
 
 /** Свой сервис текстов (lyrics.withnyao.app), API совместим с LRCLIB */
@@ -22,7 +22,7 @@ function cleanTitle(title) {
     .trim();
 }
 
-/** LRCLIB или совместимый с ним сервис (Nyao Lyrics: только точное совпадение, без поиска) */
+/** LRCLIB или совместимый с ним сервис (Nyao LyricLabs: только точное совпадение, без поиска) */
 export async function findLyrics(track, fetch = globalThis.fetch, { base = 'https://lrclib.net', name = 'LRCLIB', search = true } = {}) {
   const headers = { 'User-Agent': 'NyaoMusic/0.1 (https://github.com/)' };
   const artist = String(track.artist).split(',')[0].trim();
@@ -36,6 +36,8 @@ export async function findLyrics(track, fetch = globalThis.fetch, { base = 'http
   try {
     const q = new URLSearchParams({ track_name: title, artist_name: artist });
     if (track.duration) q.set('duration', String(track.duration));
+    // свой сервис понимает id трека Яндекса — точное совпадение без путаницы одинаковых названий
+    if (!search && track.source === 'ya' && /^\d+$/.test(String(track.srcId))) q.set('ya_id', String(track.srcId));
     data = await tryGet(`${base}/api/get?${q}`);
     if (!data && search) {
       const list = await tryGet(`${base}/api/search?${new URLSearchParams({ q: `${artist} ${title}` })}`);
@@ -84,9 +86,9 @@ export async function findLyricsChain(track, { fetch = globalThis.fetch, ya = nu
       log(`[lyrics] ${track.id} Яндекс: ${e.stack || e.message}`);
     }
   }
-  // 2) Nyao Lyrics — тексты, проверенные специалистами
-  const own = await findLyrics(track, fetch, { base: NYAO_LYRICS_API, name: 'Nyao Lyrics', search: false }).catch((e) => {
-    diag.push(`Nyao Lyrics: ${why(e)}`);
+  // 2) Nyao LyricLabs — тексты, проверенные специалистами
+  const own = await findLyrics(track, fetch, { base: NYAO_LYRICS_API, name: 'Nyao LyricLabs', search: false }).catch((e) => {
+    diag.push(`Nyao LyricLabs: ${why(e)}`);
     return null;
   });
   if (own && own.synced) return own;

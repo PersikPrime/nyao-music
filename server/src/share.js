@@ -2,6 +2,8 @@
 // Страница пытается открыть Nyao Music (nyao://…), а если его нет — показывает, где скачать.
 // На Android с подтверждённым App Link ссылка открывает приложение сразу, минуя страницу.
 
+import { LOGO_DATA } from './brand.js';
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const NICK = '[A-Za-z0-9_.]{3,24}';
 const TRACK_ID = '(?:ya|yt|sc|vk|sp):[A-Za-z0-9_.:-]{1,80}';
@@ -27,17 +29,18 @@ export function sharePage({ title, text, open = null, mirror = null, ok = true, 
   const dl = downloads(mirror);
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · Nyao Music</title>
+<link rel="icon" href="${LOGO_DATA}">
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(text)}"><meta property="og:site_name" content="Nyao Music">
 <style>
 :root{color-scheme:dark;--bg:#0b0b0f;--card:#16161d;--fg:#f3f1f7;--muted:#9a97a6;--acc:${ok ? '#b69cff' : '#ff7a8a'}}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% -10%,#2a1f4d 0,var(--bg) 60%);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px}
 .card{max-width:440px;width:100%;background:var(--card);border:1px solid #ffffff12;border-radius:28px;padding:36px 28px;text-align:center}
-.dot{width:72px;height:72px;margin:0 auto 20px;border-radius:24px;background:var(--acc);display:grid;place-items:center;font-size:34px;color:#0b0b0f}
+.logo{display:block;width:76px;height:76px;margin:0 auto 20px;border-radius:20px}
 h1{margin:0 0 8px;font-size:24px;overflow-wrap:anywhere}p{margin:0;color:var(--muted);overflow-wrap:anywhere}
 .btn{display:inline-block;margin-top:22px;padding:14px 26px;border-radius:999px;background:var(--acc);color:#0b0b0f;font-weight:700;text-decoration:none}
 .dl{margin-top:26px;padding-top:18px;border-top:1px solid #ffffff12}.dl p{font-size:13px;margin-bottom:10px}
 .dl a{display:inline-block;margin:4px;padding:8px 14px;border-radius:999px;border:1px solid #ffffff22;color:var(--fg);text-decoration:none;font-size:14px}
-</style></head><body><div class="card"><div class="dot">${esc(badge)}</div><h1>${esc(title)}</h1><p>${esc(text)}</p>
+</style></head><body><div class="card"><img class="logo" src="${LOGO_DATA}" alt="Nyao Music"><h1>${esc(title)}</h1><p>${esc(text)}</p>
 ${open ? `<a class="btn" id="open" href="${esc(open)}">Открыть в Nyao Music</a>` : ''}
 ${dl.length ? `<div class="dl"><p>Ещё нет Nyao Music? Скачай:</p>${dl.map((d) => `<a href="${esc(d.url)}">${esc(d.label)}</a>`).join('')}</div>` : ''}
 </div>${open && auto ? `<script>setTimeout(function(){try{location.href=${JSON.stringify(open)}}catch(e){}},350)</script>` : ''}</body></html>`;

@@ -100,10 +100,12 @@ const notFound = () => {
   return e;
 };
 
-export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [] }) {
+export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [], catalog = null }) {
   const writeLimit = limiter(20);
   const reportLimit = limiter(5);
   const readLimit = limiter(300);
+  const catalogLimit = limiter(40);
+  const YA_ID = /^\d{1,15}$/;
 
   const PUBLISHED = `SELECT t.id, t.title, t.artist, t.album, t.duration, v.plain, v.synced, v.instrumental
       FROM lyrics_tracks t JOIN lyrics_versions v ON v.id = t.published_version
@@ -126,14 +128,36 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
   }
 
   /** Трек по названию, исполнителю и длительности (±2 с, как в LRCLIB) */
-  async function findTrack(title, artist, duration, onlyPublished) {
+  async function findTrack(title, artist, duration, onlyPublished, yaId = null) {
+    // трек из каталога Яндекса — сначала точно по его id
+    if (yaId) {
+      const { rows } = await q('SELECT t.id, t.duration, t.published_version, t.hidden, t.ya_id FROM lyrics_tracks t WHERE t.ya_id = $1 ORDER BY t.id', [yaId]);
+      const hit = onlyPublished ? rows.filter((r) => r.published_version && !r.hidden) : rows;
+      if (hit.length) return hit[0];
+    }
     const { rows } = await q(
-      `SELECT t.id, t.duration, t.published_version, t.hidden FROM lyrics_tracks t WHERE t.title_norm = $1 AND t.artist_norm = $2 ORDER BY t.id`,
+      `SELECT t.id, t.duration, t.published_version, t.hidden, t.ya_id FROM lyrics_tracks t WHERE t.title_norm = $1 AND t.artist_norm = $2 ORDER BY t.id`,
       [norm(title), norm(artist)]
     );
-    const fits = rows.filter((r) => !duration || !r.duration || Math.abs(Number(r.duration) - duration) <= 2);
+    // при отправке: у найденного трека другой id Яндекса — это другая запись (ремастер, live…), не смешиваем
+    const fits = rows.filter((r) => (!duration || !r.duration || Math.abs(Number(r.duration) - duration) <= 2) && (onlyPublished || !yaId || !r.ya_id || r.ya_id === yaId));
     const pick = onlyPublished ? fits.filter((r) => r.published_version && !r.hidden) : fits;
     return pick[0] || null;
+  }
+
+  /** К трекам каталога — есть ли у нас текст: { id, published, pending } или null */
+  async function withLyrics(items) {
+    const out = [];
+    for (const it of items) {
+      const t = await findTrack(it.title, it.artist, it.duration, false, it.yaId);
+      let lyrics = null;
+      if (t && (!t.ya_id || t.ya_id === it.yaId)) {
+        const p = await q(`SELECT count(*) AS n FROM lyrics_versions WHERE track_id = $1 AND status = 'pending'`, [t.id]);
+        lyrics = { id: Number(t.id), published: !!t.published_version && !t.hidden, hidden: !!t.hidden, pending: Number(p.rows[0].n) > 0 };
+      }
+      out.push({ ...it, lyrics });
+    }
+    return out;
   }
 
   async function published(id) {
@@ -150,7 +174,9 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       const title = clip(url.searchParams.get('track_name'), 256);
       const artist = clip(url.searchParams.get('artist_name'), 256);
       if (!title || !artist) throw new HttpError(400, 'Нужны track_name и artist_name');
-      const t = await findTrack(title, artist, Math.round(Number(url.searchParams.get('duration')) || 0), true);
+      // ya_id — расширение Nyao: трек Яндекс Музыки, точное совпадение
+      const yaId = YA_ID.test(url.searchParams.get('ya_id') || '') ? url.searchParams.get('ya_id') : null;
+      const t = await findTrack(title, artist, Math.round(Number(url.searchParams.get('duration')) || 0), true, yaId);
       const r = t && (await published(t.id));
       if (!r) throw notFound();
       return lrclibShape(r);
@@ -185,6 +211,28 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       return rows.map(lrclibShape);
     }],
 
+    // ---------- Каталог Яндекса (только метаданные): найти трек и сразу видеть, есть ли текст ----------
+    ['GET', /^\/api\/catalog$/, async ({ url, ip }) => {
+      catalogLimit(ip);
+      if (!catalog) throw new HttpError(503, 'Каталог недоступен');
+      const text = clip(String(url.searchParams.get('q') || '').trim(), 120);
+      if (!text) throw new HttpError(400, 'Нужен q');
+      let items;
+      try {
+        items = await catalog.search(text);
+      } catch {
+        throw new HttpError(502, 'Каталог Яндекса сейчас не отвечает — трек можно ввести вручную');
+      }
+      return { items: await withLyrics(items) };
+    }],
+    ['GET', /^\/api\/catalog\/track\/(\d{1,15})$/, async ({ m, ip }) => {
+      catalogLimit(ip);
+      if (!catalog) throw new HttpError(503, 'Каталог недоступен');
+      const t = await catalog.track(m[1]).catch(() => null);
+      if (!t) throw new HttpError(404, 'Не нашёл трек в каталоге');
+      return (await withLyrics([t]))[0];
+    }],
+
     // ---------- Для сайта ----------
     ['GET', /^\/api\/stats$/, async () => {
       const { rows } = await q('SELECT count(*) AS n FROM lyrics_tracks WHERE published_version IS NOT NULL AND NOT hidden');
@@ -192,7 +240,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
     }],
     ['GET', /^\/api\/track\/(\d{1,18})$/, async ({ m }) => {
       const { rows } = await q(
-        `SELECT t.id, t.title, t.artist, t.album, t.duration, t.hidden, v.plain, v.synced, v.instrumental, v.reviewed_at,
+        `SELECT t.id, t.title, t.artist, t.album, t.duration, t.hidden, t.cover, t.ya_id, v.plain, v.synced, v.instrumental, v.reviewed_at,
                 a.name AS a_name, a.username AS a_username
            FROM lyrics_tracks t
            LEFT JOIN lyrics_versions v ON v.id = t.published_version
@@ -209,6 +257,8 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         artist: r.artist,
         album: r.album,
         duration: Number(r.duration) || 0,
+        cover: r.cover || null,
+        yaId: r.ya_id || null,
         published: r.reviewed_at
           ? { plain: r.plain, synced: r.synced, instrumental: !!r.instrumental, reviewedAt: r.reviewed_at, author: user(r, 'a_') }
           : null
@@ -259,7 +309,15 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         if (rows[0].hidden) throw new HttpError(451, 'Трек снят по жалобе правообладателя');
         duration = Number(rows[0].duration) || 0;
       } else {
-        const t = b.track || {};
+        let t = b.track || {};
+        // трек из каталога: метаданные берём у Яндекса, а не из запроса
+        const yaId = YA_ID.test(String(t.yaId || '')) ? String(t.yaId) : null;
+        if (yaId) {
+          if (!catalog) throw new HttpError(503, 'Каталог недоступен');
+          const ya = await catalog.track(yaId).catch(() => null);
+          if (!ya) throw new HttpError(404, 'Не нашёл трек в каталоге Яндекса');
+          t = ya;
+        }
         const title = clip(String(t.title || '').trim(), 200);
         const artist = clip(String(t.artist || '').trim(), 200);
         duration = Math.max(0, Math.min(36000, Math.round(Number(t.duration) || 0)));
@@ -267,19 +325,21 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         if (!duration) throw new HttpError(400, 'Укажи длительность трека — по ней Nyao отличает версии');
         if (!norm(title) || !norm(artist)) throw new HttpError(400, 'Название или исполнитель без букв и цифр');
         const album = clip(String(t.album || '').trim(), 200);
-        const found = await findTrack(title, artist, duration, false);
+        const cover = yaId && t.cover ? clip(t.cover, 300) : null;
+        const found = await findTrack(title, artist, duration, false, yaId);
         if (found) {
           if (found.hidden) throw new HttpError(451, 'Трек снят по жалобе правообладателя');
           trackId = Number(found.id);
           duration = Number(found.duration) || duration;
           clean = check(duration);
           if (album) await q(`UPDATE lyrics_tracks SET album = $1 WHERE id = $2 AND album = ''`, [album, trackId]);
+          if (yaId && !found.ya_id) await q('UPDATE lyrics_tracks SET ya_id = $1, cover = $2 WHERE id = $3', [yaId, cover, trackId]);
         } else {
           // трек заводим только для текста, который прошёл автопроверку
           clean = check(duration);
           const { rows } = await q(
-            `INSERT INTO lyrics_tracks (title, artist, album, duration, title_norm, artist_norm) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-            [title, artist, album, duration, norm(title), norm(artist)]
+            `INSERT INTO lyrics_tracks (title, artist, album, duration, title_norm, artist_norm, ya_id, cover) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+            [title, artist, album, duration, norm(title), norm(artist), yaId, cover]
           );
           trackId = Number(rows[0].id);
         }

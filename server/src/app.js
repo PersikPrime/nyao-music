@@ -99,7 +99,7 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [] }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [], yaCatalog = null }) {
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
   setInterval(() => {
     const now = Date.now();
@@ -145,7 +145,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
 
   const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl, webUrl, sharePage: (o) => sharePage({ ...o, mirror }) });
   const share = shareRoutes({ q, mirror, androidCerts, webHosts });
-  const lyrics = lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins: lyricsAdmins });
+  const lyrics = lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins: lyricsAdmins, catalog: yaCatalog });
   const routes = [
     ['GET', /^\/health$/, async () => ({ ok: true, minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
     // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)

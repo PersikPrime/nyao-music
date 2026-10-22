@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Nyao Lyrics</title>
+<title>Nyao LyricLabs</title>
 <meta name="description" content="Открытая база синхронизированных текстов песен. Пишут слушатели, проверяют специалисты.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23b69cff'/%3E%3Cpath d='M20 22h24M20 32h18M20 42h22' stroke='%230b0b0f' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="icon" href="%%LOGO%%">
 <style>
 :root{
   --bg:#0b0b0f;--surface:#14141b;--surface2:#1c1c26;--line:#ffffff14;--fg:#f3f1f7;--muted:#9a97a6;
@@ -25,7 +25,7 @@ button,input,textarea,select{font:inherit;color:inherit}
 header{border-bottom:1px solid var(--line);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(12px);z-index:5}
 header .wrap{display:flex;align-items:center;gap:18px;height:60px}
 .logo{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--fg);letter-spacing:-.01em}
-.logo i{width:28px;height:28px;border-radius:9px;background:var(--acc);display:grid;place-items:center;color:var(--on-acc);font-style:normal;font-size:15px}
+.logo img{display:block;border-radius:8px}
 nav{display:flex;gap:16px;margin-left:auto;align-items:center;flex-wrap:wrap}
 nav a{color:var(--muted);font-size:15px}nav a.on,nav a:hover{color:var(--fg);text-decoration:none}
 main{flex:1;padding:28px 0 64px}
@@ -87,7 +87,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em}
 </head>
 <body>
 <header><div class="wrap">
-  <a class="logo" href="/" data-link><i>♪</i>Nyao Lyrics</a>
+  <a class="logo" href="/" data-link><img src="%%LOGO%%" width="30" height="30" alt="">Nyao LyricLabs</a>
   <nav id="nav"></nav>
 </div></header>
 <main><div class="wrap" id="app"></div></main>
@@ -235,12 +235,24 @@ async function search(q) {
   const res = document.getElementById('res');
   if (!q) { res.innerHTML = ''; return; }
   res.innerHTML = '<div class="empty">Ищу…</div>';
-  try {
-    const items = await api('GET', `/api/search?q=${encodeURIComponent(q)}`);
-    res.innerHTML = items.length
+  // своя база и каталог Яндекса — параллельно; из каталога показываем треки, у которых текста ещё нет
+  const [own, cat] = await Promise.all([
+    api('GET', `/api/search?q=${encodeURIComponent(q)}`).catch((e) => ({ error: e.message })),
+    api('GET', `/api/catalog?q=${encodeURIComponent(q)}`).catch(() => ({ items: [] }))
+  ]);
+  const items = Array.isArray(own) ? own : [];
+  const missing = (cat.items || []).filter((t) => !(t.lyrics && t.lyrics.published));
+  res.innerHTML = (items.length
       ? `<div class="list">${items.map((t) => `<a class="item" href="/t/${t.id}" data-link><div class="grow"><div class="t">${esc(t.trackName)}</div><div class="muted small">${esc(t.artistName)}${t.albumName ? ' · ' + esc(t.albumName) : ''}</div></div>${t.syncedLyrics ? '<span class="tag ok">синхронизирован</span>' : t.instrumental ? '<span class="tag">инструментал</span>' : '<span class="tag">текст</span>'}<span class="muted small">${fmtDur(t.duration)}</span></a>`).join('')}</div>`
-      : `<div class="empty">Ничего не нашлось. <a href="/add" data-link>Добавь текст сам</a> — специалист проверит и опубликует.</div>`;
-  } catch (e) { res.innerHTML = `<div class="empty err">${esc(e.message)}</div>`; }
+      : own.error ? `<div class="empty err">${esc(own.error)}</div>` : '<div class="empty">Проверенных текстов не нашлось.</div>')
+    + (missing.length ? `<h2>Без текста — можно добавить</h2><p class="muted small" style="margin-top:-4px">Из каталога Яндекс Музыки: выбери трек, и название, альбом и длительность подставятся сами.</p><div class="list">${missing.map((t) => catalogRow(t)).join('')}</div>` : '');
+}
+
+/** Строка трека из каталога Яндекса: обложка, название, есть ли у нас текст */
+function catalogRow(t, attrs = '') {
+  const L = t.lyrics;
+  const tag = L && L.published ? '<span class="tag ok">есть текст</span>' : L && L.pending ? '<span class="tag warn">на проверке</span>' : '<span class="tag">нет текста</span>';
+  return `<a class="item" href="${L && L.published ? `/t/${L.id}` : `/add?ya=${encodeURIComponent(t.yaId)}`}" data-link ${attrs}>${t.cover ? `<img src="${esc(t.cover)}" width="44" height="44" style="border-radius:8px;flex-shrink:0" alt="" loading="lazy">` : ''}<div class="grow"><div class="t">${esc(t.title)}</div><div class="muted small">${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''}</div></div>${tag}<span class="muted small">${fmtDur(t.duration)}</span></a>`;
 }
 
 // ---------- Трек ----------
@@ -252,7 +264,7 @@ async function trackPage(id) {
   app.innerHTML = '<div class="empty">Загружаю…</div>';
   let t;
   try { t = await api('GET', `/api/track/${id}`); } catch (e) { app.innerHTML = `<div class="empty err">${esc(e.message)}</div>`; return; }
-  document.title = `${t.title} — ${t.artist} · Nyao Lyrics`;
+  document.title = `${t.title} — ${t.artist} · Nyao LyricLabs`;
   if (t.hidden) {
     app.innerHTML = `<h1>${esc(t.title)}</h1><div class="muted">${esc(t.artist)}</div><div class="card">Текст скрыт по обращению правообладателя.</div>`;
     return;
@@ -382,7 +394,14 @@ async function editor({ trackId, draftId }) {
   app.innerHTML = `<h1>${draftId ? 'Доработать текст' : trackId ? 'Правка текста' : 'Добавить текст'}</h1>
     <p class="muted">Шаг 1 — трек и текст, шаг 2 — синхронизация. После отправки текст проверит специалист.</p>
     ${note ? `<div class="card" style="border-color:var(--warn)"><b>Специалист просит поправить:</b><br>${esc(note)}</div>` : ''}
-    <div class="card">
+    ${fixed ? '' : `<div class="card" id="pick">
+      <label>Найди трек в каталоге Яндекс Музыки — название, альбом и длительность подставятся сами</label>
+      <form class="row" id="cf"><input type="search" id="cq" placeholder="Исполнитель и название" style="flex:1;min-width:200px"><button class="btn">Найти</button></form>
+      <div id="cres"></div>
+      <p class="muted small" style="margin:12px 0 0">Нет в каталоге? <a href="#" id="manual">Ввести вручную</a></p>
+    </div>
+    <div class="card" id="chosen" style="display:none"></div>`}
+    <div class="card" id="meta" style="${fixed ? '' : 'display:none'}">
       <div class="grid4">
         <div><label>Название</label><input type="text" id="ti" value="${esc(track.title)}" ${fixed ? 'disabled' : ''}></div>
         <div><label>Исполнитель</label><input type="text" id="ar" value="${esc(track.artist)}" ${fixed ? 'disabled' : ''}></div>
@@ -402,6 +421,35 @@ async function editor({ trackId, draftId }) {
     </div>
     <div class="row" style="margin-top:22px"><button class="btn primary" id="send">Отправить на проверку</button><span id="msg"></span></div>`;
   const $ = (id) => document.getElementById(id);
+  let picked = null;
+  const choose = (t) => {
+    picked = t;
+    $('pick').style.display = 'none';
+    $('meta').style.display = '';
+    ['ti', 'ar', 'al', 'du'].forEach((k) => ($(k).disabled = true));
+    $('ti').value = t.title; $('ar').value = t.artist; $('al').value = t.album || ''; $('du').value = fmtDur(t.duration);
+    const L = t.lyrics;
+    $('chosen').style.display = '';
+    $('chosen').innerHTML = `<div class="row">${t.cover ? `<img src="${esc(t.cover)}" width="56" height="56" style="border-radius:10px" alt="">` : ''}<div style="flex:1;min-width:0"><div class="t" style="font-weight:600">${esc(t.title)}</div><div class="muted small">${esc(t.artist)}${t.album ? ' · ' + esc(t.album) : ''} · ${fmtDur(t.duration)} · из каталога Яндекс Музыки</div></div><button class="btn sm" id="repick">Другой трек</button></div>
+      ${L && L.published ? `<p class="small" style="margin:12px 0 0">У этого трека уже есть проверенный текст — <a href="/t/${L.id}" data-link>посмотреть</a> или <a href="/edit/${L.id}" data-link>предложить правку</a>.</p>` : L && L.pending ? '<p class="small muted" style="margin:12px 0 0">Текст к этому треку уже ждёт проверки. Твой тоже попадёт в очередь — специалист выберет лучший.</p>' : ''}`;
+    $('repick').onclick = () => { picked = null; $('chosen').style.display = 'none'; $('meta').style.display = 'none'; $('pick').style.display = ''; ['ti', 'ar', 'al', 'du'].forEach((k) => ($(k).disabled = false)); };
+  };
+  if (!fixed) {
+    $('cf').onsubmit = async (e) => {
+      e.preventDefault();
+      const q = $('cq').value.trim();
+      if (!q) return;
+      $('cres').innerHTML = '<div class="empty">Ищу…</div>';
+      try {
+        const { items } = await api('GET', `/api/catalog?q=${encodeURIComponent(q)}`);
+        $('cres').innerHTML = items.length ? `<div class="list">${items.map((t, i) => catalogRow(t, `data-pick="${i}"`)).join('')}</div>` : '<div class="empty">В каталоге не нашлось — можно ввести вручную.</div>';
+        $('cres').querySelectorAll('[data-pick]').forEach((el) => (el.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); choose(items[Number(el.dataset.pick)]); }));
+      } catch (err) { $('cres').innerHTML = `<div class="empty err">${esc(err.message)}</div>`; }
+    };
+    $('manual').onclick = (e) => { e.preventDefault(); picked = null; $('pick').style.display = 'none'; $('meta').style.display = ''; };
+    const ya = new URLSearchParams(location.search).get('ya');
+    if (ya) api('GET', `/api/catalog/track/${encodeURIComponent(ya)}`).then(choose).catch((e) => toast(e.message));
+  }
   let lines = synced ? lrcLines(synced).map((l) => ({ ...l })) : null;
   let mode = synced ? 'lrc' : 'none';
   if (synced) $('lrc').style.display = 'block';
@@ -426,7 +474,9 @@ async function editor({ trackId, draftId }) {
     if (mode === 'lines' && lines.some((l) => l.at == null)) { msg.className = 'err'; msg.textContent = 'Не у всех строк есть время — отметь их или сбрось синхронизацию.'; return; }
     const body = { plain: $('pl').value, synced: $('inst').checked ? '' : syncOut(), instrumental: $('inst').checked };
     if (trackId) body.trackId = Number(trackId);
+    else if (picked) body.track = { yaId: picked.yaId };
     else body.track = { title: $('ti').value, artist: $('ar').value, album: $('al').value, duration: parseDur($('du').value) };
+    if (!trackId && !picked && $('meta').style.display === 'none') { msg.className = 'err'; msg.textContent = 'Сначала выбери трек в каталоге или введи его вручную.'; return; }
     $('send').disabled = true;
     try {
       const r = await api('POST', '/api/submit', body);
@@ -590,7 +640,7 @@ GET ${base}/api/search?track_name=…&amp;artist_name=…</pre>
 }
 function copyrightPage() {
   app.innerHTML = `<h1>Правообладателям</h1>
-    <div class="card"><p style="margin-top:0">Тексты на Nyao Lyrics добавляют пользователи. Если вы правообладатель и хотите убрать текст, откройте страницу трека и нажмите «Пожаловаться» → «Я правообладатель». Текст скрывается сразу, обращение рассматривает администратор и отвечает по указанному контакту.</p><p class="muted" style="margin-bottom:0">Скрытый трек нельзя добавить заново без решения администратора.</p></div>`;
+    <div class="card"><p style="margin-top:0">Тексты на Nyao LyricLabs добавляют пользователи. Если вы правообладатель и хотите убрать текст, откройте страницу трека и нажмите «Пожаловаться» → «Я правообладатель». Текст скрывается сразу, обращение рассматривает администратор и отвечает по указанному контакту.</p><p class="muted" style="margin-bottom:0">Скрытый трек нельзя добавить заново без решения администратора.</p></div>`;
 }
 
 loadMe().finally(route);

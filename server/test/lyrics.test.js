@@ -140,8 +140,47 @@ test('тексты: LYRICS_ADMINS, сайт на своём домене, без
     // сайт: любой адрес без /api и /auth — одна страница
     const page = await t.call('GET', '/t/5');
     assert.equal(page.status, 200);
-    assert.match(page.text, /<title>Nyao Lyrics<\/title>/);
+    assert.match(page.text, /<title>Nyao LyricLabs<\/title>/);
     assert.equal((await t.call('GET', '/api/stats')).json.tracks, 0);
+  } finally {
+    t.close();
+  }
+});
+
+test('тексты: каталог Яндекса — метаданные оттуда, одинаковые названия не путаются', async () => {
+  const cat = {
+    tracks: {
+      111: { yaId: '111', title: 'Звезда', artist: 'Группа', album: 'Первый', duration: 200, cover: 'https://img/1' },
+      222: { yaId: '222', title: 'Звезда', artist: 'Группа', album: 'Концерт', duration: 201, cover: 'https://img/2' }
+    },
+    async search() { return Object.values(this.tracks); },
+    async track(id) { return this.tracks[id] || null; }
+  };
+  const t = await setup({ yaCatalog: cat });
+  try {
+    const owner = await t.user('Takko');
+    const author = await t.user('Автор');
+    // метаданные из запроса игнорируются — берутся из каталога
+    const a = await t.call('POST', '/api/submit', { token: author.token, body: { track: { yaId: '111', title: 'Подделка', duration: 5 }, plain: 'Студийный текст' } });
+    assert.equal(a.status, 200);
+    const b = await t.call('POST', '/api/submit', { token: author.token, body: { track: { yaId: '222' }, plain: 'Концертный текст' } });
+    assert.notEqual(b.json.trackId, a.json.trackId, 'та же мета, но другой трек Яндекса — отдельная запись');
+    assert.equal((await t.call('POST', '/api/submit', { token: author.token, body: { track: { yaId: '999' }, plain: 'x' } })).status, 404);
+    for (const v of [a, b]) await t.call('POST', `/api/review/${v.json.id}`, { token: owner.token, body: { action: 'accept' } });
+    const tr = (await t.call('GET', `/api/track/${a.json.trackId}`)).json;
+    assert.equal(tr.title, 'Звезда');
+    assert.equal(tr.cover, 'https://img/1');
+    assert.equal(tr.yaId, '111');
+    const g = await t.call('GET', '/api/get?artist_name=Группа&track_name=Звезда&duration=201&ya_id=222');
+    assert.equal(g.json.plainLyrics, 'Концертный текст', 'по ya_id — точная запись');
+    const g2 = await t.call('GET', '/api/get?artist_name=Группа&track_name=Звезда&duration=200');
+    assert.equal(g2.status, 200, 'без ya_id (Spotify, LRCLIB-клиенты) — по названию и длительности');
+    // в каталоге видно, у каких треков текст уже есть
+    cat.tracks[333] = { yaId: '333', title: 'Новая', artist: 'Группа', album: '', duration: 150, cover: null };
+    const items = (await t.call('GET', '/api/catalog?q=группа')).json.items;
+    assert.equal(items.find((x) => x.yaId === '111').lyrics.published, true);
+    assert.equal(items.find((x) => x.yaId === '333').lyrics, null);
+    assert.equal((await t.call('GET', '/api/catalog/track/333')).json.title, 'Новая');
   } finally {
     t.close();
   }

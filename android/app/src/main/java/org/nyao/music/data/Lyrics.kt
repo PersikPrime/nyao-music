@@ -52,8 +52,10 @@ object LyricsApi {
             .addQueryParameter("track_name", cleanTitle(track.title))
             .addQueryParameter("artist_name", track.artist.split(",").first().trim())
             .apply { if (track.duration > 0) addQueryParameter("duration", track.duration.toString()) }
+            // id трека Яндекса — точное совпадение без путаницы одинаковых названий
+            .apply { if (track.source == SOURCE_YA && track.srcId.all { it.isDigit() }) addQueryParameter("ya_id", track.srcId) }
             .build().toString()
-        from(get(url)?.let { JSONObject(it) }, "Nyao Lyrics")
+        from(get(url)?.let { JSONObject(it) }, "Nyao LyricLabs")
     } catch (_: Exception) {
         null
     }
@@ -75,7 +77,7 @@ object LyricsApi {
                 runCatching { Repo.ya.lyrics(yaId, "TEXT") }.getOrNull()?.let { fallback = plain(it.first, name(it.second)) }
             }
         }
-        // 2) Nyao Lyrics, 3) LRCLIB
+        // 2) Nyao LyricLabs, 3) LRCLIB
         val own = nyaoLyrics(track)
         if (own != null && own.synced) return own.also { cache[track.id] = it }
         if (fallback == null) fallback = own

@@ -4,6 +4,7 @@ import { createPool, migrate } from './db.js';
 import { TelegramOIDC } from './telegram.js';
 import { ReleaseMirror } from './mirror.js';
 import { createApp } from './app.js';
+import { YaCatalog } from './catalog-ya.js';
 import { StatusFile } from './status.js';
 import { FcmPush, parseServiceAccount } from './push.js';
 
@@ -50,7 +51,7 @@ const status = new StatusFile(env.STATUS_FILE || '/data/status/status.json');
 const fcm = parseServiceAccount(env.FCM_SERVICE_ACCOUNT);
 const push = fcm ? new FcmPush(fcm) : null;
 console.log(push ? `[push] Firebase: ${fcm.project_id}` : '[push] FCM_SERVICE_ACCOUNT не задан — push выключены');
-const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS }));
+const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS, yaCatalog: new YaCatalog({ log: console.log }) }));
 server.listen(Number(env.PORT) || 8080, () => console.log(`[nyao] сервер слушает :${server.address().port}`));
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
