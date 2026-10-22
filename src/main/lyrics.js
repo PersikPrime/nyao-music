@@ -38,6 +38,8 @@ export async function findLyrics(track, fetch = globalThis.fetch, { base = 'http
     if (track.duration) q.set('duration', String(track.duration));
     // свой сервис понимает id трека Яндекса — точное совпадение без путаницы одинаковых названий
     if (!search && track.source === 'ya' && /^\d+$/.test(String(track.srcId))) q.set('ya_id', String(track.srcId));
+    // ISRC (у треков Spotify) — та же запись в любом сервисе
+    if (!search && track.isrc) q.set('isrc', String(track.isrc));
     data = await tryGet(`${base}/api/get?${q}`);
     if (!data && search) {
       const list = await tryGet(`${base}/api/search?${new URLSearchParams({ q: `${artist} ${title}` })}`);

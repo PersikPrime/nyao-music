@@ -268,3 +268,44 @@ test('тексты: исполнитель — хотя бы один общий
     t.close();
   }
 });
+
+test('тексты: ISRC — точное совпадение записи в любом сервисе', async () => {
+  const { normIsrc } = await import('../src/lyrics.js');
+  assert.equal(normIsrc('us-rc1-76-07839'), 'USRC17607839');
+  assert.equal(normIsrc('abc'), null);
+  const cat = { async search() { return []; }, async track() { return null; }, async isrcFor({ title }) { return title === 'Без ISRC' ? 'GBAYE0601498' : null; } };
+  const t = await setup({ yaCatalog: cat });
+  try {
+    const owner = await t.user('Takko');
+    const a = await t.call('POST', '/api/submit', { token: owner.token, body: { track: { title: 'Песня', artist: 'Группа', duration: 200, isrc: 'USRC17607839' }, plain: 'Текст' } });
+    assert.equal(a.status, 200);
+    assert.equal((await t.call('POST', '/api/submit', { token: owner.token, body: { track: { title: 'X', artist: 'Y', duration: 10, isrc: 'плохой' }, plain: 'a' } })).status, 400);
+    await t.call('POST', `/api/review/${a.json.id}`, { token: owner.token, body: { action: 'accept' } });
+    // в другом сервисе трек называется иначе — но ISRC тот же
+    const g = await t.call('GET', '/api/get?track_name=Song&artist_name=Band&isrc=USRC17607839');
+    assert.equal(g.status, 200);
+    assert.equal(g.json.isrc, 'USRC17607839');
+    // ISRC нового трека подтягивается сам (в фоне)
+    const b = await t.call('POST', '/api/submit', { token: owner.token, body: { track: { title: 'Без ISRC', artist: 'Кто-то', duration: 100 }, plain: 'Текст' } });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal((await t.call('GET', `/api/track/${b.json.trackId}`)).json.isrc, 'GBAYE0601498');
+    // админ правит ISRC
+    assert.equal((await t.call('POST', `/api/admin/track/${b.json.trackId}`, { token: owner.token, body: { isrc: 'gb-aye-06-01499' } })).status, 200);
+    assert.equal((await t.call('GET', `/api/track/${b.json.trackId}`)).json.isrc, 'GBAYE0601499');
+  } finally {
+    t.close();
+  }
+});
+
+test('каталог: ISRC через Deezer', async () => {
+  const { YaCatalog } = await import('../src/catalog-ya.js');
+  const calls = [];
+  const fetch = async (url) => {
+    calls.push(url);
+    if (url.includes('/search')) return Response.json({ data: [{ id: 1, title: 'Луна (Remix)', duration: 190 }, { id: 2, title: 'Луна', duration: 191 }] });
+    return Response.json({ id: 2, isrc: 'ruabc2400001' });
+  };
+  const c = new YaCatalog({ fetch });
+  assert.equal(await c.isrcFor({ title: 'Луна', artist: 'Группа, Другой', duration: 190 }), 'RUABC2400001');
+  assert.match(decodeURIComponent(calls[0]).replace(/\+/g, " "), /artist:"Группа" track:"Луна"/);
+});

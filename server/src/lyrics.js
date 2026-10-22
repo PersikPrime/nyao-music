@@ -50,6 +50,12 @@ export function norm(s) {
     .replace(/\s+/g, ' ');
 }
 
+/** ISRC: «us-rc1-76-07839» → 'USRC17607839'; неверный — null */
+export function normIsrc(v) {
+  const s = String(v || '').toUpperCase().replace(/[\s-]/g, '');
+  return /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(s) ? s : null;
+}
+
 /** Исполнители по отдельности: «DJ Frolov, Дмитрий Фролов feat. X» → ['dj frolov', 'дмитрий фролов', 'x'] */
 export function artistSet(s) {
   return String(s || '')
@@ -145,6 +151,7 @@ function lrclibShape(r) {
     instrumental: !!r.instrumental,
     plainLyrics: r.instrumental ? null : r.plain || null,
     syncedLyrics: r.instrumental ? null : r.synced || null,
+    isrc: r.isrc || null,
     // расширение Nyao: части песни (куплет, припев…) по номерам строк текста
     sections: parseStructure(r.structure),
     cover: r.cover || null
@@ -173,7 +180,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
   const catalogLimit = limiter(40);
   const YA_ID = /^\d{1,15}$/;
 
-  const PUBLISHED = `SELECT t.id, t.title, t.artist, t.album, t.duration, v.plain, v.synced, v.instrumental, v.structure, t.cover
+  const PUBLISHED = `SELECT t.id, t.title, t.artist, t.album, t.duration, v.plain, v.synced, v.instrumental, v.structure, t.cover, t.isrc
       FROM lyrics_tracks t JOIN lyrics_versions v ON v.id = t.published_version
      WHERE NOT t.hidden`;
 
@@ -194,7 +201,13 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
   }
 
   /** Трек по названию, исполнителю и длительности (±2 с, как в LRCLIB) */
-  async function findTrack(title, artist, duration, onlyPublished, yaId = null) {
+  async function findTrack(title, artist, duration, onlyPublished, yaId = null, isrc = null) {
+    // ISRC — одна и та же запись в любом сервисе
+    if (isrc) {
+      const { rows } = await q('SELECT t.id, t.duration, t.published_version, t.hidden, t.ya_id FROM lyrics_tracks t WHERE t.isrc = $1 ORDER BY t.id', [isrc]);
+      const hit = onlyPublished ? rows.filter((r) => r.published_version && !r.hidden) : rows;
+      if (hit.length) return hit[0];
+    }
     // трек из каталога Яндекса — сначала точно по его id
     if (yaId) {
       const { rows } = await q('SELECT t.id, t.duration, t.published_version, t.hidden, t.ya_id FROM lyrics_tracks t WHERE t.ya_id = $1 ORDER BY t.id', [yaId]);
@@ -211,6 +224,12 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
     const fits = rows.filter((r) => (!duration || !r.duration || Math.abs(Number(r.duration) - duration) <= 2) && (onlyPublished || !yaId || !r.ya_id || r.ya_id === yaId));
     const pick = onlyPublished ? fits.filter((r) => r.published_version && !r.hidden) : fits;
     return pick[0] || null;
+  }
+
+  /** ISRC нового трека — в фоне через Deezer; не нашёлся или сеть недоступна — не беда */
+  function fillIsrc(id, meta) {
+    if (!catalog || !catalog.isrcFor) return;
+    catalog.isrcFor(meta).then((isrc) => isrc && q('UPDATE lyrics_tracks SET isrc = $1 WHERE id = $2 AND isrc IS NULL', [isrc, id])).catch(() => {});
   }
 
   /** К трекам каталога — есть ли у нас текст: { id, published, pending } или null */
@@ -244,7 +263,8 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       if (!title || !artist) throw new HttpError(400, 'Нужны track_name и artist_name');
       // ya_id — расширение Nyao: трек Яндекс Музыки, точное совпадение
       const yaId = YA_ID.test(url.searchParams.get('ya_id') || '') ? url.searchParams.get('ya_id') : null;
-      const t = await findTrack(title, artist, Math.round(Number(url.searchParams.get('duration')) || 0), true, yaId);
+      const isrc = normIsrc(url.searchParams.get('isrc'));
+      const t = await findTrack(title, artist, Math.round(Number(url.searchParams.get('duration')) || 0), true, yaId, isrc);
       const r = t && (await published(t.id));
       if (!r) throw notFound();
       return lrclibShape(r);
@@ -338,7 +358,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
     }],
     ['GET', /^\/api\/track\/(\d{1,18})$/, async ({ m }) => {
       const { rows } = await q(
-        `SELECT t.id, t.title, t.artist, t.album, t.duration, t.hidden, t.cover, t.ya_id, v.plain, v.synced, v.instrumental, v.structure, v.reviewed_at,
+        `SELECT t.id, t.title, t.artist, t.album, t.duration, t.hidden, t.cover, t.ya_id, t.isrc, v.plain, v.synced, v.instrumental, v.structure, v.reviewed_at,
                 a.name AS a_name, a.username AS a_username
            FROM lyrics_tracks t
            LEFT JOIN lyrics_versions v ON v.id = t.published_version
@@ -357,6 +377,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         duration: Number(r.duration) || 0,
         cover: r.cover || null,
         yaId: r.ya_id || null,
+        isrc: r.isrc || null,
         published: r.reviewed_at
           ? { plain: r.plain, synced: r.synced, instrumental: !!r.instrumental, structure: parseStructure(r.structure), reviewedAt: r.reviewed_at, author: user(r, 'a_') }
           : null
@@ -424,7 +445,9 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         if (!norm(title) || !norm(artist)) throw new HttpError(400, 'Название или исполнитель без букв и цифр');
         const album = clip(String(t.album || '').trim(), 200);
         const cover = yaId && t.cover ? clip(t.cover, 300) : null;
-        const found = await findTrack(title, artist, duration, false, yaId);
+        const isrc = normIsrc((b.track || {}).isrc);
+        if ((b.track || {}).isrc && !isrc) throw new HttpError(400, 'ISRC — 12 знаков, например USRC17607839');
+        const found = await findTrack(title, artist, duration, false, yaId, isrc);
         if (found) {
           if (found.hidden) throw new HttpError(451, 'Трек снят по жалобе правообладателя');
           trackId = Number(found.id);
@@ -432,14 +455,16 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
           clean = check(duration);
           if (album) await q(`UPDATE lyrics_tracks SET album = $1 WHERE id = $2 AND album = ''`, [album, trackId]);
           if (yaId && !found.ya_id) await q('UPDATE lyrics_tracks SET ya_id = $1, cover = $2 WHERE id = $3', [yaId, cover, trackId]);
+          if (isrc) await q('UPDATE lyrics_tracks SET isrc = $1 WHERE id = $2 AND isrc IS NULL', [isrc, trackId]);
         } else {
           // трек заводим только для текста, который прошёл автопроверку
           clean = check(duration);
           const { rows } = await q(
-            `INSERT INTO lyrics_tracks (title, artist, album, duration, title_norm, artist_norm, ya_id, cover) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-            [title, artist, album, duration, norm(title), norm(artist), yaId, cover]
+            `INSERT INTO lyrics_tracks (title, artist, album, duration, title_norm, artist_norm, ya_id, cover, isrc) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+            [title, artist, album, duration, norm(title), norm(artist), yaId, cover, isrc]
           );
           trackId = Number(rows[0].id);
+          if (!isrc) fillIsrc(trackId, { title, artist, duration });
         }
       }
       if (!clean) clean = check(duration);
@@ -594,13 +619,18 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
           if (ya) cover = ya.cover;
         } else cover = null;
       }
+      let isrc = t.isrc;
+      if (b.isrc !== undefined) {
+        isrc = b.isrc ? normIsrc(b.isrc) : null;
+        if (b.isrc && !isrc) throw new HttpError(400, 'ISRC — 12 знаков, например USRC17607839');
+      }
       if (b.cover !== undefined) {
         if (b.cover && !/^https:\/\/[^\s"'<>]{4,300}$/.test(String(b.cover))) throw new HttpError(400, 'Обложка — ссылка https://…');
         cover = b.cover ? String(b.cover) : null;
       }
       await q(
-        `UPDATE lyrics_tracks SET title = $1, artist = $2, album = $3, duration = $4, title_norm = $5, artist_norm = $6, ya_id = $7, cover = $8 WHERE id = $9`,
-        [title, artist, album, duration, norm(title), norm(artist), yaId, cover, t.id]
+        `UPDATE lyrics_tracks SET title = $1, artist = $2, album = $3, duration = $4, title_norm = $5, artist_norm = $6, ya_id = $7, cover = $8, isrc = $9 WHERE id = $10`,
+        [title, artist, album, duration, norm(title), norm(artist), yaId, cover, isrc, t.id]
       );
       return { ok: true };
     }, true],

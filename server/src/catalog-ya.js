@@ -76,6 +76,25 @@ export class YaCatalog {
     return data;
   }
 
+  /**
+   * ISRC записи через открытый API Deezer (без ключей): ищем трек с тем же названием и длительностью (±2 с).
+   * → 'USRC17607839' или null. Только метаданные.
+   */
+  async isrcFor({ title, artist, duration }) {
+    const get = async (url) => {
+      const res = await this.fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`Deezer ответил ${res.status}`);
+      return res.json();
+    };
+    const q = `artist:"${String(artist).split(',')[0].trim()}" track:"${String(title).trim()}"`;
+    const r = await get(`https://api.deezer.com/search?${new URLSearchParams({ q, limit: '10' })}`);
+    const low = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    const hit = ((r && r.data) || []).find((d) => low(d.title) === low(title) && (!duration || Math.abs(Number(d.duration) - duration) <= 2));
+    if (!hit) return null;
+    const t = await get(`https://api.deezer.com/track/${encodeURIComponent(hit.id)}`);
+    return t && t.isrc ? String(t.isrc).toUpperCase() : null;
+  }
+
   /** Трек по id (для «Добавить текст» по ссылке и проверки метаданных при отправке) */
   async track(id) {
     const r = await this.get(`/tracks/${encodeURIComponent(id)}`);

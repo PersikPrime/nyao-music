@@ -54,6 +54,8 @@ object LyricsApi {
             .apply { if (track.duration > 0) addQueryParameter("duration", track.duration.toString()) }
             // id трека Яндекса — точное совпадение без путаницы одинаковых названий
             .apply { if (track.source == SOURCE_YA && track.srcId.all { it.isDigit() }) addQueryParameter("ya_id", track.srcId) }
+            // ISRC (у треков Spotify) — та же запись в любом сервисе
+            .apply { track.isrc?.let { addQueryParameter("isrc", it) } }
             .build().toString()
         from(get(url)?.let { JSONObject(it) }, "Nyao LyricLabs")
     } catch (_: Exception) {

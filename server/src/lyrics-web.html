@@ -421,7 +421,7 @@ async function trackPage(id) {
   const hasSync = !!(p && p.synced);
   const hasStruct = !!(p && p.structure && p.structure.length);
   app.innerHTML = `<div class="thead">${coverImg(t.cover, 'art')}<div class="meta">
-      <div class="muted small">${t.album ? esc(t.album) + ' · ' : ''}${fmtDur(t.duration)}</div>
+      <div class="muted small">${t.album ? esc(t.album) + ' · ' : ''}${fmtDur(t.duration)}${t.isrc ? ` · ISRC ${esc(t.isrc)}` : ''}</div>
       <h1 style="margin-top:4px">${esc(t.title)}</h1>
       <div class="muted" style="font-size:17px">${esc(t.artist)}</div>
       <div class="badges">${p ? '<span class="tag ok">✓ Проверено</span>' : '<span class="tag">Текста пока нет</span>'}${hasSync ? '<span class="tag">Синхронизирован</span>' : ''}${p && p.instrumental ? '<span class="tag">Инструментал</span>' : ''}</div>
@@ -464,6 +464,7 @@ function metaForm(t) {
     <div><label>Альбом</label><input type="text" id="m-al" value="${esc(t.album || '')}"></div>
     <div><label>Длительность</label><input type="text" id="m-du" value="${fmtDur(t.duration)}"></div>
     <div><label>Номер трека в Яндекс Музыке (или ссылка)</label><input type="text" id="m-ya" value="${esc(t.yaId || '')}" placeholder="пусто — не привязан"></div>
+    <div><label>ISRC</label><input type="text" id="m-is" value="${esc(t.isrc || '')}" placeholder="например USRC17607839"></div>
     <div><label>Обложка (ссылка https://…)</label><input type="text" id="m-cv" value="${esc(t.cover || '')}"></div>
     <p class="muted small" style="margin:0">Поиск совпадает, если общий хотя бы один исполнитель: «DJ Frolov» найдёт «DJ Frolov, Дмитрий Фролов».</p>
     <div class="row"><button class="btn primary sm" id="m-save">Сохранить</button><button class="btn sm" id="m-cancel">Отмена</button></div>
@@ -473,7 +474,7 @@ function metaForm(t) {
   $('m-save').onclick = async () => {
     const yaRaw = $('m-ya').value.trim();
     const ya = (/track\/(\d+)/.exec(yaRaw) || [null, yaRaw])[1];
-    const body = { title: $('m-ti').value, artist: $('m-ar').value, album: $('m-al').value, duration: parseDur($('m-du').value), yaId: ya || null };
+    const body = { title: $('m-ti').value, artist: $('m-ar').value, album: $('m-al').value, duration: parseDur($('m-du').value), yaId: ya || null, isrc: $('m-is').value.trim() || null };
     if ($('m-cv').value.trim() !== (t.cover || '')) body.cover = $('m-cv').value.trim() || null;
     try { await api('POST', `/api/admin/track/${t.id}`, body); toast('Сохранено'); trackPage(t.id); } catch (e) { $('m-msg').textContent = e.message; }
   };
@@ -788,6 +789,7 @@ function pickTrack() {
     <div class="card" id="mf" style="display:none"><div class="grid4">
       <div><label>Название</label><input type="text" id="ti"></div><div><label>Исполнитель</label><input type="text" id="ar"></div>
       <div><label>Альбом</label><input type="text" id="al"></div><div><label>Длительность</label><input type="text" id="du" placeholder="3:25"></div></div>
+      <div style="margin-top:12px;max-width:320px"><label>ISRC (если знаешь — трек найдётся в любом сервисе точно)</label><input type="text" id="is" placeholder="например USRC17607839"></div>
       <div class="row" style="margin-top:14px"><button class="btn primary" id="mgo">Дальше</button><span id="mmsg" class="err small"></span></div></div>`;
   const $ = (x) => document.getElementById(x);
   const choose = (t) => {
@@ -809,7 +811,7 @@ function pickTrack() {
   };
   $('manual').onclick = (e) => { e.preventDefault(); $('mf').style.display = ''; $('ti').focus(); };
   $('mgo').onclick = () => {
-    const t = { title: $('ti').value.trim(), artist: $('ar').value.trim(), album: $('al').value.trim(), duration: parseDur($('du').value), cover: null };
+    const t = { title: $('ti').value.trim(), artist: $('ar').value.trim(), album: $('al').value.trim(), duration: parseDur($('du').value), cover: null, isrc: $('is').value.trim() || null };
     if (!t.title || !t.artist || !t.duration) { $('mmsg').textContent = 'Нужны название, исполнитель и длительность'; return; }
     openEditor({ track: t, version: null, trackId: null, note: '', tab: 'text', title: 'Добавить текст' });
   };
@@ -862,7 +864,7 @@ function openEditor({ track, version, trackId, note, tab, title, pending }) {
     if (!body.instrumental && !body.plain) { msg.className = 'small err'; msg.textContent = 'Напиши текст или отметь трек как инструментал.'; return; }
     if (trackId) body.trackId = Number(trackId);
     else if (track.yaId) body.track = { yaId: track.yaId };
-    else body.track = { title: track.title, artist: track.artist, album: track.album, duration: track.duration };
+    else body.track = { title: track.title, artist: track.artist, album: track.album, duration: track.duration, ...(track.isrc ? { isrc: track.isrc } : {}) };
     document.getElementById('send').disabled = true;
     try {
       await api('POST', '/api/submit', body);
@@ -1007,7 +1009,7 @@ function docsPage() {
     <p class="muted">Открытый API для чтения проверенных текстов. Формат ответов совместим с LRCLIB — подходят существующие клиенты, достаточно поменять адрес. Ключ не нужен, лимит — 300 запросов в минуту с одного адреса.</p>
     <h2>Текст по треку</h2>
     <pre class="code">GET ${base}/api/get?artist_name=…&amp;track_name=…&amp;album_name=…&amp;duration=213</pre>
-    <p class="muted small">Длительность в секундах; подходят треки с разницей до 2 секунд. Для треков Яндекс Музыки можно добавить <code>ya_id</code> — тогда совпадение точное. Нет текста — <code>404</code> с <code>{"code":404,"name":"TrackNotFound"}</code>.</p>
+    <p class="muted small">Длительность в секундах; подходят треки с разницей до 2 секунд. Для точного совпадения можно добавить <code>isrc</code> (код записи, одинаковый во всех сервисах) или <code>ya_id</code> для треков Яндекс Музыки. Нет текста — <code>404</code> с <code>{"code":404,"name":"TrackNotFound"}</code>.</p>
     <pre class="code">{
   "id": 42,
   "trackName": "…", "artistName": "…", "albumName": "…",
@@ -1016,6 +1018,7 @@ function docsPage() {
   "plainLyrics": "…",
   "syncedLyrics": "[00:12.30] …",
   "sections": [{ "from": 0, "type": "verse" }, { "from": 8, "type": "chorus" }],
+  "isrc": "USRC17607839",
   "cover": "https://…"
 }</pre>
     <p class="muted small"><code>sections</code> — части песни: с какой строки текста (без пустых строк, с нуля) начинается куплет, припев и т. д. Типы: ${SECTIONS.map(([k]) => `<code>${k}</code>`).join(', ')}.</p>
