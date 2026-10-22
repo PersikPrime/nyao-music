@@ -49,6 +49,26 @@ export class YaCatalog {
   }
 
   /**
+   * Тот же трек в других сервисах через открытый API Odesli (song.link): ссылка Spotify → номер трека
+   * в Яндекс Музыке и метаданные. → { yaId, title, artist, cover } или null
+   */
+  async songLink(url) {
+    const key = `odesli:${url}`;
+    const hit = this.cache.get(key);
+    if (hit && hit.until > Date.now()) return hit.data;
+    const res = await this.fetch(`https://api.song.link/v1-alpha.1/links?${new URLSearchParams({ url, userCountry: 'RU' })}`, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw Object.assign(new Error(`song.link ответил ${res.status}`), { status: res.status });
+    const j = await res.json();
+    const ents = Object.values(j.entitiesByUniqueId || {});
+    const ent = ents.find((e) => e.apiProvider === 'spotify') || ents[0] || {};
+    const ya = j.linksByPlatform && j.linksByPlatform.yandex;
+    const m = ya && /track\/(\d{1,15})/.exec(ya.url || '');
+    const data = ent.title ? { yaId: m ? m[1] : null, title: ent.title, artist: ent.artistName || '', cover: ent.thumbnailUrl || null } : null;
+    this.cache.set(key, { data, until: Date.now() + TTL });
+    return data;
+  }
+
+  /**
    * Метаданные трека по публичной странице open.spotify.com (og-теги, без входа и ключей).
    * → { title, artist, album, duration, cover } или null
    */

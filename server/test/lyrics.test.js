@@ -309,3 +309,22 @@ test('каталог: ISRC через Deezer', async () => {
   assert.equal(await c.isrcFor({ title: 'Луна', artist: 'Группа, Другой', duration: 190 }), 'RUABC2400001');
   assert.match(decodeURIComponent(calls[0]).replace(/\+/g, " "), /artist:"Группа" track:"Луна"/);
 });
+
+test('тексты: ссылка Spotify через song.link сразу находит трек Яндекса', async () => {
+  const cat = {
+    async search() { return []; },
+    async track(id) { return id === '777' ? { yaId: '777', title: 'Вивальди как быть', artist: 'DJ Frolov, Дмитрий Фролов', album: '', duration: 51, cover: null } : null; },
+    async songLink(url) { return url.endsWith('/abcdefghij1234567890ab') ? { yaId: '777', title: 'Вивальди как быть', artist: 'DJ Frolov', cover: null } : null; },
+    async spotifyTrack() { throw new Error('403'); }
+  };
+  const t = await setup({ yaCatalog: cat });
+  try {
+    const r = await t.call('GET', `/api/catalog/link?url=${encodeURIComponent('https://open.spotify.com/track/abcdefghij1234567890ab')}`);
+    assert.equal(r.status, 200);
+    assert.equal(r.json.items[0].yaId, '777');
+    // ни song.link, ни страница Spotify не ответили — понятная ошибка
+    assert.equal((await t.call('GET', `/api/catalog/link?url=${encodeURIComponent('https://open.spotify.com/track/zzzzzzzzzz1234567890ab')}`)).status, 502);
+  } finally {
+    t.close();
+  }
+});

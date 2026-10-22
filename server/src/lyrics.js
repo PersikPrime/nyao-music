@@ -326,13 +326,16 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       }
       const sp = /open\.spotify\.com\/(?:intl-[a-z-]+\/)?track\/([A-Za-z0-9]{10,40})/i.exec(link) || /^spotify:track:([A-Za-z0-9]{10,40})$/i.exec(link);
       if (sp) {
-        let meta = null;
-        try {
-          meta = await catalog.spotifyTrack(sp[1]);
-        } catch {
-          throw new HttpError(502, 'Не получилось открыть ссылку Spotify с сервера — найди трек по названию');
+        // сначала song.link: сразу знает тот же трек в Яндексе; страница Spotify — запасной путь
+        const spUrl = `https://open.spotify.com/track/${sp[1]}`;
+        const odesli = catalog.songLink ? await catalog.songLink(spUrl).catch(() => null) : null;
+        if (odesli && odesli.yaId) {
+          const t = await catalog.track(odesli.yaId).catch(() => null);
+          if (t) return { source: 'sp', items: await withLyrics([t]), fallback: null };
         }
-        if (!meta) throw new HttpError(404, 'По ссылке Spotify не нашёл данных о треке');
+        let meta = await catalog.spotifyTrack(sp[1]).catch(() => null);
+        if (!meta && odesli) meta = { title: odesli.title, artist: odesli.artist, album: '', duration: 0, cover: odesli.cover };
+        if (!meta) throw new HttpError(502, 'Не получилось прочитать ссылку Spotify — найди трек по названию');
         // тот же трек в Яндексе: совпадает название и длительность (±3 с)
         const found = await catalog.search(`${meta.artist.split(',')[0]} ${meta.title}`).catch(() => []);
         const same = found
