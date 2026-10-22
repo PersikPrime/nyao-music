@@ -8,7 +8,13 @@ export function parseDeepLink(raw) {
     return null;
   }
   if (u.protocol !== 'nyao:') return null;
-  const seg = decodeURIComponent(u.pathname.replace(/^\/+/, '')).split('/')[0] || '';
+  let seg;
+  try {
+    // битая ссылка (nyao://u/%ZZ) не должна ронять запуск приложения
+    seg = decodeURIComponent(u.pathname.replace(/^\/+/, '')).split('/')[0] || '';
+  } catch {
+    return null;
+  }
   if (u.host === 'add' && /^[a-z0-9]{6,16}$/.test(seg)) return { kind: 'add', value: seg };
   if (u.host === 'join' && /^[A-Za-z0-9]{6}$/.test(seg)) return { kind: 'join', value: seg.toUpperCase() };
   if (u.host === 'u' && /^[A-Za-z0-9_.]{3,24}$/.test(seg)) return { kind: 'user', value: seg };

@@ -25,7 +25,8 @@ export function livePosition(d, now = Date.now()) {
 /** Код комнаты из того, что ввели: «abc-123», ссылка-приглашение… → «ABC123» или null */
 export function parseRoomCode(input) {
   const s = String(input || '').trim();
-  const m = s.match(/join\/([A-Za-z0-9]{6})\b/);
+  // ссылки nyao://join/КОД, …/share/room/КОД (кнопка «Скопировать ссылку») и старые …/join/КОД
+  const m = s.match(/(?:join|share\/room)\/([A-Za-z0-9]{6})\b/);
   const code = (m ? m[1] : s.replace(/[^A-Za-z0-9]/g, '')).toUpperCase();
   return /^[A-Z0-9]{6}$/.test(code) ? code : null;
 }

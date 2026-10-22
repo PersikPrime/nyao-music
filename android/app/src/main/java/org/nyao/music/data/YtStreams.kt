@@ -80,6 +80,8 @@ class YtStreams(private val yt: YtMusicApi) {
         val errors = ArrayList<String>()
         val deadline = android.os.SystemClock.elapsedRealtime() + 25_000
         for (round in 0..1) {
+            // без visitorData YouTube чаще просит «подтвердить, что вы не бот»: берём его до запроса потока
+            if (yt.visitorData == null) runCatching { kotlinx.coroutines.runBlocking { yt.ensureVisitor() } }
             for (c in order(videoId)) {
                 if (android.os.SystemClock.elapsedRealtime() >= deadline) break
                 try {

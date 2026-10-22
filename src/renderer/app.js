@@ -1545,6 +1545,8 @@ function syncSpMode() {
   const a = s && s.account;
   const was = spMode.fallback;
   spMode.fallback = !(s && s.loggedIn && !s.regionBlocked && a && !a.error && a.premium !== false);
+  // Spotify снова может играть сам — значки «SP → Я» и пометки о копиях больше не нужны
+  if (!spMode.fallback) spMode.subs.clear();
   if (was !== spMode.fallback && player.current && player.current.source === 'sp') player.reload();
 }
 async function loadStatus() {
@@ -3505,6 +3507,8 @@ function openMixBuilder() {
     api.spotify.onSubstitute(({ id, track } = {}) => {
       if (!id || !track) return;
       spMode.subs.set(id, track);
+      // сервер отдал копию сам (например, Spotify не пускает из региона) — значит, Spotify сейчас не играет
+      spMode.fallback = true;
       renderBar();
       if (state.drawer === 'queue') renderDrawer();
       if (state.route === 'wave') RENDER.wave();

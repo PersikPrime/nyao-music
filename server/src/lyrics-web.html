@@ -1141,12 +1141,12 @@ async function reportPage(id) {
   $('kind').onchange = () => {
     const c = $('kind').value === 'copyright';
     $('who').style.display = c ? 'grid' : 'none';
-    $('hint').textContent = c ? 'Текст скроется сразу после отправки. Мы свяжемся по указанному контакту.' : 'Ошибки исправляют через «Править» на странице трека — но можно и просто сообщить.';
+    $('hint').textContent = c ? 'Обычно текст скрывается сразу после отправки. Обращение рассмотрит администратор и ответит по указанному контакту.' : 'Ошибки исправляют через «Править» на странице трека — но можно и просто сообщить.';
   };
   $('send').onclick = async () => {
     try {
       const r = await api('POST', '/api/report', { trackId: Number(id), kind: $('kind').value, name: $('nm').value, contact: $('ct').value, details: $('dt').value });
-      app.innerHTML = `<div class="card" style="text-align:center;max-width:480px;margin:40px auto"><h2 style="margin-top:0">Спасибо</h2><p class="muted">${r.hidden ? 'Текст скрыт. Обращение рассмотрит администратор.' : 'Сообщение получено.'}</p><a class="btn" href="/" data-link>На главную</a></div>`;
+      app.innerHTML = `<div class="card" style="text-align:center;max-width:480px;margin:40px auto"><h2 style="margin-top:0">Спасибо</h2><p class="muted">${r.hidden ? 'Текст скрыт. Обращение рассмотрит администратор.' : $('kind') && $('kind').value === 'copyright' ? 'Обращение получено — администратор рассмотрит его и ответит по указанному контакту.' : 'Сообщение получено.'}</p><a class="btn" href="/" data-link>На главную</a></div>`;
     } catch (e) { $('msg').className = 'err'; $('msg').textContent = e.message; }
   };
 }
@@ -1219,7 +1219,7 @@ GET ${base}/api/search?track_name=…&amp;artist_name=…</pre>
 }
 function copyrightPage() {
   app.innerHTML = `<h1>Правообладателям</h1>
-    <div class="card"><p style="margin-top:0">Тексты на Nyao LyricLabs добавляют пользователи. Если вы правообладатель и хотите убрать текст, откройте страницу трека и нажмите «Пожаловаться» → «Я правообладатель». Текст скрывается сразу, обращение рассматривает администратор и отвечает по указанному контакту.</p><p class="muted" style="margin-bottom:0">Скрытый трек нельзя добавить заново без решения администратора.</p></div>`;
+    <div class="card"><p style="margin-top:0">Тексты на Nyao LyricLabs добавляют пользователи. Если вы правообладатель и хотите убрать текст, откройте страницу трека и нажмите «Пожаловаться» → «Я правообладатель». Обычно текст скрывается сразу; обращение рассматривает администратор и отвечает по указанному контакту.</p><p class="muted" style="margin-bottom:0">Скрытый трек нельзя добавить заново без решения администратора.</p></div>`;
 }
 
 loadMe().finally(route);

@@ -152,9 +152,11 @@ export class YTMusicProvider {
   }
 
   async likedTracks(limit = 5000) {
-    if (this.likedCache && Date.now() - this.likedCache.at < 10 * 60 * 1000) return this.likedCache.tracks;
+    // кэш помнит, сколько треков просили: короткий список для волны (300) не должен обрезать «Мне нравится»
+    const c = this.likedCache;
+    if (c && Date.now() - c.at < 10 * 60 * 1000 && (c.limit >= limit || c.tracks.length < c.limit)) return c.tracks.slice(0, limit);
     const tracks = await this.playlistTracks('yt:LM', limit);
-    this.likedCache = { at: Date.now(), tracks };
+    this.likedCache = { at: Date.now(), tracks, limit };
     return tracks;
   }
 

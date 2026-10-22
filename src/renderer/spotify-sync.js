@@ -6,7 +6,8 @@
 import { spMode } from './sp-mode.js';
 
 // трек Spotify, который играет сам Spotify (а не копия из другого сервиса)
-const isSp = (t) => !!t && t.source === 'sp' && !spMode.fallback && !spMode.subs.has(t.id);
+// (копии существуют только пока fallback включён — app.js держит это правило)
+const isSp = (t) => !!t && t.source === 'sp' && !spMode.fallback;
 
 export class SpotifySync {
   constructor(player, api, { onMessage } = {}) {

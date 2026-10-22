@@ -395,3 +395,27 @@ test('LRC: сжатые строки с несколькими метками и
   assert.match(cd, /filename\*=UTF-8''Don%27t%20Stop%20%28Live%29/);
   assert.doesNotMatch(cd.split("UTF-8''")[1], /['()!*]/);
 });
+
+test('жалобы правообладателя: автоскрытие с лимитом, возвращённый админом трек сам не скрывается', async () => {
+  const t = await setup();
+  try {
+    const owner = await t.user('Takko');
+    const ids = [];
+    for (let i = 0; i < 5; i++) {
+      const s = await t.call('POST', '/api/submit', { token: owner.token, body: { track: { title: `Трек ${i}`, artist: 'Группа', duration: 100 + i }, plain: 'Текст' } });
+      await t.call('POST', `/api/review/${s.json.id}`, { token: owner.token, body: { action: 'accept' } });
+      ids.push(s.json.trackId);
+    }
+    const report = (id) => t.call('POST', '/api/report', { body: { trackId: id, kind: 'copyright', name: 'X', contact: 'x@x', details: 'моё' } });
+    const hidden = [];
+    for (const id of ids.slice(0, 4)) hidden.push((await report(id)).json.hidden);
+    assert.deepEqual(hidden, [true, true, true, false], 'с одного адреса — не больше 3 автоскрытий в сутки');
+    assert.equal((await t.call('GET', `/api/get/${ids[3]}`)).status, 200, 'четвёртый трек остался, жалоба ждёт админа');
+    // админ вернул трек — повторная жалоба его сама уже не скрывает
+    const rep = (await t.call('GET', '/api/admin/reports', { token: owner.token })).json.items.find((r) => r.track.id === ids[0]);
+    await t.call('POST', `/api/admin/reports/${rep.id}`, { token: owner.token, body: { action: 'restore' } });
+    assert.equal((await t.call('GET', `/api/get/${ids[0]}`)).status, 200);
+  } finally {
+    t.close();
+  }
+});

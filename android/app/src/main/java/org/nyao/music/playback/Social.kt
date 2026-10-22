@@ -151,7 +151,7 @@ object Together {
         .build().toString()
 
     fun parseCode(input: String): String? {
-        val m = Regex("join/([A-Za-z0-9]{6})\\b").find(input)
+        val m = Regex("(?:join|share/room)/([A-Za-z0-9]{6})\\b").find(input) // nyao://join/…, …/share/room/…
         val code = (m?.groupValues?.get(1) ?: input.replace(Regex("[^A-Za-z0-9]"), "")).uppercase()
         return code.takeIf { Regex("^[A-Z0-9]{6}$").matches(it) }
     }

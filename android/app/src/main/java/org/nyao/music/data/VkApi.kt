@@ -209,6 +209,8 @@ class VkApi(private val prefs: Prefs) {
     private val refreshLock = kotlinx.coroutines.sync.Mutex()
     @Volatile private var lastRefresh = 0L
     @Volatile private var lastRefreshOk = false
+    /** VK при продлении отправил на страницу входа — сессии точно нет (а не просто сеть подвела) */
+    @Volatile private var lastRefreshLoggedOut = false
 
     /**
      * Тихое продление сессии: vk.com сам обновляет свои cookie, когда открыт его сайт.
@@ -218,7 +220,10 @@ class VkApi(private val prefs: Prefs) {
      */
     suspend fun refreshSession(force: Boolean = false): Boolean = refreshLock.withLock {
         val ctx = appContext ?: return false
-        if (!force && System.currentTimeMillis() - lastRefresh < 60_000) return lastRefreshOk
+        // неудачная попытка — следующая не раньше чем через 10 минут: не гоняем невидимый WebView каждую минуту
+        val wait = if (lastRefreshOk) 60_000L else 10 * 60_000L
+        if (!force && System.currentTimeMillis() - lastRefresh < wait) return lastRefreshOk
+        lastRefreshLoggedOut = false
         val result = kotlinx.coroutines.withTimeoutOrNull(25_000) {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 kotlinx.coroutines.suspendCancellableCoroutine<Boolean> { cont ->
@@ -240,7 +245,10 @@ class VkApi(private val prefs: Prefs) {
                         override fun onPageFinished(view: android.webkit.WebView, url: String) {
                             val login = url.contains("login") || url.contains("/join") || url.contains("id.vk.")
                             // даём скриптам VK пару секунд обновить cookie
-                            if (login) finish(false) else view.postDelayed({
+                            if (login) {
+                                lastRefreshLoggedOut = true
+                                finish(false)
+                            } else view.postDelayed({
                                 if (!done) view.evaluateJavascript("(window.vk && Number(window.vk.id)) || 0") { value ->
                                     finish(value.trim('"').toLongOrNull() == uid)
                                 }
@@ -280,6 +288,10 @@ class VkApi(private val prefs: Prefs) {
                 prefs.vkUid = null
                 throw ApiException("Сессия VK закончилась — войди заново", 401)
             }
+        } else if (lastRefreshLoggedOut) {
+            // VK отправил на вход — как на ПК: выходим из аккаунта, чтобы не повторять попытки впустую
+            prefs.vkUid = null
+            throw ApiException("Сессия VK закончилась — войди заново", 401)
         } else {
             throw ApiException("VK не подтвердил вход — попробуй позже или войди заново", 401)
         }

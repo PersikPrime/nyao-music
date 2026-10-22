@@ -33,6 +33,24 @@ object Match {
     }
 
     fun similarity(src: Track, cand: Track): Double {
+        val base = similarityRaw(src, cand)
+        // разная азбука («Кино» и «Kino»): сравниваем ещё и в латинице, берём лучшее
+        val cyr = Regex("[а-яёА-ЯЁ]")
+        if (base >= 0.85 || !(cyr.containsMatchIn(src.title + src.artist) || cyr.containsMatchIn(cand.title + cand.artist))) return base
+        return maxOf(base, similarityRaw(src.copy(title = translit(src.title), artist = translit(src.artist)), cand.copy(title = translit(cand.title), artist = translit(cand.artist))))
+    }
+
+    private val TRANSLIT = mapOf(
+        'а' to "a", 'б' to "b", 'в' to "v", 'г' to "g", 'д' to "d", 'е' to "e", 'ё' to "e", 'ж' to "zh", 'з' to "z", 'и' to "i",
+        'й' to "y", 'к' to "k", 'л' to "l", 'м' to "m", 'н' to "n", 'о' to "o", 'п' to "p", 'р' to "r", 'с' to "s", 'т' to "t",
+        'у' to "u", 'ф' to "f", 'х' to "h", 'ц' to "ts", 'ч' to "ch", 'ш' to "sh", 'щ' to "sch", 'ъ' to "", 'ы' to "y", 'ь' to "",
+        'э' to "e", 'ю' to "yu", 'я' to "ya",
+    )
+
+    /** Кириллица латиницей: «Кино» → «kino» */
+    fun translit(s: String): String = buildString { s.lowercase().forEach { c -> append(TRANSLIT[c] ?: c.toString()) } }
+
+    private fun similarityRaw(src: Track, cand: Track): Double {
         if (recordingVersion(src.title) != recordingVersion(cand.title)) return 0.0
         val st = norm(src.title)
         val ct = norm(cand.title)

@@ -45,7 +45,22 @@ export function recordingVersion(title) {
     .filter(word => new RegExp('(?:^|[^a-z])' + word + '(?:$|[^a-z])').test(s)).join(',');
 }
 
+const TRANSLIT = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya' };
+/** Кириллица латиницей: «Кино» → «kino» — один и тот же трек в разных сервисах бывает записан разной азбукой */
+export function translit(s) {
+  return String(s || '').toLowerCase().replace(/[а-яё]/g, (c) => TRANSLIT[c] ?? c);
+}
+
 export function similarity(src, cand) {
+  const base = similarityRaw(src, cand);
+  // разная азбука: сравниваем ещё и в латинице, берём лучшее
+  const cyr = /[а-яё]/i;
+  if (base >= 0.85 || !(cyr.test(src.title + src.artist) || cyr.test(cand.title + cand.artist))) return base;
+  const lat = (t) => ({ ...t, title: translit(t.title), artist: translit(t.artist) });
+  return Math.max(base, similarityRaw(lat(src), lat(cand)));
+}
+
+function similarityRaw(src, cand) {
   if (recordingVersion(src.title) !== recordingVersion(cand.title)) return 0;
   const st = norm(src.title);
   const ct = norm(cand.title);

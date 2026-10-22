@@ -165,7 +165,10 @@ export const SCHEMA = [
   `ALTER TABLE lyrics_versions ADD COLUMN IF NOT EXISTS structure TEXT NOT NULL DEFAULT ''`,
   // ISRC — код записи, одинаковый во всех сервисах: точное совпадение без сравнения названий
   `ALTER TABLE lyrics_tracks ADD COLUMN IF NOT EXISTS isrc TEXT`,
-  `CREATE INDEX IF NOT EXISTS lyrics_tracks_isrc ON lyrics_tracks (isrc)`
+  `CREATE INDEX IF NOT EXISTS lyrics_tracks_isrc ON lyrics_tracks (isrc)`,
+  // жалобы: скрыл ли трек сам сервер и с какого адреса (хэш) — чтобы ограничить автоскрытие
+  `ALTER TABLE lyrics_reports ADD COLUMN IF NOT EXISTS auto_hidden BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE lyrics_reports ADD COLUMN IF NOT EXISTS ip_hash TEXT NOT NULL DEFAULT ''`
 ];
 
 export async function migrate(pool) {

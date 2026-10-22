@@ -223,3 +223,33 @@ test('Spotify concurrent readiness requests share startup and release rejects pe
   await assert.rejects(pending, /остановлен/);
   assert.equal(engine.readyWaiters.length, 0);
 });
+
+test('ultrareview: застрявший лайк не держит очередь, битая ссылка не роняет запуск, «Кино» = «Kino»', async () => {
+  const { PendingLikes } = await import('../src/main/pending-likes.js');
+  let store = [];
+  const q = new PendingLikes({ read: () => store, write: (v) => { store = v; }, account: () => 'me', send: async (it) => { if (it.srcId === 'bad') throw Object.assign(new Error('403'), { status: 403 }); } });
+  q.enqueue({ srcId: 'bad', title: 'b' }, true);
+  q.enqueue({ srcId: 'ok', title: 'o' }, true);
+  const r = await q.flush();
+  assert.equal(r.sent, 1, 'новый лайк отправлен, хотя старый получает 403');
+  assert.deepEqual(store.map((x) => [x.srcId, x.tries]), [['bad', 1]]);
+  for (let i = 0; i < 4; i++) await q.flush();
+  assert.equal(store.length, 0, 'после 5 отказов застрявший лайк выброшен');
+
+  const { parseDeepLink } = await import('../src/main/deeplink.js');
+  assert.equal(parseDeepLink('nyao://u/%ZZ'), null);
+
+  const { similarity } = await import('../src/main/match.js');
+  assert.ok(similarity({ title: 'Группа крови', artist: 'Кино', duration: 285 }, { title: 'Gruppa krovi', artist: 'Kino', duration: 286 }) >= 0.85);
+  assert.ok(similarity({ title: 'Группа крови', artist: 'Кино', duration: 285 }, { title: 'Kukushka', artist: 'Kino', duration: 400 }) < 0.62);
+});
+
+test('ultrareview: короткий список лайков для волны не обрезает «Мне нравится»', async () => {
+  const yt = new YTMusicProvider({});
+  const calls = [];
+  yt.playlistTracks = async (_id, limit) => { calls.push(limit); return Array.from({ length: Math.min(limit, 500) }, (_, i) => ({ id: 'yt:' + i })); };
+  assert.equal((await yt.likedTracks(300)).length, 300);
+  assert.equal((await yt.likedTracks()).length, 500, 'полный список запрошен заново');
+  assert.equal((await yt.likedTracks(300)).length, 300, 'короткий — из полного кэша');
+  assert.deepEqual(calls, [300, 5000]);
+});

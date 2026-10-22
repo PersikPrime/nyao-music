@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 // Тексты песен (lyrics.withnyao.app, API — api.corrode5-15.withnyao.app).
 // Пишут пользователи (вход — аккаунт Nyao через Telegram), проверяет специалист, после проверки текст публикуется.
 // Публичная часть API совместима с LRCLIB (/api/get, /api/search) — подходит существующим клиентам.
@@ -9,6 +10,10 @@ const LRC_LINE = /^\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\](.*)$/;
 const LRC_TAG = /^\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/;
 const LRC_META = /^\[(ar|ti|al|au|by|length|offset|re|ve|#):.*\]$/i;
 const ROLES = new Set(['specialist', 'admin']);
+// автоскрытие по жалобе правообладателя: не больше столько треков в сутки всего и с одного адреса,
+// остальные жалобы ждут админа (иначе скрипт без входа скрыл бы всю базу)
+const AUTO_HIDE_PER_DAY = 20;
+const AUTO_HIDE_PER_IP_DAY = 3;
 /** Части песни для разметки структуры */
 export const SECTION_TYPES = ['intro', 'verse', 'pre-chorus', 'chorus', 'post-chorus', 'hook', 'bridge', 'interlude', 'outro', 'other'];
 
@@ -651,10 +656,21 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       if (!rows.length) throw new HttpError(404, 'Нет такого трека');
       if (kind === 'copyright' && (!name || !contact)) throw new HttpError(400, 'Для жалобы правообладателя нужны имя (или компания) и контакт');
       if (!details) throw new HttpError(400, 'Опиши, в чём дело');
-      await q('INSERT INTO lyrics_reports (track_id, kind, name, contact, details) VALUES ($1, $2, $3, $4, $5)', [trackId, kind, name, contact, details]);
-      // правообладатель: скрываем сразу, разбирается админ
-      if (kind === 'copyright') await q('UPDATE lyrics_tracks SET hidden = true WHERE id = $1', [trackId]);
-      return { ok: true, hidden: kind === 'copyright' };
+      const ipHash = crypto.createHash('sha256').update(`lyrics:${ip}`).digest('hex').slice(0, 32);
+      // правообладатель: скрываем сразу, но в пределах лимитов; трек, который админ уже вернул, — только решением админа
+      let hide = false;
+      if (kind === 'copyright') {
+        const since = new Date(Date.now() - 86_400_000);
+        const [all, mine, restored] = await Promise.all([
+          q('SELECT count(*) AS n FROM lyrics_reports WHERE auto_hidden AND created_at > $1', [since]),
+          q('SELECT count(*) AS n FROM lyrics_reports WHERE auto_hidden AND created_at > $1 AND ip_hash = $2', [since, ipHash]),
+          q(`SELECT 1 FROM lyrics_reports WHERE track_id = $1 AND status = 'restored' LIMIT 1`, [trackId])
+        ]);
+        hide = Number(all.rows[0].n) < AUTO_HIDE_PER_DAY && Number(mine.rows[0].n) < AUTO_HIDE_PER_IP_DAY && !restored.rows.length;
+      }
+      await q('INSERT INTO lyrics_reports (track_id, kind, name, contact, details, auto_hidden, ip_hash) VALUES ($1, $2, $3, $4, $5, $6, $7)', [trackId, kind, name, contact, details, hide, ipHash]);
+      if (hide) await q('UPDATE lyrics_tracks SET hidden = true WHERE id = $1', [trackId]);
+      return { ok: true, hidden: hide };
     }],
 
     // ---------- Админка ----------
