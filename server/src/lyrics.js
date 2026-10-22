@@ -50,6 +50,62 @@ export function norm(s) {
     .replace(/\s+/g, ' ');
 }
 
+// ---------- TTML (формат текстов Apple Music): по строкам, с частями песни ----------
+const TTML_PART = { intro: 'Intro', verse: 'Verse', 'pre-chorus': 'PreChorus', chorus: 'Chorus', 'post-chorus': 'PostChorus', hook: 'Hook', bridge: 'Bridge', interlude: 'Interlude', outro: 'Outro', other: 'Other' };
+const xmlEsc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]);
+const ttmlTime = (ms) => {
+  ms = Math.max(0, Math.round(ms));
+  const m = Math.floor(ms / 60000);
+  const s = ((ms % 60000) / 1000).toFixed(3).padStart(6, '0');
+  return `${m}:${s}`;
+};
+
+/**
+ * Опубликованный текст → TTML. Строки — <p> со временем начала и конца (конец — начало следующей строки),
+ * части песни — <div itunes:songPart>. Нужна синхронизация по строкам.
+ */
+export function toTtml({ title, artist, duration = 0, plain = '', synced = '', structure = [] }) {
+  const timed = parseLrc(synced).filter((l) => l.text);
+  const lines = textLines(plain);
+  if (!timed.length || timed.length !== lines.length) return null;
+  const starts = new Map((structure || []).map((s) => [s.from, s.type]));
+  // куплеты: пустая строка в тексте или начало части
+  const gaps = new Set();
+  let i = 0;
+  let gap = false;
+  for (const raw of String(plain).split('\n')) {
+    if (!raw.trim()) { gap = i > 0; continue; }
+    if (gap) gaps.add(i);
+    gap = false;
+    i++;
+  }
+  const end = (k) => (k + 1 < timed.length ? timed[k + 1].at : duration > 0 ? Math.max(timed[k].at + 1000, duration * 1000) : timed[k].at + 4000);
+  const divs = [];
+  timed.forEach((l, k) => {
+    if (!divs.length || gaps.has(k) || starts.has(k)) divs.push({ type: starts.get(k) || null, lines: [] });
+    divs[divs.length - 1].lines.push(k);
+  });
+  const body = divs.map((d) => {
+    const first = d.lines[0];
+    const last = d.lines[d.lines.length - 1];
+    const part = d.type ? ` itunes:songPart="${TTML_PART[d.type] || 'Other'}"` : '';
+    return `    <div begin="${ttmlTime(timed[first].at)}" end="${ttmlTime(end(last))}"${part}>\n${d.lines.map((k) => `      <p begin="${ttmlTime(timed[k].at)}" end="${ttmlTime(end(k))}">${xmlEsc(timed[k].text)}</p>`).join('\n')}\n    </div>`;
+  }).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="Line">
+  <head>
+    <metadata>
+      <ttm:title>${xmlEsc(title)}</ttm:title>
+      <ttm:agent type="person" xml:id="v1"><ttm:name type="full">${xmlEsc(artist)}</ttm:name></ttm:agent>
+    </metadata>
+  </head>
+  <body${duration > 0 ? ` dur="${ttmlTime(duration * 1000)}"` : ''}>
+${body}
+  </body>
+</tt>
+`;
+}
+
 /** ISRC: «us-rc1-76-07839» → 'USRC17607839'; неверный — null */
 export function normIsrc(v) {
   const s = String(v || '').toUpperCase().replace(/[\s-]/g, '');
@@ -274,6 +330,15 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       const r = await published(m[1]);
       if (!r) throw notFound();
       return lrclibShape(r);
+    }],
+    // TTML опубликованного текста (с синхронизацией): ?download=1 — файлом
+    ['GET', /^\/api\/get\/(\d{1,18})\/ttml$/, async ({ m, url, ip }) => {
+      readLimit(ip);
+      const r = await published(m[1]);
+      if (!r || r.instrumental) throw notFound();
+      const xml = toTtml({ title: r.title, artist: r.artist, duration: Number(r.duration) || 0, plain: r.plain, synced: r.synced, structure: parseStructure(r.structure) });
+      if (!xml) throw new HttpError(404, 'У этого текста нет синхронизации по строкам — TTML не собрать');
+      return { __raw: { type: 'application/ttml+xml; charset=utf-8', body: xml, filename: url.searchParams.get('download') ? `${r.artist} - ${r.title}.ttml`.replace(/[\\/:*?"<>|]/g, '_') : null } };
     }],
     ['GET', /^\/api\/search$/, async ({ url, ip }) => {
       readLimit(ip);
@@ -596,6 +661,36 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       if (action === 'restore') await q('UPDATE lyrics_tracks SET hidden = false WHERE id = $1', [rows[0].track_id]);
       await q(`UPDATE lyrics_reports SET status = $1, resolved_by = $2, resolved_at = now() WHERE id = $3`, [action === 'close' ? 'closed' : action === 'hide' ? 'hidden' : 'restored', s.uid, m[1]]);
       return { ok: true };
+    }, true],
+    // релиз из DDEX ERN (разбирает браузер): треки заводятся по ISRC, уже известные — не трогаем
+    ['POST', /^\/api\/admin\/import-release$/, async ({ s, req }) => {
+      await need(s, 'specialist', 'admin');
+      const b = await readJson(req);
+      const tracks = Array.isArray(b.tracks) ? b.tracks.slice(0, 200) : [];
+      if (!tracks.length) throw new HttpError(400, 'В релизе нет треков');
+      const album = clip(String((b.release && b.release.title) || '').trim(), 200);
+      const out = [];
+      for (const t of tracks) {
+        const title = clip(String(t.title || '').trim(), 200);
+        const artist = clip(String(t.artist || '').trim(), 200);
+        const duration = Math.max(0, Math.min(36000, Math.round(Number(t.duration) || 0)));
+        const isrc = normIsrc(t.isrc);
+        if (!norm(title) || !norm(artist) || !duration || !isrc) {
+          out.push({ title, isrc: t.isrc || null, status: 'error', error: !isrc ? 'нет ISRC' : !duration ? 'нет длительности' : 'нет названия или исполнителя' });
+          continue;
+        }
+        const ex = await q('SELECT id FROM lyrics_tracks WHERE isrc = $1 ORDER BY id LIMIT 1', [isrc]);
+        if (ex.rows.length) {
+          out.push({ title, isrc, status: 'exists', id: Number(ex.rows[0].id) });
+          continue;
+        }
+        const { rows } = await q(
+          `INSERT INTO lyrics_tracks (title, artist, album, duration, title_norm, artist_norm, isrc) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+          [title, artist, clip(String(t.album || '').trim(), 200) || album, duration, norm(title), norm(artist), isrc]
+        );
+        out.push({ title, isrc, status: 'created', id: Number(rows[0].id) });
+      }
+      return { items: out };
     }, true],
     // данные трека (например, добавленного вручную): название, исполнитель, альбом, длительность, привязка к Яндексу
     ['POST', /^\/api\/admin\/track\/(\d{1,18})$/, async ({ m, s, req }) => {

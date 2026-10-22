@@ -292,6 +292,7 @@ function route() {
   if (p === '/review') return reviewQueue();
   if ((m = /^\/review\/(\d+)$/.exec(p))) return reviewItem(m[1]);
   if (p === '/admin') return adminPage();
+  if (p === '/import') return importPage();
   if ((m = /^\/report\/(\d+)$/.exec(p))) return reportPage(m[1]);
   if (p === '/docs') return docsPage();
   if (p === '/copyright') return copyrightPage();
@@ -338,6 +339,93 @@ function stanzas(lines, structure) {
     out[out.length - 1].lines.push({ ...l, i });
   });
   return out;
+}
+
+// ---------- Импорт файлов: LRC, TTML (Apple Music), DDEX ERN ----------
+const byLocal = (root, name) => [...root.getElementsByTagName('*')].filter((e) => e.localName === name);
+const firstText = (root, ...names) => { for (const n of names) { const e = byLocal(root, n)[0]; if (e && e.textContent.trim()) return e.textContent.trim(); } return ''; };
+const attrLocal = (el, name) => { for (const a of el.attributes) if (a.localName === name) return a.value; return null; };
+function parseXml(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('Файл не похож на XML');
+  return doc;
+}
+/** Время TTML: «12.5», «12.5s», «1:02.345», «00:01:02.345», «1500ms» → мс */
+function ttmlMs(v) {
+  if (v == null || v === '') return null;
+  v = String(v).trim();
+  let m;
+  if ((m = /^([\d.]+)ms$/.exec(v))) return Math.round(Number(m[1]));
+  if ((m = /^([\d.]+)s?$/.exec(v))) return Math.round(Number(m[1]) * 1000);
+  const p = v.split(':').map(Number);
+  if (p.some((x) => Number.isNaN(x))) return null;
+  return Math.round((p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1]) * 1000);
+}
+const TTML_TO_SECTION = { intro: 'intro', verse: 'verse', prechorus: 'pre-chorus', 'pre-chorus': 'pre-chorus', chorus: 'chorus', postchorus: 'post-chorus', 'post-chorus': 'post-chorus', hook: 'hook', bridge: 'bridge', interlude: 'interlude', outro: 'outro' };
+/** TTML → строки с временем, куплеты (div) и части (itunes:songPart). Пословное время пока сводится к строкам */
+function parseTtml(text) {
+  const doc = parseXml(text);
+  const lines = [];
+  const structure = new Map();
+  let words = false;
+  for (const div of byLocal(doc, 'div')) {
+    const part = (attrLocal(div, 'songPart') || '').toLowerCase().replace(/[\s_]/g, '');
+    let firstInDiv = true;
+    for (const p of byLocal(div, 'p')) {
+      const spans = byLocal(p, 'span').filter((sp) => sp.hasAttribute('begin'));
+      if (spans.length) words = true;
+      // бэк-вокал (ttm:role="x-bg") — в скобках, как обычно пишут в текстах
+      const clone = p.cloneNode(true);
+      for (const bg of byLocal(clone, 'span').filter((sp) => attrLocal(sp, 'role') === 'x-bg')) bg.textContent = ` (${bg.textContent.trim().replace(/^\(|\)$/g, '')}) `;
+      const t = clone.textContent.replace(/\s+/g, ' ').trim();
+      if (!t) continue;
+      const at = ttmlMs(p.getAttribute('begin')) ?? (spans[0] ? ttmlMs(spans[0].getAttribute('begin')) : null);
+      if (firstInDiv && part && TTML_TO_SECTION[part]) structure.set(lines.length, TTML_TO_SECTION[part]);
+      lines.push({ text: t, at, gap: firstInDiv && lines.length > 0 });
+      firstInDiv = false;
+    }
+  }
+  if (!lines.length) throw new Error('В TTML не нашёл строк текста');
+  return { lines, structure, words };
+}
+/** ISO 8601 «PT3M25.5S» → секунды */
+function isoDur(v) {
+  const m = /^P(?:T)?(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/i.exec(String(v || '').trim());
+  return m ? Math.round((Number(m[1] || 0) * 3600) + (Number(m[2] || 0) * 60) + Number(m[3] || 0)) : 0;
+}
+/** DDEX ERN (3.x и 4.x) → { release: { title, upc }, tracks: [{ title, artist, duration, isrc }] } */
+function parseErn(text) {
+  const doc = parseXml(text);
+  // участники (ERN 4): ссылка → имя
+  const parties = new Map();
+  for (const p of byLocal(doc, 'Party')) {
+    const ref = firstText(p, 'PartyReference');
+    const name = firstText(p, 'FullName');
+    if (ref && name) parties.set(ref, name);
+  }
+  const titleOf = (el) => {
+    const t = firstText(el, 'DisplayTitleText') || (byLocal(el, 'ReferenceTitle')[0] ? firstText(byLocal(el, 'ReferenceTitle')[0], 'TitleText') : '') || firstText(el, 'TitleText');
+    const sub = (byLocal(el, 'ReferenceTitle')[0] && firstText(byLocal(el, 'ReferenceTitle')[0], 'SubTitle')) || '';
+    return sub && !t.includes(sub) ? `${t} (${sub})` : t;
+  };
+  const artistOf = (el) => {
+    const disp = firstText(el, 'DisplayArtistName');
+    if (disp) return disp;
+    const names = byLocal(el, 'DisplayArtist').map((a) => firstText(a, 'FullName') || parties.get(firstText(a, 'ArtistPartyReference')) || '').filter(Boolean);
+    return [...new Set(names)].join(', ');
+  };
+  const releases = byLocal(doc, 'Release');
+  const main = releases.find((r) => r.getAttribute('IsMainRelease') === 'true') || releases.find((r) => /album|single|ep/i.test(firstText(r, 'ReleaseType'))) || releases[0];
+  const release = main ? { title: titleOf(main), upc: firstText(main, 'ICPN', 'UPC', 'EAN') } : { title: '', upc: '' };
+  const relArtist = main ? artistOf(main) : '';
+  const tracks = byLocal(doc, 'SoundRecording').map((sr) => ({
+    title: titleOf(sr),
+    artist: artistOf(sr) || relArtist,
+    duration: isoDur(firstText(sr, 'Duration')),
+    isrc: firstText(sr, 'ISRC')
+  })).filter((t) => t.title);
+  if (!tracks.length) throw new Error('В файле нет треков (SoundRecording) — это точно DDEX ERN?');
+  return { release, tracks };
 }
 
 // ---------- Главная: поиск ----------
@@ -437,7 +525,7 @@ async function trackPage(id) {
       <div class="badges">${p ? '<span class="tag ok">✓ Проверено</span>' : '<span class="tag">Текста пока нет</span>'}${hasSync ? '<span class="tag">Синхронизирован</span>' : ''}${p && p.instrumental ? '<span class="tag">Инструментал</span>' : ''}</div>
     </div></div>
     <div class="tlayout"><div>
-      ${p && !p.instrumental ? `<div class="row" style="margin-bottom:18px"><div class="seg" id="mode"><button data-v="text" class="on">Текст</button><button data-v="time" ${hasSync ? '' : 'disabled'}>С таймингами</button></div><span style="flex:1"></span>${hasSync ? '<button class="btn sm" id="copy">Скопировать LRC</button>' : ''}</div>` : ''}
+      ${p && !p.instrumental ? `<div class="row" style="margin-bottom:18px"><div class="seg" id="mode"><button data-v="text" class="on">Текст</button><button data-v="time" ${hasSync ? '' : 'disabled'}>С таймингами</button></div><span style="flex:1"></span>${hasSync ? `<button class="btn sm" id="copy">Скопировать LRC</button><a class="btn sm" href="/api/get/${t.id}/ttml?download=1" download>TTML</a>` : ''}</div>` : ''}
       <div id="body"></div>
       ${p ? `<p class="muted small" style="margin-top:28px">${p.author ? `Автор: ${esc(p.author.name || '@' + p.author.username)} · ` : ''}проверено ${new Date(p.reviewedAt).toLocaleDateString('ru')} · <a href="/report/${t.id}" data-link>Пожаловаться</a></p>` : ''}
     </div>
@@ -590,7 +678,7 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
       <div id="tw" style="${state.instrumental ? 'display:none' : ''}">
         <p class="muted small" style="margin-top:0">Строка — как поётся. Пустая строка — новый куплет. Без пометок вроде «Припев:» — части размечаются на вкладке «Структура».</p>
         <textarea id="pl" placeholder="Текст песни по строкам" style="min-height:420px">${esc(toPlain(state.lines))}</textarea>
-        <div class="row" style="margin-top:12px"><button class="btn primary" id="next">Дальше — синхронизация</button><button class="btn sm" id="paste">Вставить готовый LRC</button></div>
+        <div class="row" style="margin-top:12px"><button class="btn primary" id="next">Дальше — синхронизация</button><button class="btn sm" id="paste">Вставить готовый LRC</button><label class="btn sm" style="margin:0">Загрузить LRC или TTML<input type="file" accept=".lrc,.ttml,.xml,text/plain,application/xml" id="tfile" hidden></label></div>
       </div>`;
     $('#inst').onchange = (e) => { state.instrumental = e.target.checked; $('#tw').style.display = state.instrumental ? 'none' : ''; changed(); };
     const apply = () => {
@@ -604,6 +692,31 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
     };
     $('#pl').oninput = apply;
     $('#next').onclick = () => { apply(); show('sync'); };
+    $('#tfile').onchange = async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const text = await f.text();
+      try {
+        if (/<tt[\s>]/.test(text)) {
+          const r = parseTtml(text);
+          state.lines = r.lines;
+          state.structure = r.structure;
+          toast(r.words ? 'TTML загружен. Пословное время пока сводится к строкам' : `TTML загружен: ${r.lines.length} строк`);
+        } else {
+          const lrc = lrcLines(text);
+          if (!lrc.length) throw new Error('Не нашёл строк с временем');
+          let gap = false;
+          const next = [];
+          for (const l of lrc) { if (!l.text) { gap = next.length > 0; continue; } next.push({ text: l.text, at: l.at, gap }); gap = false; }
+          state.lines = next;
+          state.structure.clear();
+          toast(`LRC загружен: ${next.length} строк`);
+        }
+        state.instrumental = false;
+        changed();
+        show(state.lines.every((l) => l.at != null) ? 'sync' : 'text');
+      } catch (err) { toast(err.message); }
+    };
     $('#paste').onclick = () => {
       const v = prompt('Вставь LRC — строки вида [00:12.30] Текст');
       if (!v) return;
@@ -897,11 +1010,41 @@ async function mePage() {
 }
 
 // ---------- Проверка ----------
+// ---------- Импорт релиза (DDEX ERN) ----------
+async function importPage() {
+  if (!store.get()) return needLogin('Импорт релизов — для специалистов и админов.');
+  if (!me) await loadMe();
+  if (!isSpec()) { app.innerHTML = '<div class="empty">Импорт релизов — для специалистов и админов.</div>'; return; }
+  app.innerHTML = `<h1>Импорт релиза</h1>
+    <p class="muted">Файл DDEX ERN (XML, версии 3.x и 4.x), который лейбл отправляет дистрибьютору. Из него берутся только треки: название, исполнители, длительность и ISRC. Треки появятся без текста — тексты добавляются как обычно и проходят проверку. Уже известные ISRC не дублируются.</p>
+    <div class="card"><label class="btn primary" style="margin:0">Выбрать файл ERN<input type="file" accept=".xml,application/xml,text/xml" id="ern" hidden></label><span class="muted small" style="margin-left:10px" id="fn"></span></div>
+    <div id="prev"></div>`;
+  const $ = (x) => document.getElementById(x);
+  $('ern').onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    $('fn').textContent = f.name;
+    let rel;
+    try { rel = parseErn(await f.text()); } catch (err) { $('prev').innerHTML = `<div class="empty err">${esc(err.message)}</div>`; return; }
+    $('prev').innerHTML = `<h2>${esc(rel.release.title || 'Релиз')}</h2><p class="muted small" style="margin-top:-6px">${rel.release.upc ? `UPC ${esc(rel.release.upc)} · ` : ''}${rel.tracks.length} треков</p>
+      <div class="list">${rel.tracks.map((t) => `<div class="item"><div class="grow"><div class="t">${esc(t.title)}</div><div class="muted small">${esc(t.artist) || '<span class="err">нет исполнителя</span>'} · ${t.isrc ? 'ISRC ' + esc(t.isrc) : '<span class="err">нет ISRC</span>'}</div></div><span class="muted small">${t.duration ? fmtDur(t.duration) : '—'}</span></div>`).join('')}</div>
+      <div class="row" style="margin-top:16px"><button class="btn primary" id="go">Импортировать</button><span id="msg" class="small"></span></div>`;
+    $('go').onclick = async () => {
+      $('go').disabled = true;
+      try {
+        const { items } = await api('POST', '/api/admin/import-release', { release: rel.release, tracks: rel.tracks });
+        const label = { created: ['добавлен', 'ok'], exists: ['уже был', ''], error: ['ошибка', 'bad'] };
+        $('prev').innerHTML = `<h2>Готово</h2><div class="list">${items.map((x) => `<div class="item"><div class="grow"><div class="t">${esc(x.title)}</div><div class="muted small">${x.isrc ? 'ISRC ' + esc(x.isrc) : ''}${x.error ? ' · ' + esc(x.error) : ''}</div></div><span class="tag ${label[x.status][1]}">${label[x.status][0]}</span>${x.id ? `<a class="btn sm" href="/edit/${x.id}" data-link>Добавить текст</a>` : ''}</div>`).join('')}</div>`;
+      } catch (err) { $('msg').className = 'small err'; $('msg').textContent = err.message; $('go').disabled = false; }
+    };
+  };
+}
+
 async function reviewQueue() {
   if (!store.get()) return needLogin('Проверка — для специалистов.');
   if (!me) await loadMe();
   if (!isSpec()) { app.innerHTML = '<div class="empty">Проверять тексты могут только специалисты.</div>'; return; }
-  app.innerHTML = '<h1>Проверка</h1><div id="q" class="empty">Загружаю…</div>';
+  app.innerHTML = '<div class="row"><h1 style="flex:1">Проверка</h1><a class="btn sm" href="/import" data-link>Импорт релиза (DDEX)</a></div><div id="q" class="empty">Загружаю…</div>';
   try {
     const { items } = await api('GET', '/api/review');
     document.getElementById('q').outerHTML = items.length
@@ -1032,6 +1175,9 @@ function docsPage() {
   "cover": "https://…"
 }</pre>
     <p class="muted small"><code>sections</code> — части песни: с какой строки текста (без пустых строк, с нуля) начинается куплет, припев и т. д. Типы: ${SECTIONS.map(([k]) => `<code>${k}</code>`).join(', ')}.</p>
+    <h2>TTML</h2>
+    <pre class="code">GET ${base}/api/get/42/ttml</pre>
+    <p class="muted small">Тот же текст в формате TTML (как у Apple Music): строки со временем начала и конца, части песни — <code>itunes:songPart</code>. Только для текстов с синхронизацией.</p>
     <h2>По номеру</h2>
     <pre class="code">GET ${base}/api/get/42</pre>
     <h2>Поиск</h2>

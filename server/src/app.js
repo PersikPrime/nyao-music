@@ -458,6 +458,11 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
           s = await auth(req);
         }
         const out = await fn({ req, res, url, m, s, ip });
+        // файл не-JSON (например, TTML с текстом песни): { __raw: { type, body, filename? } }
+        if (out && out.__raw) {
+          const r = out.__raw;
+          return send(res, 200, r.body, { 'Content-Type': r.type, ...(r.filename ? { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(r.filename)}` } : {}) });
+        }
         return send(res, 200, out);
       }
       throw new HttpError(404, 'Нет такого адреса');

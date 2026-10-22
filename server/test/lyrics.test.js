@@ -328,3 +328,46 @@ test('тексты: ссылка Spotify через song.link сразу нах�
     t.close();
   }
 });
+
+test('тексты: TTML и импорт релиза DDEX', async () => {
+  const { toTtml } = await import('../src/lyrics.js');
+  const xml = toTtml({ title: 'Песня & Co', artist: 'Группа', duration: 30, plain: 'Раз\nДва\n\nТри', synced: '[00:01.00] Раз\n[00:02.50] Два\n[00:10.00] Три', structure: [{ from: 0, type: 'verse' }, { from: 2, type: 'chorus' }] });
+  assert.match(xml, /<ttm:title>Песня &amp; Co<\/ttm:title>/);
+  assert.match(xml, /<div begin="0:01.000" end="0:10.000" itunes:songPart="Verse">/);
+  assert.match(xml, /<p begin="0:02.500" end="0:10.000">Два<\/p>/);
+  assert.match(xml, /itunes:songPart="Chorus">\n\s+<p begin="0:10.000" end="0:30.000">Три<\/p>/);
+  assert.equal(toTtml({ title: 'x', artist: 'y', plain: 'a', synced: '' }), null, 'без синхронизации TTML не собрать');
+
+  const t = await setup();
+  try {
+    const owner = await t.user('Takko');
+    const author = await t.user('Автор');
+    const sub = await t.call('POST', '/api/submit', { token: author.token, body: { track: { title: 'Песня', artist: 'Группа', duration: 30 }, plain: 'Раз\nДва\n\nТри', synced: '[00:01.00] Раз\n[00:02.50] Два\n[00:10.00] Три', structure: [{ from: 2, type: 'chorus' }] } });
+    await t.call('POST', `/api/review/${sub.json.id}`, { token: owner.token, body: { action: 'accept' } });
+    const r = await t.call('GET', `/api/get/${sub.json.trackId}/ttml`);
+    assert.equal(r.status, 200);
+    assert.match(r.text, /^<\?xml/);
+    assert.match(r.text, /itunes:songPart="Chorus"/);
+
+    // импорт релиза
+    const rel = { release: { title: 'Дебютный EP', upc: '0123456789012' }, tracks: [
+      { title: 'Первый', artist: 'Лейбл Бэнд', duration: 180, isrc: 'RU-A12-26-00001' },
+      { title: 'Второй', artist: 'Лейбл Бэнд', duration: 200, isrc: 'RUA122600002' },
+      { title: 'Без кода', artist: 'Лейбл Бэнд', duration: 100 }
+    ] };
+    assert.equal((await t.call('POST', '/api/admin/import-release', { token: author.token, body: rel })).status, 403);
+    const imp = (await t.call('POST', '/api/admin/import-release', { token: owner.token, body: rel })).json.items;
+    assert.deepEqual(imp.map((x) => x.status), ['created', 'created', 'error']);
+    const tr = (await t.call('GET', `/api/track/${imp[0].id}`)).json;
+    assert.equal(tr.isrc, 'RUA122600001');
+    assert.equal(tr.album, 'Дебютный EP');
+    assert.equal(tr.published, null);
+    assert.deepEqual((await t.call('POST', '/api/admin/import-release', { token: owner.token, body: rel })).json.items.map((x) => x.status), ['exists', 'exists', 'error'], 'повторный импорт ничего не дублирует');
+    // текст к импортированному треку — обычной отправкой; находится по ISRC
+    const s2 = await t.call('POST', '/api/submit', { token: author.token, body: { trackId: imp[0].id, plain: 'Текст первого' } });
+    await t.call('POST', `/api/review/${s2.json.id}`, { token: owner.token, body: { action: 'accept' } });
+    assert.equal((await t.call('GET', '/api/get?track_name=First&artist_name=Label%20Band&isrc=RUA122600001')).json.plainLyrics, 'Текст первого');
+  } finally {
+    t.close();
+  }
+});
