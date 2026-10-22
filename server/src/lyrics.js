@@ -50,6 +50,20 @@ export function norm(s) {
     .replace(/\s+/g, ' ');
 }
 
+/** Исполнители по отдельности: «DJ Frolov, Дмитрий Фролов feat. X» → ['dj frolov', 'дмитрий фролов', 'x'] */
+export function artistSet(s) {
+  return String(s || '')
+    .split(/,|&|;|\/|\s+(?:feat|ft)\.?\s+|\s+x\s+|\s+и\s+|\s+and\s+|\s+with\s+/i)
+    .map((a) => norm(a))
+    .filter(Boolean);
+}
+/** Один и тот же исполнитель: полное совпадение или хотя бы один общий из перечисленных */
+export function sameArtist(a, b) {
+  if (norm(a) && norm(a) === norm(b)) return true;
+  const B = new Set(artistSet(b));
+  return artistSet(a).some((x) => B.has(x));
+}
+
 const ms = (m, s, f = '') => (Number(m) * 60 + Number(s)) * 1000 + (f ? Math.round(Number(f.padEnd(3, '0'))) : 0);
 
 /** Разбор LRC: строки по времени. Ошибка — с номером строки, чтобы автор понял, где поправить */
@@ -187,10 +201,12 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       const hit = onlyPublished ? rows.filter((r) => r.published_version && !r.hidden) : rows;
       if (hit.length) return hit[0];
     }
-    const { rows } = await q(
-      `SELECT t.id, t.duration, t.published_version, t.hidden, t.ya_id FROM lyrics_tracks t WHERE t.title_norm = $1 AND t.artist_norm = $2 ORDER BY t.id`,
-      [norm(title), norm(artist)]
+    // по названию, а исполнитель — хотя бы один общий: «DJ Frolov» найдёт «DJ Frolov, Дмитрий Фролов»
+    const { rows: all } = await q(
+      `SELECT t.id, t.artist, t.artist_norm, t.duration, t.published_version, t.hidden, t.ya_id FROM lyrics_tracks t WHERE t.title_norm = $1 ORDER BY t.id`,
+      [norm(title)]
     );
+    const rows = [...all.filter((r) => r.artist_norm === norm(artist)), ...all.filter((r) => r.artist_norm !== norm(artist) && sameArtist(r.artist, artist))];
     // при отправке: у найденного трека другой id Яндекса — это другая запись (ремастер, live…), не смешиваем
     const fits = rows.filter((r) => (!duration || !r.duration || Math.abs(Number(r.duration) - duration) <= 2) && (onlyPublished || !yaId || !r.ya_id || r.ya_id === yaId));
     const pick = onlyPublished ? fits.filter((r) => r.published_version && !r.hidden) : fits;
@@ -551,6 +567,41 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       if (action === 'hide') await q('UPDATE lyrics_tracks SET hidden = true WHERE id = $1', [rows[0].track_id]);
       if (action === 'restore') await q('UPDATE lyrics_tracks SET hidden = false WHERE id = $1', [rows[0].track_id]);
       await q(`UPDATE lyrics_reports SET status = $1, resolved_by = $2, resolved_at = now() WHERE id = $3`, [action === 'close' ? 'closed' : action === 'hide' ? 'hidden' : 'restored', s.uid, m[1]]);
+      return { ok: true };
+    }, true],
+    // данные трека (например, добавленного вручную): название, исполнитель, альбом, длительность, привязка к Яндексу
+    ['POST', /^\/api\/admin\/track\/(\d{1,18})$/, async ({ m, s, req }) => {
+      await need(s, 'admin');
+      const b = await readJson(req);
+      const { rows } = await q('SELECT * FROM lyrics_tracks WHERE id = $1', [m[1]]);
+      const t = rows[0];
+      if (!t) throw new HttpError(404, 'Нет такого трека');
+      const title = b.title !== undefined ? clip(String(b.title).trim(), 200) : t.title;
+      const artist = b.artist !== undefined ? clip(String(b.artist).trim(), 200) : t.artist;
+      const album = b.album !== undefined ? clip(String(b.album || '').trim(), 200) : t.album;
+      const duration = b.duration !== undefined ? Math.max(0, Math.min(36000, Math.round(Number(b.duration) || 0))) : Number(t.duration);
+      if (!norm(title) || !norm(artist)) throw new HttpError(400, 'Нужны название и исполнитель');
+      if (!duration) throw new HttpError(400, 'Нужна длительность');
+      let yaId = t.ya_id;
+      let cover = t.cover;
+      if (b.yaId !== undefined) {
+        yaId = b.yaId ? String(b.yaId).trim() : null;
+        if (yaId && !YA_ID.test(yaId)) throw new HttpError(400, 'Номер трека Яндекса — только цифры');
+        if (yaId) {
+          const other = await q('SELECT id FROM lyrics_tracks WHERE ya_id = $1 AND id <> $2', [yaId, t.id]);
+          if (other.rows.length) throw new HttpError(409, `Этот трек Яндекса уже привязан к записи №${other.rows[0].id}`);
+          const ya = catalog ? await catalog.track(yaId).catch(() => null) : null;
+          if (ya) cover = ya.cover;
+        } else cover = null;
+      }
+      if (b.cover !== undefined) {
+        if (b.cover && !/^https:\/\/[^\s"'<>]{4,300}$/.test(String(b.cover))) throw new HttpError(400, 'Обложка — ссылка https://…');
+        cover = b.cover ? String(b.cover) : null;
+      }
+      await q(
+        `UPDATE lyrics_tracks SET title = $1, artist = $2, album = $3, duration = $4, title_norm = $5, artist_norm = $6, ya_id = $7, cover = $8 WHERE id = $9`,
+        [title, artist, album, duration, norm(title), norm(artist), yaId, cover, t.id]
+      );
       return { ok: true };
     }, true],
     ['GET', /^\/api\/admin\/roles$/, async ({ s }) => {

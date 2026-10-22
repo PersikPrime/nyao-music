@@ -436,7 +436,10 @@ async function trackPage(id) {
       ${[['Текст', p && !p.instrumental ? 'проверен' : p ? 'инструментал' : 'ещё нет', !!p, 'text'], ['Синхронизация', hasSync ? 'проверена' : 'ещё нет', hasSync, 'sync'], ['Структура', hasStruct ? 'куплеты и припевы размечены' : 'ещё не размечена', hasStruct, 'structure']]
         .map(([name, sub, done, tab]) => `<div class="step"><div class="ic ${done ? 'done' : ''}">${done ? '✓' : '+'}</div><div class="grow"><b>${name}</b><span>${sub}</span></div><a class="btn sm" href="/edit/${t.id}?tab=${tab}" data-link>${done ? 'Править' : 'Добавить'}</a></div>`).join('')}
       <p class="muted small" style="margin:12px 0 0">Правки проверяет специалист — до проверки здесь остаётся текущая версия.</p>
+      ${isAdmin() ? '<button class="btn sm block" id="meta-edit" style="margin-top:14px">Изменить данные трека</button><div id="meta-form"></div>' : ''}
     </aside></div>`;
+  const me_ = document.getElementById('meta-edit');
+  if (me_) me_.onclick = () => metaForm(t);
   const body = document.getElementById('body');
   if (!p) { body.innerHTML = '<div class="card" style="margin-top:0">Проверенного текста пока нет — возможно, он уже ждёт проверки. Можно предложить свой.</div>'; return; }
   if (p.instrumental) { body.innerHTML = '<div class="empty">В этом треке нет слов.</div>'; return; }
@@ -449,6 +452,31 @@ async function trackPage(id) {
   const copy = document.getElementById('copy');
   if (copy) copy.onclick = () => navigator.clipboard.writeText(p.synced).then(() => toast('Скопировано'));
   show('text');
+}
+
+/** Админ: название, исполнитель, альбом, длительность, привязка к Яндексу и обложка трека */
+function metaForm(t) {
+  const box = document.getElementById('meta-form');
+  document.getElementById('meta-edit').style.display = 'none';
+  box.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">
+    <div><label>Название</label><input type="text" id="m-ti" value="${esc(t.title)}"></div>
+    <div><label>Исполнитель</label><input type="text" id="m-ar" value="${esc(t.artist)}"></div>
+    <div><label>Альбом</label><input type="text" id="m-al" value="${esc(t.album || '')}"></div>
+    <div><label>Длительность</label><input type="text" id="m-du" value="${fmtDur(t.duration)}"></div>
+    <div><label>Номер трека в Яндекс Музыке (или ссылка)</label><input type="text" id="m-ya" value="${esc(t.yaId || '')}" placeholder="пусто — не привязан"></div>
+    <div><label>Обложка (ссылка https://…)</label><input type="text" id="m-cv" value="${esc(t.cover || '')}"></div>
+    <p class="muted small" style="margin:0">Поиск совпадает, если общий хотя бы один исполнитель: «DJ Frolov» найдёт «DJ Frolov, Дмитрий Фролов».</p>
+    <div class="row"><button class="btn primary sm" id="m-save">Сохранить</button><button class="btn sm" id="m-cancel">Отмена</button></div>
+    <div id="m-msg" class="small err"></div></div>`;
+  const $ = (x) => document.getElementById(x);
+  $('m-cancel').onclick = () => { box.innerHTML = ''; $('meta-edit').style.display = ''; };
+  $('m-save').onclick = async () => {
+    const yaRaw = $('m-ya').value.trim();
+    const ya = (/track\/(\d+)/.exec(yaRaw) || [null, yaRaw])[1];
+    const body = { title: $('m-ti').value, artist: $('m-ar').value, album: $('m-al').value, duration: parseDur($('m-du').value), yaId: ya || null };
+    if ($('m-cv').value.trim() !== (t.cover || '')) body.cover = $('m-cv').value.trim() || null;
+    try { await api('POST', `/api/admin/track/${t.id}`, body); toast('Сохранено'); trackPage(t.id); } catch (e) { $('m-msg').textContent = e.message; }
+  };
 }
 
 // ---------- Плеер: свой аудиофайл (остаётся в браузере) или секундомер ----------

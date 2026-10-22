@@ -238,3 +238,33 @@ test('каталог: метаданные со страницы Spotify', async
   const c = new YaCatalog({ fetch: async () => new Response('', { status: 403 }) });
   await assert.rejects(c.spotifyTrack('x3'), /403/);
 });
+
+test('тексты: исполнитель — хотя бы один общий; админ правит данные трека', async () => {
+  const { sameArtist, artistSet } = await import('../src/lyrics.js');
+  assert.deepEqual(artistSet('DJ Frolov, Дмитрий Фролов feat. Кто-то'), ['dj frolov', 'дмитрий фролов', 'кто то']);
+  assert.equal(sameArtist('DJ Frolov, Дмитрий Фролов', 'DJ Frolov'), true);
+  assert.equal(sameArtist('DJ Frolov', 'DJ Frolov & MC X'), true);
+  assert.equal(sameArtist('DJ Frolov', 'DJ Smash'), false);
+  const t = await setup();
+  try {
+    const owner = await t.user('Takko');
+    const author = await t.user('Автор');
+    const sub = await t.call('POST', '/api/submit', { token: author.token, body: { track: { title: 'Вивальди как быть', artist: 'DJ Frolov, Дмитрий Фролов', duration: 51 }, plain: 'Строка' } });
+    await t.call('POST', `/api/review/${sub.json.id}`, { token: owner.token, body: { action: 'accept' } });
+    // Spotify и другие сервисы знают только «DJ Frolov»
+    const g = await t.call('GET', `/api/get?track_name=${encodeURIComponent('Вивальди как быть')}&artist_name=DJ%20Frolov&duration=51`);
+    assert.equal(g.status, 200);
+    assert.equal((await t.call('GET', `/api/get?track_name=${encodeURIComponent('Вивальди как быть')}&artist_name=DJ%20Smash&duration=51`)).status, 404);
+    // админ правит данные
+    assert.equal((await t.call('POST', `/api/admin/track/${sub.json.trackId}`, { token: author.token, body: { artist: 'X' } })).status, 403);
+    const ed = await t.call('POST', `/api/admin/track/${sub.json.trackId}`, { token: owner.token, body: { title: 'Вивальди, как быть', artist: 'DJ Frolov', album: 'Сингл', duration: 52 } });
+    assert.equal(ed.status, 200);
+    const tr = (await t.call('GET', `/api/track/${sub.json.trackId}`)).json;
+    assert.equal(tr.artist, 'DJ Frolov');
+    assert.equal(tr.duration, 52);
+    assert.equal((await t.call('GET', `/api/get?track_name=${encodeURIComponent('Вивальди как быть')}&artist_name=DJ%20Frolov&duration=52`)).status, 200, 'нормализация пересчитана');
+    assert.equal((await t.call('POST', `/api/admin/track/${sub.json.trackId}`, { token: owner.token, body: { yaId: 'abc' } })).status, 400);
+  } finally {
+    t.close();
+  }
+});
