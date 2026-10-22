@@ -390,8 +390,18 @@ const isLink = (q) => /^(https?:\/\/|spotify:)/i.test(q.trim()) || /(music\.yand
 /** Поиск в каталоге: по словам или по ссылке на трек Яндекс Музыки / Spotify → { items, fallback } */
 async function catalogFind(q) {
   if (isLink(q)) {
-    const r = await api('GET', `/api/catalog/link?url=${encodeURIComponent(q.trim())}`);
-    return { items: r.items || [], fallback: r.fallback, link: r.source };
+    try {
+      const r = await api('GET', `/api/catalog/link?url=${encodeURIComponent(q.trim())}`);
+      return { items: r.items || [], fallback: r.fallback, link: r.source };
+    } catch (e) {
+      // сервер не достучался до Spotify — пробуем из браузера через song.link: он знает тот же трек в Яндексе
+      if (!/spotify/i.test(q)) throw e;
+      const ya = await fetch(`https://api.song.link/v1-alpha.1/links?${new URLSearchParams({ url: q.trim(), userCountry: 'RU' })}`)
+        .then((r) => (r.ok ? r.json() : null)).then((j) => j && j.linksByPlatform && j.linksByPlatform.yandex && j.linksByPlatform.yandex.url).catch(() => null);
+      if (!ya) throw new Error('Не получилось прочитать ссылку Spotify — найди трек по названию или вставь ссылку на Яндекс Музыку');
+      const r = await api('GET', `/api/catalog/link?url=${encodeURIComponent(ya)}`);
+      return { items: r.items || [], fallback: null, link: 'sp' };
+    }
   }
   const r = await api('GET', `/api/catalog?q=${encodeURIComponent(q)}`);
   return { items: r.items || [], fallback: null };
