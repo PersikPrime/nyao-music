@@ -37,11 +37,25 @@ object LyricsApi {
         return if (code in 200..299) text else null
     }
 
-    private fun from(o: JSONObject?): Lyrics? {
+    private fun from(o: JSONObject?, source: String = "LRCLIB"): Lyrics? {
         if (o == null) return null
-        o.str("syncedLyrics")?.let { s -> parseLrc(s).takeIf { it.isNotEmpty() }?.let { return Lyrics(true, it) } }
-        o.str("plainLyrics")?.let { p -> return Lyrics(false, p.lines().map { LyricLine(null, it) }) }
+        o.str("syncedLyrics")?.let { s -> parseLrc(s).takeIf { it.isNotEmpty() }?.let { return Lyrics(true, it, source) } }
+        o.str("plainLyrics")?.let { p -> return Lyrics(false, p.lines().map { LyricLine(null, it) }, source) }
         return null
+    }
+
+    /** Свой сервис текстов (lyrics.withnyao.app): проверенные специалистами, API как у LRCLIB, только точное совпадение */
+    private const val NYAO_LYRICS_API = "https://api.corrode5-15.withnyao.app"
+
+    private suspend fun nyaoLyrics(track: Track): Lyrics? = try {
+        val url = "$NYAO_LYRICS_API/api/get".toHttpUrl().newBuilder()
+            .addQueryParameter("track_name", cleanTitle(track.title))
+            .addQueryParameter("artist_name", track.artist.split(",").first().trim())
+            .apply { if (track.duration > 0) addQueryParameter("duration", track.duration.toString()) }
+            .build().toString()
+        from(get(url)?.let { JSONObject(it) }, "Nyao Lyrics")
+    } catch (_: Exception) {
+        null
     }
 
     private fun plain(text: String, source: String) = Lyrics(false, text.lines().map { LyricLine(null, it.trim()) }, source)
@@ -61,6 +75,10 @@ object LyricsApi {
                 runCatching { Repo.ya.lyrics(yaId, "TEXT") }.getOrNull()?.let { fallback = plain(it.first, name(it.second)) }
             }
         }
+        // 2) Nyao Lyrics, 3) LRCLIB
+        val own = nyaoLyrics(track)
+        if (own != null && own.synced) return own.also { cache[track.id] = it }
+        if (fallback == null) fallback = own
         val lr = lrclib(track)
         if (lr != null && lr.synced) return lr.also { cache[track.id] = it }
         if (fallback == null) fallback = lr

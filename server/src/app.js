@@ -7,6 +7,8 @@ import { pkce } from './telegram.js';
 import { Hub } from './hub.js';
 import { summarize, periodRange } from './stats.js';
 import { socialRoutes } from './social.js';
+import { lyricsRoutes, lrclibError } from './lyrics.js';
+import { lyricsPage } from './lyrics-web.js';
 
 const LOGIN_TTL = 10 * 60_000;
 const MAX_BODY = 512 * 1024;
@@ -97,7 +99,7 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [] }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [] }) {
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
   setInterval(() => {
     const now = Date.now();
@@ -143,6 +145,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
 
   const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl, webUrl, sharePage: (o) => sharePage({ ...o, mirror }) });
   const share = shareRoutes({ q, mirror, androidCerts, webHosts });
+  const lyrics = lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins: lyricsAdmins });
   const routes = [
     ['GET', /^\/health$/, async () => ({ ok: true, minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
     // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)
@@ -417,6 +420,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       if (!rel) throw new HttpError(503, 'Сервер ещё не знает о релизах');
       return { ...rel, min_build: minBuild };
     }],
+    ...lyrics,
     ...social,
     ...share
   ];
@@ -430,6 +434,14 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       // файлы зеркала отдаём потоком, с поддержкой докачки
       const dl = /^\/dl\/([^/]+)\/([^/]+)$/.exec(url.pathname);
       if (dl && (req.method === 'GET' || req.method === 'HEAD')) return serveFile(req, res, mirror && mirror.file(dl[1], dl[2]));
+      // тексты песен: сайт на lyrics.withnyao.app (все страницы — одна, дальше разбирается сама), API — на своём домене
+      const host = String(req.headers.host || '').split(':')[0].toLowerCase();
+      if (req.method === 'GET' && lyricsHosts.includes(host) && !/^\/(api|auth)\//.test(url.pathname)) {
+        return send(res, 200, lyricsPage(), { 'Cache-Control': 'no-cache' });
+      }
+      if (req.method === 'GET' && lyricsApiHosts.includes(host) && url.pathname === '/') {
+        return send(res, 200, { ok: true, service: 'nyao-lyrics', docs: lyricsHosts[0] ? `https://${lyricsHosts[0]}/docs` : null });
+      }
       for (const [method, re, fn, needAuth] of routes) {
         const m = re.exec(url.pathname);
         if (!m || method !== req.method) continue;
@@ -437,7 +449,8 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         if (needAuth) {
           apiLimit(ip);
           // слишком старая сборка: синхронизацию не даём, просим обновиться
-          if (minBuild && clientBuild(req) < minBuild) {
+          // (сайт текстов /api/… — не приложение, сборки у него нет)
+          if (minBuild && !url.pathname.startsWith('/api/') && clientBuild(req) < minBuild) {
             const e = new HttpError(426, 'Эта версия Nyao Music устарела — обнови приложение в настройках');
             e.extra = { minBuild };
             throw e;
@@ -449,6 +462,8 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       }
       throw new HttpError(404, 'Нет такого адреса');
     } catch (e) {
+      const lr = lrclibError(e);
+      if (lr) return send(res, lr.status, lr.body);
       if (!(e instanceof HttpError)) log(`[api] ${req.method} ${url.pathname}: ${e.stack || e.message}`);
       return send(res, e.status || 500, { error: e instanceof HttpError ? e.message : 'Ошибка сервера', ...(e.extra || {}) });
     }

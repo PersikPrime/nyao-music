@@ -107,6 +107,55 @@ export const SCHEMA = [
     token TEXT NOT NULL,
     platform TEXT NOT NULL DEFAULT '',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // ---------- Тексты песен (lyrics.withnyao.app): пишут пользователи, проверяют специалисты ----------
+  `CREATE TABLE IF NOT EXISTS lyrics_tracks (
+    id BIGSERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    album TEXT NOT NULL DEFAULT '',
+    duration INTEGER NOT NULL DEFAULT 0,
+    title_norm TEXT NOT NULL,
+    artist_norm TEXT NOT NULL,
+    published_version BIGINT,
+    hidden BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS lyrics_tracks_norm ON lyrics_tracks (artist_norm, title_norm)`,
+  // версии текста: pending (ждёт проверки) → published / returned (на доработку) / rejected
+  `CREATE TABLE IF NOT EXISTS lyrics_versions (
+    id BIGSERIAL PRIMARY KEY,
+    track_id BIGINT NOT NULL REFERENCES lyrics_tracks(id) ON DELETE CASCADE,
+    author_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    plain TEXT NOT NULL DEFAULT '',
+    synced TEXT NOT NULL DEFAULT '',
+    instrumental BOOLEAN NOT NULL DEFAULT false,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reviewer_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_at TIMESTAMPTZ
+  )`,
+  `CREATE INDEX IF NOT EXISTS lyrics_versions_status ON lyrics_versions (status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS lyrics_versions_author ON lyrics_versions (author_id, created_at)`,
+  // роли: specialist (проверяет), admin (назначает, разбирает жалобы)
+  `CREATE TABLE IF NOT EXISTS lyrics_roles (
+    user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // жалобы: copyright (правообладатель — трек скрывается сразу) и wrong (ошибка в тексте)
+  `CREATE TABLE IF NOT EXISTS lyrics_reports (
+    id BIGSERIAL PRIMARY KEY,
+    track_id BIGINT NOT NULL REFERENCES lyrics_tracks(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    contact TEXT NOT NULL DEFAULT '',
+    details TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    resolved_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at TIMESTAMPTZ
   )`
 ];
 

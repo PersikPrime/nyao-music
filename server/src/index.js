@@ -16,6 +16,12 @@ const WEB_HOSTS = String(env.WEB_HOSTS || new URL(WEB_URL).host).split(',').map(
 // отпечатки SHA-256 ключа подписи APK — для Android App Links (ссылки открывают приложение сразу)
 const ANDROID_CERTS = String(env.ANDROID_CERT_SHA256 || '').split(',').map((h) => h.trim().toUpperCase()).filter((h) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(h));
 
+// тексты песен: сайт и публичный API (у API свой домен), админы — Telegram ID через запятую
+const hosts = (v, d) => String(v || d).split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+const LYRICS_HOSTS = hosts(env.LYRICS_HOSTS, 'lyrics.withnyao.app');
+const LYRICS_API_HOSTS = hosts(env.LYRICS_API_HOSTS, 'api.corrode5-15.withnyao.app');
+const LYRICS_ADMINS = String(env.LYRICS_ADMINS || '').split(',').map((x) => x.trim()).filter((x) => /^\d{3,20}$/.test(x));
+
 const pool = createPool(env.DATABASE_URL);
 for (let i = 0; ; i++) {
   try {
@@ -44,7 +50,7 @@ const status = new StatusFile(env.STATUS_FILE || '/data/status/status.json');
 const fcm = parseServiceAccount(env.FCM_SERVICE_ACCOUNT);
 const push = fcm ? new FcmPush(fcm) : null;
 console.log(push ? `[push] Firebase: ${fcm.project_id}` : '[push] FCM_SERVICE_ACCOUNT не задан — push выключены');
-const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS }));
+const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS }));
 server.listen(Number(env.PORT) || 8080, () => console.log(`[nyao] сервер слушает :${server.address().port}`));
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

@@ -1,4 +1,8 @@
-// Тексты песен. Цепочка источников: Яндекс Музыка (лицензированные, по строкам) → LRCLIB (открытая база) → YouTube Music.
+// Тексты песен. Цепочка источников: Яндекс Музыка (лицензированные, по строкам) → Nyao Lyrics (проверенные специалистами)
+// → LRCLIB (открытая база) → YouTube Music.
+
+/** Свой сервис текстов (lyrics.withnyao.app), API совместим с LRCLIB */
+export const NYAO_LYRICS_API = 'https://api.corrode5-15.withnyao.app';
 
 export function parseLrc(lrc) {
   const lines = [];
@@ -18,13 +22,13 @@ function cleanTitle(title) {
     .trim();
 }
 
-/** Только LRCLIB */
-export async function findLyrics(track, fetch = globalThis.fetch) {
+/** LRCLIB или совместимый с ним сервис (Nyao Lyrics: только точное совпадение, без поиска) */
+export async function findLyrics(track, fetch = globalThis.fetch, { base = 'https://lrclib.net', name = 'LRCLIB', search = true } = {}) {
   const headers = { 'User-Agent': 'NyaoMusic/0.1 (https://github.com/)' };
   const artist = String(track.artist).split(',')[0].trim();
   const title = cleanTitle(track.title);
   const tryGet = async (url) => {
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
     return res.json();
   };
@@ -32,17 +36,17 @@ export async function findLyrics(track, fetch = globalThis.fetch) {
   try {
     const q = new URLSearchParams({ track_name: title, artist_name: artist });
     if (track.duration) q.set('duration', String(track.duration));
-    data = await tryGet(`https://lrclib.net/api/get?${q}`);
-    if (!data) {
-      const list = await tryGet(`https://lrclib.net/api/search?${new URLSearchParams({ q: `${artist} ${title}` })}`);
+    data = await tryGet(`${base}/api/get?${q}`);
+    if (!data && search) {
+      const list = await tryGet(`${base}/api/search?${new URLSearchParams({ q: `${artist} ${title}` })}`);
       data = Array.isArray(list) ? list.find((l) => l.syncedLyrics) || list[0] : null;
     }
   } catch (e) {
     throw Object.assign(new Error(e.message || 'сеть'), { status: e.status });
   }
   if (!data) return null;
-  if (data.syncedLyrics) return { synced: true, lines: parseLrc(data.syncedLyrics), source: 'LRCLIB' };
-  if (data.plainLyrics) return { synced: false, lines: plainLines(data.plainLyrics), source: 'LRCLIB' };
+  if (data.syncedLyrics) return { synced: true, lines: parseLrc(data.syncedLyrics), source: name };
+  if (data.plainLyrics) return { synced: false, lines: plainLines(data.plainLyrics), source: name };
   return null;
 }
 
@@ -80,7 +84,14 @@ export async function findLyricsChain(track, { fetch = globalThis.fetch, ya = nu
       log(`[lyrics] ${track.id} Яндекс: ${e.stack || e.message}`);
     }
   }
-  // 2) LRCLIB
+  // 2) Nyao Lyrics — тексты, проверенные специалистами
+  const own = await findLyrics(track, fetch, { base: NYAO_LYRICS_API, name: 'Nyao Lyrics', search: false }).catch((e) => {
+    diag.push(`Nyao Lyrics: ${why(e)}`);
+    return null;
+  });
+  if (own && own.synced) return own;
+  if (!plain && own) plain = own;
+  // 3) LRCLIB
   let lr = null;
   try {
     lr = await findLyrics(track, fetch);

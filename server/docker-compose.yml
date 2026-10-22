@@ -28,6 +28,9 @@ services:
       WEB_URL: https://${WEB_DOMAIN:-music.withnyao.app}
       WEB_HOSTS: ${WEB_DOMAIN:-music.withnyao.app}
       ANDROID_CERT_SHA256: ${ANDROID_CERT_SHA256:-}
+      LYRICS_HOSTS: ${LYRICS_DOMAIN:-lyrics.withnyao.app}
+      LYRICS_API_HOSTS: ${LYRICS_API_DOMAIN:-api.corrode5-15.withnyao.app}
+      LYRICS_ADMINS: ${LYRICS_ADMINS:-}
       MIRROR_DIR: /data/releases
       STATUS_FILE: /data/status/status.json
     volumes:
@@ -47,6 +50,8 @@ services:
       DOMAIN: ${DOMAIN}
       API_DOMAIN: ${API_DOMAIN:-api.music.withnyao.app}
       WEB_DOMAIN: ${WEB_DOMAIN:-music.withnyao.app}
+      LYRICS_DOMAIN: ${LYRICS_DOMAIN:-lyrics.withnyao.app}
+      LYRICS_API_DOMAIN: ${LYRICS_API_DOMAIN:-api.corrode5-15.withnyao.app}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

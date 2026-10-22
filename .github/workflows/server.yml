@@ -18,6 +18,8 @@ env:
   DOMAIN: api.nmusic.bixtl.cc
   API_DOMAIN: api.music.withnyao.app
   WEB_DOMAIN: music.withnyao.app
+  LYRICS_DOMAIN: lyrics.withnyao.app
+  LYRICS_API_DOMAIN: api.corrode5-15.withnyao.app
   TG_CLIENT_ID: '8853157969'
   REMOTE_DIR: /opt/nyao/server
 
@@ -73,6 +75,9 @@ jobs:
             echo "DOMAIN=$DOMAIN"
             echo "API_DOMAIN=$API_DOMAIN"
             echo "WEB_DOMAIN=$WEB_DOMAIN"
+            echo "LYRICS_DOMAIN=$LYRICS_DOMAIN"
+            echo "LYRICS_API_DOMAIN=$LYRICS_API_DOMAIN"
+            echo "LYRICS_ADMINS=${{ vars.NYAO_LYRICS_ADMINS }}"
             echo "ANDROID_CERT_SHA256=$CERT"
             echo "TG_CLIENT_ID=$TG_CLIENT_ID"
             echo "TG_CLIENT_SECRET=$(q "$TG_SECRET")"
@@ -112,7 +117,7 @@ jobs:
       - name: Проверка новых адресов
         run: |
           # новые домены: если DNS ещё не настроен, это только предупреждение — старый адрес работает
-          for d in "$API_DOMAIN" "$WEB_DOMAIN"; do
+          for d in "$API_DOMAIN" "$WEB_DOMAIN" "$LYRICS_DOMAIN" "$LYRICS_API_DOMAIN"; do
             ok=""
             for i in $(seq 1 12); do curl -fsS "https://$d/health" > /dev/null && { ok=1; break; }; sleep 10; done
             if [ -n "$ok" ]; then echo "https://$d — работает"; else echo "::warning::https://$d пока не отвечает (DNS или сертификат ещё не готовы)"; fi
