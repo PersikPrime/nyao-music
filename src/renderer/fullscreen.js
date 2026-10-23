@@ -166,15 +166,15 @@ export class FullScreen {
     if (typeof ResizeObserver === 'function') {
       let lastH = 0;
       new ResizeObserver(() => {
-        const box = this.$('.fs-lyrics');
-        if (!this.open || !box || box.clientHeight === lastH) return;
-        lastH = box.clientHeight;
+        const right = this.$('.fs-right');
+        if (!this.open || !right || right.clientHeight === lastH) return;
+        lastH = right.clientHeight;
         this.layout();
         if (!this.scrolling) {
           this.lastLine = -2;
           this.tick(true);
         }
-      }).observe($('.fs-lyrics'));
+      }).observe($('.fs-right'));
     }
   }
 
@@ -191,6 +191,10 @@ export class FullScreen {
     }
     const box = this.$('.fs-lyrics');
     if (box && !box.classList.contains('plain')) {
+      // меряем без старых отступов: блок не сжимается меньше своих отступов, и прежние (от развёрнутого
+      // на весь экран текста) не давали ему вернуться к высоте плеера
+      box.style.paddingTop = '0px';
+      box.style.paddingBottom = '0px';
       const pad = `${Math.round(box.clientHeight / 2)}px`;
       box.style.paddingTop = pad;
       box.style.paddingBottom = pad;
