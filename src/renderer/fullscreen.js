@@ -240,7 +240,7 @@ export class FullScreen {
     const { player } = this.d;
     const q = player.queue || [];
     const from = Math.max(0, player.index - 3);
-    const items = q.slice(from, from + 150);
+    const items = q.slice(from, from + 150).filter(Boolean);
     const list = this.$('.fs-q-list');
     const key = `${player.index}|${q.length}|${q[player.index] && q[player.index].id}`;
     if (this.queueKey === key && !scroll && !force) return;
@@ -275,30 +275,137 @@ export class FullScreen {
   }
 
   show() {
-    if (!this.d.player.current) return;
+    if (!this.d.player.current || this.closing) return;
     this.build();
     this.open = true;
     this.el.hidden = false;
     // при открытии обложка сразу на своём месте — анимация только при переключении текста
     this.el.classList.add('noanim');
     setTimeout(() => this.el && this.el.classList.remove('noanim'), 400);
-    document.body.classList.add('fs-on');
-    this.d.api.win.fullscreen(true).catch(() => {});
     this.trackId = null;
     this.update();
     this.wake();
     requestAnimationFrame(() => this.layout());
+    if (!this.canAnimate()) {
+      this.d.api.win.fullscreen(true).catch(() => {});
+      document.body.classList.add('fs-on');
+      return;
+    }
+    // окно сначала становится полноэкранным, потом из плашки вылетает обложка — иначе она прыгнет,
+    // когда окно поменяет размер посреди полёта
+    this.el.style.opacity = '0';
+    Promise.resolve(this.d.api.win.fullscreen(true).catch(() => {}))
+      .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+      .then(() => {
+        if (!this.el) return;
+        this.el.style.opacity = '';
+        if (!this.open) return;
+        this.layout();
+        this.animateOpen();
+      });
   }
 
   close() {
     if (!this.open) return;
     this.open = false;
-    this.el.hidden = true;
     this.el.classList.remove('expand');
     this.scrolling = false;
     document.body.classList.remove('fs-on');
     clearTimeout(this.idleTimer);
-    this.d.api.win.fullscreen(false).catch(() => {});
+    const back = this.d.api.win.fullscreen(false).catch(() => {});
+    if (!this.canAnimate()) {
+      this.el.hidden = true;
+      return;
+    }
+    // окно сначала возвращается к обычному размеру, чтобы плашка плеера встала на своё место,
+    // и уже туда уезжает обложка
+    this.closing = true;
+    Promise.resolve(back)
+      .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+      .then(() => this.animateClose());
+  }
+
+  // ---------- Разворот из плашки плеера и обратно ----------
+
+  canAnimate() {
+    if (!this.el || typeof this.el.animate !== 'function') return false;
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+    return !!this.sourceRect();
+  }
+
+  /** Обложка в плашке плеера, откуда разворачивается полный экран */
+  sourceEl() {
+    try {
+      return (this.d.source && this.d.source()) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  sourceRect() {
+    const el = this.sourceEl();
+    if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? r : null;
+  }
+
+  /** Сдвиг и масштаб, чтобы обложка полного экрана встала точно на место обложки в плашке */
+  flight(from, to) {
+    const s = from.width / to.width;
+    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+    return `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${s.toFixed(4)})`;
+  }
+
+  /** Всё, кроме обложки: кнопки, текст, прогресс — они просто проявляются */
+  parts() {
+    return Array.from(this.el.querySelectorAll('.fs-top, .fs-right, .fs-queue, .fs-left > :not(.fs-art)'));
+  }
+
+  animateOpen() {
+    const art = this.$('.fs-art');
+    const from = this.sourceRect();
+    const done = () => {
+      document.body.classList.add('fs-on');
+      const src = this.sourceEl();
+      if (src) src.style.visibility = '';
+    };
+    const to = art && art.getBoundingClientRect ? art.getBoundingClientRect() : null;
+    if (!this.canAnimate() || !to || !to.width || !this.open) return done();
+    this.el.getAnimations({ subtree: true }).forEach((a) => a.cancel());
+    const src = this.sourceEl();
+    if (src) src.style.visibility = 'hidden'; // обложка «улетела» из плашки — там её не показываем
+    const bg = getComputedStyle(this.el).backgroundColor;
+    const ease = 'cubic-bezier(.2, .8, .2, 1)';
+    this.el.animate([{ backgroundColor: 'transparent' }, { backgroundColor: bg }], { duration: 420, easing: 'ease-out' });
+    this.parts().forEach((p) => p.animate([{ opacity: 0 }, { opacity: 0, offset: 0.35 }, { opacity: 1 }], { duration: 520, easing: 'ease-out' }));
+    const fly = art.animate([{ transform: this.flight(from, to), borderRadius: '8px' }, { transform: 'none', borderRadius: '10px' }], { duration: 520, easing: ease });
+    fly.finished.then(done, done);
+  }
+
+  animateClose() {
+    const art = this.$('.fs-art');
+    const to = this.sourceRect();
+    const finish = () => {
+      this.closing = false;
+      const src = this.sourceEl();
+      if (src) src.style.visibility = '';
+      if (!this.open) this.el.hidden = true;
+    };
+    const from = art && art.getBoundingClientRect ? art.getBoundingClientRect() : null;
+    if (!to || !from || !from.width) return finish();
+    const src = this.sourceEl();
+    if (src) src.style.visibility = 'hidden';
+    const bg = getComputedStyle(this.el).backgroundColor;
+    this.el.animate([{ backgroundColor: bg }, { backgroundColor: 'transparent' }], { duration: 380, easing: 'ease-in', fill: 'forwards' });
+    this.parts().forEach((p) => p.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease-in', fill: 'forwards' }));
+    const fly = art.animate([{ transform: 'none', borderRadius: '10px' }, { transform: this.flight(to, from), borderRadius: '6px' }], { duration: 440, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+    const end = () => {
+      finish();
+      // снимаем «замороженные» конечные кадры уже спрятанного слоя, иначе при следующем открытии всё останется прозрачным
+      this.el.getAnimations({ subtree: true }).forEach((a) => a.cancel());
+    };
+    fly.finished.then(end, end);
   }
 
   /** Мышь двинулась — показываем кнопки; прячем через 3 секунды, только если включено «Прятать кнопки» */
@@ -312,47 +419,86 @@ export class FullScreen {
     }, 3000);
   }
 
+  /** Промис с пределом ожидания: зависший запрос цвета или текста не держит экран в «Ищу…» */
+  withTimeout(promise, ms, fallback = null) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(fallback), ms);
+      Promise.resolve(promise).then((v) => { clearTimeout(timer); resolve(v); }, () => { clearTimeout(timer); resolve(fallback); });
+    });
+  }
+
+  /** Шаг обновления, который не должен ронять остальные: ошибка в очереди или тексте не трогает название */
+  safe(step) {
+    try {
+      step();
+    } catch (e) {
+      console.warn('[fs]', e);
+    }
+  }
+
   /** Смена трека, паузы, лайка */
   update() {
-    if (!this.open) return;
+    if (!this.open || !this.el) return;
     const { player } = this.d;
     const t = player.current;
     if (!t) return this.close();
     const $ = this.$;
-    $('.fs-play').innerHTML = player.playing ? this.d.icons.pause : this.d.icons.play;
-    $('.fs-play').setAttribute('aria-label', player.playing ? 'Пауза' : 'Играть');
-    const liked = player.liked.has(t.id);
-    $('.fs-like').innerHTML = liked ? this.d.icons.heartOn : this.d.icons.heart;
-    $('.fs-like').classList.toggle('on', liked);
-    if (!player.playing) this.el.classList.remove('idle');
-    this.renderQueue();
-    if (this.trackId === t.id) return this.tick();
+    this.safe(() => {
+      $('.fs-play').innerHTML = player.playing ? this.d.icons.pause : this.d.icons.play;
+      $('.fs-play').setAttribute('aria-label', player.playing ? 'Пауза' : 'Играть');
+      const liked = player.liked.has(t.id);
+      $('.fs-like').innerHTML = liked ? this.d.icons.heartOn : this.d.icons.heart;
+      $('.fs-like').classList.toggle('on', liked);
+      if (!player.playing) this.el.classList.remove('idle');
+    });
+    if (this.trackId === t.id) {
+      this.safe(() => this.renderQueue());
+      return this.tick();
+    }
+    // Сначала название и обложка — это то, что человек видит; очередь, цвет фона и текст идут отдельными
+    // шагами, чтобы сбой в любом из них не оставил на экране прошлый трек
     this.trackId = t.id;
     this.lastLine = -2;
-    const img = $('.fs-art img');
-    img.src = t.cover || '';
-    img.style.visibility = t.cover ? 'visible' : 'hidden';
-    $('.fs-title').textContent = t.title;
-    $('.fs-artist').textContent = t.artist + (t.album ? ` · ${t.album}` : '');
-    this.el.style.setProperty('--fs-bg', backgroundFrom(null));
+    this.safe(() => {
+      const img = $('.fs-art img');
+      img.src = t.cover || '';
+      img.style.visibility = t.cover ? 'visible' : 'hidden';
+      $('.fs-title').textContent = t.title || '';
+      $('.fs-artist').textContent = (t.artist || '') + (t.album ? ` · ${t.album}` : '');
+      this.el.style.setProperty('--fs-bg', backgroundFrom(null));
+    });
+    this.safe(() => this.renderQueue());
     if (t.cover) {
-      this.d.api.coverColor(t.cover).then((rgb) => {
-        if (this.trackId === t.id) this.el.style.setProperty('--fs-bg', backgroundFrom(rgb));
-      }).catch(() => {});
+      let colorPromise;
+      try {
+        colorPromise = this.d.api.coverColor(t.cover);
+      } catch (e) {
+        colorPromise = Promise.resolve(null);
+      }
+      this.withTimeout(colorPromise, 8000).then((rgb) => {
+        if (rgb && this.trackId === t.id && this.el) this.el.style.setProperty('--fs-bg', backgroundFrom(rgb));
+      });
     }
     this.lyrics = undefined;
-    this.renderLyrics();
-    this.d.ensureLyrics().then((data) => {
+    this.safe(() => this.renderLyrics());
+    let lyricsPromise;
+    try {
+      lyricsPromise = this.d.ensureLyrics();
+    } catch (e) {
+      lyricsPromise = Promise.resolve(null);
+    }
+    this.withTimeout(lyricsPromise, 15000).then((data) => {
       if (this.trackId !== t.id) return;
       this.lyrics = data || null;
-      this.renderLyrics();
+      this.safe(() => this.renderLyrics());
     });
-    this.tick();
+    this.safe(() => this.tick());
   }
 
   renderLyrics() {
     if (!this.el) return;
     const box = this.$('.fs-lyrics');
+    if (!box) return;
     const d = this.lyrics;
     const has = this.showLyrics && d && d.lines && d.lines.length;
     const avail = !!(d && d.lines && d.lines.length);
@@ -403,14 +549,17 @@ export class FullScreen {
   /** Время: прогресс и текущая строка */
   tick(force) {
     if (!this.open || !this.el) return;
+    // страховка: если на экране не тот трек, что играет (событие смены потерялось или упало), обновляемся сами
+    const cur = this.d.player.current;
+    if (cur && cur.id !== this.trackId) return this.update();
     const a = this.d.player.audio;
     const dur = this.duration();
-    const cur = a.currentTime || 0;
+    const pos = a.currentTime || 0;
     // пока тянут ползунок, он стоит под курсором, а не там, где играет
-    if (this.seeking == null) this.paintProgress(dur ? Math.min(1, cur / dur) : 0, dur);
+    if (this.seeking == null) this.paintProgress(dur ? Math.min(1, pos / dur) : 0, dur);
     const d = this.lyrics;
     if (!d || !d.synced || !this.showLyrics) return;
-    const time = cur + 0.25;
+    const time = pos + 0.25;
     let idx = -1;
     for (let i = 0; i < d.lines.length; i++) if (d.lines[i].time <= time) idx = i;
     if (idx === this.lastLine && !force) return;
