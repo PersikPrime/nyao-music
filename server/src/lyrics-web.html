@@ -68,7 +68,7 @@ label{display:block;font-size:13px;color:var(--muted);margin-bottom:5px}
 .empty{padding:36px 16px;text-align:center;color:var(--muted)}
 pre.code{background:var(--surface2);border-radius:12px;padding:12px 14px;overflow:auto;font-size:13px}
 code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em}
-.toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--surface3);border:1px solid var(--line);padding:10px 18px;border-radius:999px;font-size:14px;z-index:30;max-width:calc(100% - 32px)}
+.toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--surface3);border:1px solid var(--line);padding:10px 18px;border-radius:16px;font-size:14px;z-index:30;max-width:min(560px,calc(100% - 32px));width:max-content;text-align:center;box-shadow:0 8px 30px #0000002e}
 .btn.primary kbd{background:#00000022;color:inherit;border-color:#00000033}
 kbd{font:12px ui-monospace,Menlo,Consolas,monospace;background:var(--surface3);border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:1px 6px}
 
@@ -124,6 +124,22 @@ kbd{font:12px ui-monospace,Menlo,Consolas,monospace;background:var(--surface3);b
 .ib{width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:var(--surface2);color:var(--muted);display:grid;place-items:center;padding:0;font-size:12px;flex-shrink:0}
 .ib:hover{color:var(--fg);border-color:var(--acc)}
 .gap{height:10px}
+
+/* слова */
+.wl{display:flex;gap:10px;align-items:flex-start;padding:8px;border-radius:12px;scroll-margin:140px}
+.wl.cur{background:var(--cur);outline:1px solid var(--acc)}
+.wl .lt{font:12px ui-monospace,Menlo,Consolas,monospace;color:var(--muted);min-width:64px;padding-top:6px}
+.wl .ws{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0}
+.wd{display:flex;flex-direction:column;align-items:center;border:1px solid var(--line);background:var(--surface2);border-radius:10px;padding:3px 9px 2px;cursor:pointer;min-width:38px}
+.wd b{font-weight:600;font-size:15px}
+.wd small{font:10.5px ui-monospace,Menlo,Consolas,monospace;color:var(--muted)}
+.wd.unset b{color:var(--muted)}
+.wd.sel{border-color:var(--acc);box-shadow:0 0 0 2px var(--cur)}
+.wd.playing b{color:var(--play)}
+.wd .nud{display:flex;gap:2px;margin-top:2px}
+.wd .nud button{border:none;background:var(--surface3);color:var(--fg);border-radius:6px;font-size:11px;padding:0 6px;line-height:18px}
+.gem{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+.gem input[type=password],.gem input[type=text]{margin-bottom:8px}
 
 .blk{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px 14px;margin-bottom:12px}
 .blk .bh{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap}
@@ -199,11 +215,13 @@ const SECTION_NAME = Object.fromEntries(SECTIONS);
 const LOGO = document.querySelector('.logo img').src;
 
 function toast(msg) {
+  // новый тост заменяет прежний, а не ложится поверх
+  document.querySelectorAll('.toast').forEach((x) => x.remove());
   const el = document.createElement('div');
   el.className = 'toast';
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2600);
+  setTimeout(() => el.remove(), Math.max(2600, msg.length * 60));
 }
 
 async function api(method, path, body) {
@@ -318,7 +336,26 @@ function toLines(plain) {
   return out;
 }
 const toPlain = (lines) => lines.map((l, i) => (l.gap && i ? '\n' : '') + l.text).join('\n');
-/** LRC → [{ at, text }]; сжатые строки «[00:10.00][01:20.00] припев» разворачиваются и расставляются по времени */
+const tokens = (text) => String(text || '').split(/\s+/).filter(Boolean);
+const squash = (text) => tokens(text).join(' ');
+const WORD_TAG = /<(\d+):(\d{2})(?:[.:](\d{1,3}))?>/;
+const tagMs = (m) => (Number(m[1]) * 60 + Number(m[2])) * 1000 + (m[3] ? Number(m[3].padEnd(3, '0')) : 0);
+/** Enhanced LRC внутри строки: «<t1>слово <t2>слово <t3>» → { text, words: [{ text, at }], end }, без угловых меток — null */
+function splitWordTags(rest) {
+  if (!WORD_TAG.test(rest)) return null;
+  const parts = rest.split(/(<\d+:\d{2}(?:[.:]\d{1,3})?>)/);
+  const words = [];
+  let end = null;
+  tokens(parts[0]).forEach((w) => words.push({ text: w, at: null }));
+  for (let k = 1; k < parts.length; k += 2) {
+    const at = tagMs(WORD_TAG.exec(parts[k]));
+    const ws = tokens(parts[k + 1]);
+    if (!ws.length) { if (k + 2 >= parts.length) end = at; continue; }
+    ws.forEach((w, j) => words.push({ text: w, at: j === 0 ? at : null }));
+  }
+  return { text: words.map((w) => w.text).join(' '), words, end };
+}
+/** LRC → [{ at, text, words?, wend? }]; сжатые строки «[00:10.00][01:20.00] припев» разворачиваются и расставляются по времени */
 function lrcLines(synced) {
   const out = [];
   let multi = false;
@@ -328,7 +365,12 @@ function lrcLines(synced) {
     let m;
     while ((m = /^\[(\d+):(\d{2})(?:[.:](\d{1,3}))?\]/.exec(rest))) { tags.push(m); rest = rest.slice(m[0].length); }
     if (tags.length > 1) multi = true;
-    for (const t of tags) out.push({ at: (Number(t[1]) * 60 + Number(t[2])) * 1000 + (t[3] ? Number(t[3].padEnd(3, '0')) : 0), text: rest.trim() });
+    const w = splitWordTags(rest);
+    for (const t of tags) {
+      const at = (Number(t[1]) * 60 + Number(t[2])) * 1000 + (t[3] ? Number(t[3].padEnd(3, '0')) : 0);
+      // у сжатой строки пословное время относится к первому месту — в остальных слова без времени
+      out.push(w ? { at, text: w.text, words: t === tags[0] ? w.words : null, wend: t === tags[0] ? w.end : null } : { at, text: rest.trim() });
+    }
   }
   return multi ? out.sort((a, b) => a.at - b.at) : out;
 }
@@ -338,7 +380,7 @@ function linesFromLrc(text) {
   if (!lrc.length) throw new Error('Не нашёл строк с временем');
   let gap = false;
   const next = [];
-  for (const l of lrc) { if (!l.text) { gap = next.length > 0; continue; } next.push({ text: l.text, at: l.at, gap }); gap = false; }
+  for (const l of lrc) { if (!l.text) { gap = next.length > 0; continue; } next.push({ text: l.text, at: l.at, gap, words: l.words || null, wend: l.wend ?? null }); gap = false; }
   return next;
 }
 /** Опубликованный текст → строки с временем и куплетами */
@@ -347,6 +389,9 @@ function versionLines(v) {
   const lrc = lrcLines(v.synced).filter((l) => l.text);
   if (lrc.length === lines.length) lines.forEach((l, i) => (l.at = lrc[i].at));
   else if (!lines.length && lrc.length) return lrc.map((l) => ({ ...l, gap: false }));
+  // пословное время — те же строки, что в synced
+  const wl = lrcLines(v.words).filter((l) => l.text);
+  if (wl.length === lines.length) lines.forEach((l, i) => { if (wl[i].words && wl[i].text === squash(l.text)) { l.words = wl[i].words; l.wend = wl[i].wend ?? null; } });
   return lines;
 }
 /** Строки и части → куплеты для показа: [{ type, lines: [{ text, at, i }] }] */
@@ -389,7 +434,33 @@ function ttmlMs(v, fps = 30) {
   return Math.round((p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1]) * 1000);
 }
 const TTML_TO_SECTION = { intro: 'intro', verse: 'verse', prechorus: 'pre-chorus', 'pre-chorus': 'pre-chorus', chorus: 'chorus', postchorus: 'post-chorus', 'post-chorus': 'post-chorus', hook: 'hook', bridge: 'bridge', interlude: 'interlude', outro: 'outro' };
-/** TTML → строки с временем, куплеты (div) и части (itunes:songPart). Пословное время пока сводится к строкам */
+/**
+ * Слова строки TTML: <span begin> (кроме бэк-вокала); соседние span без пробела между ними — части одного слова.
+ * → [{ text, at }] или null
+ */
+function ttmlWords(p, fps, offset) {
+  if (byLocal(p, 'span').some((sp) => attrLocal(sp, 'role') === 'x-bg')) return null;
+  const out = [];
+  let glue = false;
+  let end = null;
+  for (const n of p.childNodes) {
+    if (n.nodeType === 3) { if (/\s/.test(n.textContent)) glue = false; continue; }
+    if (n.nodeType !== 1) continue;
+    const txt = n.textContent;
+    const b = ttmlMs(n.getAttribute('begin'), fps);
+    const e = ttmlMs(n.getAttribute('end'), fps);
+    if (e != null) end = e + offset;
+    const ws = tokens(txt);
+    if (!ws.length) continue;
+    ws.forEach((w, j) => {
+      if (j === 0 && glue && out.length) out[out.length - 1].text += w;
+      else out.push({ text: w, at: j === 0 && b != null ? b + offset : null });
+    });
+    glue = !/\s$/.test(txt);
+  }
+  return out.length && out.some((w) => w.at != null) ? { words: out, end } : null;
+}
+/** TTML → строки с временем, куплеты (div) и части (itunes:songPart), пословное время из <span> */
 function parseTtml(text) {
   const doc = parseXml(text);
   const lines = [];
@@ -410,12 +481,14 @@ function parseTtml(text) {
       // бэк-вокал (ttm:role="x-bg") — в скобках, как обычно пишут в текстах
       const clone = p.cloneNode(true);
       for (const bg of byLocal(clone, 'span').filter((sp) => attrLocal(sp, 'role') === 'x-bg')) bg.textContent = ` (${bg.textContent.trim().replace(/^\(|\)$/g, '')}) `;
-      const t = clone.textContent.replace(/\s+/g, ' ').trim();
+      let t = clone.textContent.replace(/\s+/g, ' ').trim();
       if (!t) continue;
       const own = ttmlMs(p.getAttribute('begin'), fps) ?? (spans[0] ? ttmlMs(spans[0].getAttribute('begin'), fps) : null);
       const at = own == null ? null : own + (relative ? divAt : 0);
+      const w = spans.length ? ttmlWords(p, fps, relative ? divAt : 0) : null;
+      if (w) t = w.words.map((x) => x.text).join(' ');
       if (firstInDiv && part && TTML_TO_SECTION[part]) structure.set(lines.length, TTML_TO_SECTION[part]);
-      lines.push({ text: t, at, gap: firstInDiv && lines.length > 0 });
+      lines.push({ text: t, at, gap: firstInDiv && lines.length > 0, words: w ? w.words : null, wend: w ? w.end : null });
       firstInDiv = false;
     }
   }
@@ -552,11 +625,12 @@ async function trackPage(id) {
   const p = t.published;
   const hasSync = !!(p && p.synced);
   const hasStruct = !!(p && p.structure && p.structure.length);
+  const hasWords = !!(p && p.words);
   app.innerHTML = `<div class="thead">${coverImg(t.cover, 'art')}<div class="meta">
       <div class="muted small">${t.album ? esc(t.album) + ' · ' : ''}${fmtDur(t.duration)}${t.isrc ? ` · ISRC ${esc(t.isrc)}` : ''}</div>
       <h1 style="margin-top:4px">${esc(t.title)}</h1>
       <div class="muted" style="font-size:17px">${esc(t.artist)}</div>
-      <div class="badges">${p ? '<span class="tag ok">✓ Проверено</span>' : '<span class="tag">Текста пока нет</span>'}${hasSync ? '<span class="tag">Синхронизирован</span>' : ''}${p && p.instrumental ? '<span class="tag">Инструментал</span>' : ''}</div>
+      <div class="badges">${p ? '<span class="tag ok">✓ Проверено</span>' : '<span class="tag">Текста пока нет</span>'}${hasSync ? '<span class="tag">Синхронизирован</span>' : ''}${hasWords ? '<span class="tag">По словам</span>' : ''}${p && p.instrumental ? '<span class="tag">Инструментал</span>' : ''}</div>
     </div></div>
     <div class="tlayout"><div>
       ${p && !p.instrumental ? `<div class="row" style="margin-bottom:18px"><div class="seg" id="mode"><button data-v="text" class="on">Текст</button><button data-v="time" ${hasSync ? '' : 'disabled'}>С таймингами</button></div><span style="flex:1"></span>${hasSync ? `<button class="btn sm" id="copy">Скопировать LRC</button><a class="btn sm" href="/api/get/${t.id}/ttml?download=1" download>TTML</a>` : ''}</div>` : ''}
@@ -565,7 +639,7 @@ async function trackPage(id) {
     </div>
     <aside class="card contrib" style="margin-top:0">
       <h3>Вклад</h3>
-      ${[['Текст', p && !p.instrumental ? 'проверен' : p ? 'инструментал' : 'ещё нет', !!p, 'text'], ['Синхронизация', hasSync ? 'проверена' : 'ещё нет', hasSync, 'sync'], ['Структура', hasStruct ? 'куплеты и припевы размечены' : 'ещё не размечена', hasStruct, 'structure']]
+      ${[['Текст', p && !p.instrumental ? 'проверен' : p ? 'инструментал' : 'ещё нет', !!p, 'text'], ['Синхронизация', hasSync ? 'проверена' : 'ещё нет', hasSync, 'sync'], ['По словам', hasWords ? 'слова размечены — для караоке' : 'ещё не размечены', hasWords, 'words'], ['Структура', hasStruct ? 'куплеты и припевы размечены' : 'ещё не размечена', hasStruct, 'structure']]
         .map(([name, sub, done, tab]) => `<div class="step"><div class="ic ${done ? 'done' : ''}">${done ? '✓' : '+'}</div><div class="grow"><b>${name}</b><span>${sub}</span></div><a class="btn sm" href="/edit/${t.id}?tab=${tab}" data-link>${done ? 'Править' : 'Добавить'}</a></div>`).join('')}
       <p class="muted small" style="margin:12px 0 0">Правки проверяет специалист — до проверки здесь остаётся текущая версия.</p>
       ${isAdmin() ? '<button class="btn sm block" id="meta-edit" style="margin-top:14px">Изменить данные трека</button><div id="meta-form"></div>' : ''}
@@ -626,7 +700,7 @@ function createPlayer(root, { duration = 0, onTick = () => {} } = {}) {
   </div></div><audio id="pa" preload="auto"></audio>`;
   const au = root.querySelector('#pa');
   const $ = (x) => root.querySelector(x);
-  let url = null, swStart = 0, swAcc = 0, swOn = false, raf = 0;
+  let url = null, swStart = 0, swAcc = 0, swOn = false, raf = 0, srcFile = null, decoded = null;
   const file = () => !!au.src;
   const total = () => (file() && au.duration ? au.duration * 1000 : duration * 1000 || 300000);
   const P = {
@@ -635,11 +709,26 @@ function createPlayer(root, { duration = 0, onTick = () => {} } = {}) {
     play() { if (file()) au.play(); else if (!swOn) { swStart = performance.now(); swOn = true; } draw(); },
     pause() { if (file()) au.pause(); else if (swOn) { swAcc += performance.now() - swStart; swOn = false; } draw(); },
     toggle() { P.playing() ? P.pause() : P.play(); },
-    seek(ms) { ms = Math.max(0, Math.min(total(), ms)); if (file()) au.currentTime = ms / 1000; else { swAcc = ms; swStart = performance.now(); } draw(); },
+    seek(ms) { P.stopAt = 0; ms = Math.max(0, Math.min(total(), ms)); if (file()) au.currentTime = ms / 1000; else { swAcc = ms; swStart = performance.now(); } draw(); },
+    stopAt: 0,
+    /** Проиграть отрезок [from, to) — например, одно слово */
+    playRange(from, to) { P.seek(from); P.stopAt = to; P.play(); },
+    hasFile: () => !!srcFile,
+    /** Аудио своего файла для разбора (декодируется один раз, остаётся в браузере) */
+    async buffer() {
+      if (!srcFile) throw new Error('Загрузи аудиофайл кнопкой «Свой файл» внизу');
+      if (!decoded) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        const ctx = new Ctx();
+        try { decoded = await ctx.decodeAudioData(await srcFile.arrayBuffer()); } finally { ctx.close && ctx.close(); }
+      }
+      return decoded;
+    },
     destroy() { cancelAnimationFrame(raf); au.pause(); if (url) URL.revokeObjectURL(url); root.innerHTML = ''; }
   };
   function draw() {
     const t = P.now();
+    if (P.stopAt && t >= P.stopAt) { P.stopAt = 0; P.pause(); return; }
     $('#ptm').textContent = fmtLrc(t);
     $('#pp').textContent = P.playing() ? '❚❚' : '▶';
     if (document.activeElement !== $('#seek')) $('#seek').value = String(Math.round((t / total()) * 1000));
@@ -658,6 +747,8 @@ function createPlayer(root, { duration = 0, onTick = () => {} } = {}) {
     if (url) URL.revokeObjectURL(url);
     url = URL.createObjectURL(f);
     au.src = url;
+    srcFile = f;
+    decoded = null;
     au.onloadedmetadata = () => { $('#pdur').textContent = fmtDur(au.duration); if (duration && Math.abs(au.duration - duration) > 3) toast(`Длительность файла (${fmtDur(au.duration)}) не совпадает с треком (${fmtDur(duration)}) — возможно, другая версия`); };
     $('#psrc').textContent = f.name;
   };
@@ -672,6 +763,9 @@ function createPlayer(root, { duration = 0, onTick = () => {} } = {}) {
 function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}) {
   let cur = Math.max(0, state.lines.findIndex((l) => l.at == null));
   let playingIdx = -1;
+  let playingWord = '';
+  let wl = 0, wi = 0; // выбранное слово: строка и номер слова
+  let busy = false; // идёт черновик (Gemini или по звуку)
   const host = document.createElement('div');
   document.body.appendChild(host);
   const player = createPlayer(host, { duration: state.track.duration, onTick: (t) => {
@@ -681,10 +775,22 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
       playingIdx = k;
       root.querySelectorAll('.sl').forEach((el) => el.classList.toggle('playing', Number(el.dataset.i) === k));
     }
+    if (tab === 'words') {
+      const l = state.lines[k];
+      let j = -1;
+      if (l && l.words) l.words.forEach((w, n) => { if (w.at != null && w.at <= t) j = n; });
+      const key = j >= 0 ? `${k}:${j}` : '';
+      if (key !== playingWord) {
+        playingWord = key;
+        root.querySelectorAll('.wd.playing').forEach((el) => el.classList.remove('playing'));
+        if (key) { const el = root.querySelector(`.wd[data-w="${key}"]`); if (el) el.classList.add('playing'); }
+      }
+    }
   } });
   const done = {
     text: () => state.instrumental || state.lines.length > 0,
     sync: () => state.instrumental || (state.lines.length > 0 && state.lines.every((l) => l.at != null)),
+    words: () => state.instrumental || (state.lines.length > 0 && state.lines.every((l) => l.words && l.words.length && l.words.every((w) => w.at != null))),
     structure: () => state.instrumental || state.structure.size > 0
   };
   const changed = () => { onChange(); renderTabs(); if (side) side(); };
@@ -692,7 +798,7 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
   root.innerHTML = `<div class="tabs" id="tabs"></div><div id="pane"></div>`;
   const $ = (x) => root.querySelector(x);
   function renderTabs() {
-    const T = [['text', 'Текст'], ['sync', 'Синхронизация'], ['structure', 'Структура']];
+    const T = [['text', 'Текст'], ['sync', 'Синхронизация'], ['words', 'Слова'], ['structure', 'Структура']];
     $('#tabs').innerHTML = T.map(([k, n], i) => `<button data-t="${k}" class="${tab === k ? 'on' : ''}"><span class="dot ${done[k]() ? 'done' : ''}">${done[k]() ? '✓' : i + 1}</span>${n}</button>`).join('');
     $('#tabs').querySelectorAll('button').forEach((b) => (b.onclick = () => show(b.dataset.t)));
   }
@@ -702,6 +808,7 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
     if (state.instrumental && t !== 'text') { $('#pane').innerHTML = '<div class="empty">Трек отмечен как инструментал — синхронизировать и размечать нечего.</div>'; return; }
     if (t === 'text') paneText();
     if (t === 'sync') paneSync();
+    if (t === 'words') paneWords();
     if (t === 'structure') paneStructure();
   }
 
@@ -718,7 +825,7 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
     const apply = () => {
       const next = toLines($('#pl').value);
       // время и части не теряем: у строк с тем же текстом на том же месте время сохраняется
-      next.forEach((l, i) => { const o = state.lines[i]; if (o && o.text === l.text) l.at = o.at; });
+      next.forEach((l, i) => { const o = state.lines[i]; if (o && o.text === l.text) { l.at = o.at; l.words = o.words || null; l.wend = o.wend ?? null; } });
       const n = next.length;
       for (const k of [...state.structure.keys()]) if (k >= n) state.structure.delete(k);
       state.lines = next;
@@ -735,11 +842,11 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
           const r = parseTtml(text);
           state.lines = r.lines;
           state.structure = r.structure;
-          toast(r.words ? 'TTML загружен. Пословное время пока сводится к строкам' : `TTML загружен: ${r.lines.length} строк`);
+          toast(r.words ? `TTML загружен: ${r.lines.length} строк, с пословным временем` : `TTML загружен: ${r.lines.length} строк`);
         } else {
           state.lines = linesFromLrc(text);
           state.structure.clear();
-          toast(`LRC загружен: ${state.lines.length} строк`);
+          toast(`LRC загружен: ${state.lines.length} строк${state.lines.some((l) => l.words) ? ', с пословным временем' : ''}`);
         }
         state.instrumental = false;
         changed();
@@ -804,6 +911,329 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
     changed(); drawSync();
   }
 
+
+  // --- Слова: время каждого слова внутри строки (для караоке)
+  /** Слова строки по её тексту; размеченное время сохраняется, пока текст строки не поменялся */
+  function wordsOf(l) {
+    const t = tokens(l.text);
+    if (!l.words || l.words.length !== t.length || l.words.some((w, n) => w.text !== t[n])) { l.words = t.map((x) => ({ text: x, at: null })); l.wend = null; }
+    return l.words;
+  }
+  /** Границы строки: от её времени до следующей строки (не дольше 12 с) */
+  function lineSpan(i) {
+    const l = state.lines[i];
+    const next = state.lines.slice(i + 1).find((x) => x.at != null && x.at > l.at);
+    const end = next ? next.at : l.at + Math.max(2500, l.text.length * 200);
+    return [l.at, Math.min(end, l.at + 12000)];
+  }
+  const allWords = () => state.lines.reduce((n, l) => n + tokens(l.text).length, 0);
+  const setWords = () => state.lines.reduce((n, l) => n + (l.words ? l.words.filter((w) => w.at != null).length : 0), 0);
+  function paneWords() {
+    if (!state.lines.length) { $('#pane').innerHTML = '<div class="empty">Сначала напиши текст на вкладке «Текст».</div>'; return; }
+    if (!state.lines.every((l) => l.at != null)) { $('#pane').innerHTML = '<div class="empty">Сначала отметь все строки на вкладке «Синхронизация» — слова размечаются внутри строк.</div>'; return; }
+    state.lines.forEach(wordsOf);
+    wl = Math.min(wl, state.lines.length - 1);
+    wi = Math.min(wi, state.lines[wl].words.length - 1);
+    $('#pane').innerHTML = `<div class="sync-head">
+        <button class="btn primary" id="wstamp">Отметить слово <kbd>Пробел</kbd></button>
+        <span class="muted small" id="wprog"></span><span style="flex:1"></span>
+        <button class="btn sm" id="wdraft" title="Расставить слова в неразмеченных строках — по звуку своего файла или по длине слов">Черновик</button>
+        <button class="btn sm" id="wgem" title="Черновик через Gemini со своим ключом">Черновик Gemini</button>
+        <button class="btn sm" id="wgset" title="Ключ Gemini">⚙</button>
+        <button class="btn sm" id="wclr">Сбросить слова</button>
+      </div>
+      <div id="gemset"></div>
+      <p class="muted small" style="margin:0 0 10px">Слово отмечается в момент, когда его начинают петь. Черновик расставит время сам — останется поправить на слух: <kbd>,</kbd> <kbd>.</kbd> двигают выбранное слово на 0,05 с.</p>
+      <div id="wlist"></div>`;
+    $('#wstamp').onclick = (e) => { e.currentTarget.blur(); stampWord(); };
+    $('#wclr').onclick = () => { if (confirm('Сбросить время у всех слов?')) { state.lines.forEach((l) => { l.words = null; l.wend = null; wordsOf(l); }); wl = 0; wi = 0; changed(); drawWords(); } };
+    $('#wdraft').onclick = (e) => { e.currentTarget.blur(); draftLocal(); };
+    $('#wgem').onclick = (e) => { e.currentTarget.blur(); draftGemini(); };
+    $('#wgset').onclick = () => gemSettings(true);
+    $('#wlist').onclick = (e) => {
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      const nb = e.target.closest('[data-nud]');
+      if (nb) { nudge(Number(nb.dataset.nud)); return; }
+      const rd = e.target.closest('[data-redo]');
+      if (rd) { const l = state.lines[Number(rd.dataset.redo)]; l.words = null; wordsOf(l); changed(); drawWords(); return; }
+      const w = e.target.closest('.wd');
+      if (!w) return;
+      const [a, b] = w.dataset.w.split(':').map(Number);
+      wl = a; wi = b;
+      drawWords();
+      playWord();
+    };
+    drawWords();
+  }
+  function drawWords() {
+    const box = $('#wlist');
+    if (!box) return;
+    $('#wprog').textContent = `${setWords()} из ${allWords()} слов`;
+    box.innerHTML = state.lines.map((l, i) => `${l.gap ? '<div class="gap"></div>' : ''}<div class="wl ${i === wl ? 'cur' : ''}" data-i="${i}">
+      <span class="lt">${fmtLrc(l.at)}</span>
+      <div class="ws">${wordsOf(l).map((w, n) => {
+        const sel = i === wl && n === wi;
+        return `<div class="wd ${w.at == null ? 'unset' : ''} ${sel ? 'sel' : ''} ${playingWord === `${i}:${n}` ? 'playing' : ''}" data-w="${i}:${n}"><b>${esc(w.text)}</b><small>${w.at == null ? '—' : fmtLrc(w.at).slice(3)}</small>${sel && w.at != null ? '<span class="nud"><button data-nud="-50" title="−0,05 с">‹</button><button data-nud="50" title="+0,05 с">›</button></span>' : ''}</div>`;
+      }).join('')}</div>
+      ${l.words && l.words.some((w) => w.at != null) ? `<button class="ib" data-redo="${i}" title="Сбросить слова строки">✕</button>` : ''}
+    </div>`).join('');
+    const el = box.querySelector('.wl.cur');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+  function moveWord(d) {
+    let a = wl, b = wi + d;
+    while (a >= 0 && a < state.lines.length) {
+      const n = wordsOf(state.lines[a]).length;
+      if (b >= 0 && b < n) break;
+      a += d > 0 ? 1 : -1;
+      if (a < 0 || a >= state.lines.length) return false;
+      b = d > 0 ? 0 : wordsOf(state.lines[a]).length - 1;
+    }
+    wl = a; wi = b;
+    return true;
+  }
+  function stampWord() {
+    const l = state.lines[wl];
+    if (!l) return;
+    if (!player.playing()) player.play();
+    wordsOf(l)[wi].at = Math.round(player.now());
+    // слова идут по порядку: следующие, отмеченные раньше этого, сбрасываем
+    for (let n = wi + 1; n < l.words.length; n++) if (l.words[n].at != null && l.words[n].at < l.words[wi].at) l.words[n].at = null;
+    moveWord(1);
+    changed(); drawWords();
+  }
+  function nudge(ms) {
+    const w = wordsOf(state.lines[wl])[wi];
+    if (!w || w.at == null) return;
+    w.at = Math.max(0, w.at + ms);
+    changed(); drawWords(); playWord();
+  }
+  /** Проиграть выбранное слово: от его начала до следующего слова (или 0,6 с) */
+  function playWord() {
+    const ws = wordsOf(state.lines[wl]);
+    const w = ws[wi];
+    if (!w || w.at == null) return;
+    const nx = ws.slice(wi + 1).find((x) => x.at != null);
+    const end = nx ? nx.at : Math.min(w.at + 900, lineSpan(wl)[1]);
+    player.playRange(Math.max(0, w.at - 60), Math.max(end, w.at + 250));
+  }
+  /** Время слов в границах строки, по возрастанию, не меньше 60 мс на слово */
+  function clampWords(times, i) {
+    const [a, b] = lineSpan(i);
+    const out = [];
+    times.forEach((t, n) => {
+      let x = Math.round(Number.isFinite(t) ? t : a);
+      x = Math.max(a - 300, Math.min(b - 80, x));
+      if (n === 0) x = Math.max(x, a - 300);
+      if (n > 0) x = Math.max(x, out[n - 1] + 60);
+      out.push(x);
+    });
+    // не влезло в строку — сжимаем хвост
+    const over = out.length ? out[out.length - 1] - (b - 80) : 0;
+    if (over > 0) out.forEach((x, n) => { out[n] = Math.round(a + ((x - a) * (b - 80 - a)) / Math.max(1, out[out.length - 1] - a)); });
+    return out;
+  }
+  /** По длине слов: начало слова пропорционально числу букв до него */
+  function proportional(i) {
+    const ws = wordsOf(state.lines[i]);
+    const [a, b] = lineSpan(i);
+    const len = ws.map((w) => w.text.length + 1);
+    const total = len.reduce((x, y) => x + y, 0);
+    let acc = 0;
+    return ws.map((w, n) => { const t = a + ((b - a) * 0.92 * acc) / total; acc += len[n]; return t; });
+  }
+  /** Огибающая вокального диапазона (250–3500 Гц) своего файла: сила «атаки» звука каждые 10 мс */
+  let onsetCache = null;
+  async function onsets() {
+    if (onsetCache) return onsetCache;
+    const buf = await player.buffer();
+    const sr = 16000;
+    const off = new OfflineAudioContext(1, Math.ceil(buf.duration * sr), sr);
+    const src = off.createBufferSource();
+    src.buffer = buf;
+    const hp = off.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 250;
+    const lp = off.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3500;
+    src.connect(hp); hp.connect(lp); lp.connect(off.destination);
+    src.start();
+    const data = (await off.startRendering()).getChannelData(0);
+    const hop = sr / 100;
+    const n = Math.floor(data.length / hop);
+    const e = new Float32Array(n);
+    for (let f = 0; f < n; f++) { let s = 0; for (let k = f * hop; k < (f + 1) * hop; k++) s += data[k] * data[k]; e[f] = Math.log10(s / hop + 1e-9); }
+    const sm = new Float32Array(n);
+    for (let f = 0; f < n; f++) { let s = 0, c = 0; for (let k = Math.max(0, f - 2); k <= Math.min(n - 1, f + 2); k++) { s += e[k]; c++; } sm[f] = s / c; }
+    const o = new Float32Array(n);
+    for (let f = 3; f < n; f++) o[f] = Math.max(0, sm[f] - sm[f - 3]);
+    onsetCache = o;
+    return o;
+  }
+  /**
+   * По звуку: в строке ищем самые сильные «атаки» (начала звуков) — по одной на слово, по порядку.
+   * Если явных атак меньше, чем слов, — каждое слово к ближайшей атаке рядом с его местом по длине слов.
+   */
+  function byOnsets(i, o) {
+    const prop = proportional(i);
+    const [a, b] = lineSpan(i);
+    const need = prop.length - 1;
+    if (need <= 0) return [a];
+    const f0 = Math.ceil((a + 90) / 10), f1 = Math.min(o.length - 1, Math.floor((b - 80) / 10));
+    let max = 0;
+    for (let f = f0; f <= f1; f++) max = Math.max(max, o[f]);
+    const thr = Math.max(0.02, max * 0.25);
+    const peaks = [];
+    for (let f = f0; f <= f1; f++) {
+      if (o[f] < thr) continue;
+      let top = true;
+      for (let k = Math.max(0, f - 5); k <= Math.min(o.length - 1, f + 5); k++) if (o[k] > o[f] || (o[k] === o[f] && k < f)) { top = false; break; }
+      if (top) peaks.push(f);
+    }
+    // самые сильные, не ближе 120 мс друг к другу
+    const chosen = [];
+    for (const f of peaks.sort((x, y) => o[y] - o[x])) {
+      if (chosen.length >= need) break;
+      if (Math.abs(f * 10 - a) >= 120 && chosen.every((g) => Math.abs(g - f) >= 12)) chosen.push(f);
+    }
+    if (chosen.length === need) return [a, ...chosen.sort((x, y) => x - y).map((f) => f * 10)];
+    return byWindows(i, o, prop, a, b);
+  }
+  function byWindows(i, o, prop, a, b) {
+    const slot = (b - a) / Math.max(1, prop.length);
+    const out = [];
+    prop.forEach((p, n) => {
+      if (n === 0) { out.push(a); return; }
+      const lo = Math.max(out[n - 1] + 90, p - slot * 0.5), hi = Math.min(b - 80, p + slot * 0.5);
+      let best = -1, at = Math.max(lo, Math.min(hi, p));
+      for (let f = Math.ceil(lo / 10); f <= Math.floor(hi / 10) && f < o.length; f++) {
+        // ближе к ожидаемому месту — небольшая фора
+        const sc = o[f] * (1 - (0.4 * Math.abs(f * 10 - p)) / (slot + 1));
+        if (o[f] > 0.02 && sc > best) { best = sc; at = f * 10; }
+      }
+      out.push(at);
+    });
+    return out;
+  }
+  const todoLines = () => state.lines.map((l, i) => i).filter((i) => { const ws = wordsOf(state.lines[i]); return ws.length > 1 ? ws.some((w) => w.at == null) : ws.length === 1 && ws[0].at == null; });
+  function applyDraft(i, times) {
+    const ws = wordsOf(state.lines[i]);
+    clampWords(times, i).forEach((t, n) => (ws[n].at = t));
+  }
+  async function draftLocal() {
+    if (busy) return;
+    const todo = todoLines();
+    if (!todo.length) { toast('Все слова уже размечены — сбрось строку крестиком, чтобы расставить заново'); return; }
+    let o = null;
+    if (player.hasFile()) {
+      busy = true; toast('Слушаю файл…');
+      try { o = await onsets(); } catch (e) { toast(`Не получилось разобрать файл: ${e.message} — расставлю по длине слов`); }
+      busy = false;
+    }
+    todo.forEach((i) => applyDraft(i, o ? byOnsets(i, o) : proportional(i)));
+    changed(); drawWords();
+    toast(`Черновик: ${todo.length} строк${o ? ' по звуку' : ' по длине слов (загрузи свой файл — будет точнее)'}. Проверь на слух`);
+  }
+
+  // --- Gemini: ключ — свой, хранится только в этом браузере, запросы идут прямо в Google
+  const GEM_KEY = 'nyao-gemini-key', GEM_MODEL = 'nyao-gemini-model', GEM_DEFAULT = 'gemini-3.8-flash';
+  const gemGet = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+  const gemSet = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} };
+  function gemSettings(open) {
+    const box = $('#gemset');
+    if (!box) return;
+    if (!open || box.innerHTML) { box.innerHTML = ''; return; }
+    box.innerHTML = `<div class="gem"><h3>Помощник Gemini</h3>
+      <p class="muted small" style="margin-top:0">Нужен свой ключ Gemini API — его можно получить в <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>. Ключ хранится только в этом браузере и отправляется только в Google. Для черновика отрезки твоего аудиофайла уходят в Gemini с твоим ключом — загружай только то, на что у тебя есть право.</p>
+      <label>Ключ</label><input type="password" id="gk" value="${esc(gemGet(GEM_KEY))}" placeholder="AIza…" autocomplete="off">
+      <label>Модель</label><input type="text" id="gm" value="${esc(gemGet(GEM_MODEL) || GEM_DEFAULT)}">
+      <div class="row"><button class="btn primary sm" id="gsave">Сохранить</button><button class="btn sm" id="gdel">Удалить ключ</button></div></div>`;
+    box.querySelector('#gsave').onclick = () => { gemSet(GEM_KEY, box.querySelector('#gk').value.trim()); gemSet(GEM_MODEL, box.querySelector('#gm').value.trim()); box.innerHTML = ''; toast('Сохранено в этом браузере'); };
+    box.querySelector('#gdel').onclick = () => { gemSet(GEM_KEY, ''); box.innerHTML = ''; toast('Ключ удалён'); };
+  }
+  /** Отрезок аудио → WAV 16 кГц моно (base64) */
+  async function wavB64(buf, from, to) {
+    const sr = 16000;
+    const len = Math.max(1, Math.ceil(((to - from) / 1000) * sr));
+    const off = new OfflineAudioContext(1, len, sr);
+    const src = off.createBufferSource();
+    src.buffer = buf;
+    src.connect(off.destination);
+    src.start(0, from / 1000, (to - from) / 1000);
+    const pcm = (await off.startRendering()).getChannelData(0);
+    const out = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+    const str = (o, t) => { for (let k = 0; k < t.length; k++) out.setUint8(o + k, t.charCodeAt(k)); };
+    str(0, 'RIFF'); out.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+    out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true); out.setUint32(24, sr, true);
+    out.setUint32(28, sr * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true); str(36, 'data'); out.setUint32(40, pcm.length * 2, true);
+    for (let k = 0; k < pcm.length; k++) out.setInt16(44 + k * 2, Math.max(-1, Math.min(1, pcm[k])) * 0x7fff, true);
+    const bytes = new Uint8Array(out.buffer);
+    let bin = '';
+    for (let k = 0; k < bytes.length; k += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000));
+    return btoa(bin);
+  }
+  async function askGemini(key, model, b64, from, lines) {
+    const dur = lines.clipMs / 1000;
+    const prompt = `You align song lyrics to audio. The audio clip is ${dur.toFixed(2)} seconds long. Below are the lyric lines sung in this clip, each with the approximate time (seconds from the clip start) when the line begins.
+For EVERY word of every line, return the time in seconds from the start of the clip (2 decimals) when that word starts being sung.
+Keep the words exactly as given, in the same order, one entry per word. Times inside a line must increase.
+Lines:
+${lines.map((l, n) => `${n + 1}. [${((l.at - from) / 1000).toFixed(2)}s] ${tokens(l.text).join(' ')}`).join('\n')}`;
+    const schema = { type: 'OBJECT', properties: { lines: { type: 'ARRAY', items: { type: 'OBJECT', properties: { line: { type: 'INTEGER' }, words: { type: 'ARRAY', items: { type: 'OBJECT', properties: { w: { type: 'STRING' }, s: { type: 'NUMBER' } }, required: ['w', 's'] } } }, required: ['line', 'words'] } } }, required: ['lines'] };
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'audio/wav', data: b64 } }, { text: prompt }] }], generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0 } })
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((j.error && j.error.message) || `Gemini ответил ${res.status}`);
+    const text = (((j.candidates || [])[0] || {}).content || {}).parts ? j.candidates[0].content.parts.map((x) => x.text || '').join('') : '';
+    let out;
+    try { out = JSON.parse(text); } catch { throw new Error('Gemini вернул не то, что просили — попробуй ещё раз'); }
+    return Array.isArray(out.lines) ? out.lines : [];
+  }
+  async function draftGemini() {
+    if (busy) return;
+    const key = gemGet(GEM_KEY);
+    if (!key) { gemSettings(true); toast('Сначала вставь свой ключ Gemini'); return; }
+    if (!player.hasFile()) { toast('Загрузи аудиофайл кнопкой «Свой файл» внизу — Gemini нужно слышать трек'); return; }
+    const todo = todoLines();
+    if (!todo.length) { toast('Все слова уже размечены — сбрось строку крестиком, чтобы расставить заново'); return; }
+    busy = true;
+    let ok = 0, fallback = 0;
+    try {
+      const buf = await player.buffer();
+      let o = null;
+      try { o = await onsets(); } catch {}
+      // куски: подряд идущие строки, до 6 строк и 25 секунд
+      const chunks = [];
+      for (const i of todo) {
+        const last = chunks[chunks.length - 1];
+        if (last && last[last.length - 1] === i - 1 && last.length < 6 && lineSpan(i)[1] - state.lines[last[0]].at <= 25000) last.push(i);
+        else chunks.push([i]);
+      }
+      const model = gemGet(GEM_MODEL) || GEM_DEFAULT;
+      for (let c = 0; c < chunks.length; c++) {
+        toast(`Gemini: часть ${c + 1} из ${chunks.length}…`);
+        const ids = chunks[c];
+        const from = Math.max(0, state.lines[ids[0]].at - 300);
+        const to = Math.min(buf.duration * 1000, lineSpan(ids[ids.length - 1])[1] + 300);
+        const lines = ids.map((i) => state.lines[i]);
+        lines.clipMs = to - from;
+        let got = [];
+        try { got = await askGemini(key, model, await wavB64(buf, from, to), from, lines); } catch (e) {
+          if (/api key|permission|quota|billing|not found/i.test(e.message)) throw e;
+        }
+        ids.forEach((i, n) => {
+          const r = got.find((x) => Number(x.line) === n + 1) || got[n];
+          const ws = wordsOf(state.lines[i]);
+          if (r && Array.isArray(r.words) && r.words.length === ws.length && r.words.every((x) => Number.isFinite(Number(x.s)))) { applyDraft(i, r.words.map((x) => from + Number(x.s) * 1000)); ok++; }
+          else { applyDraft(i, o ? byOnsets(i, o) : proportional(i)); fallback++; }
+        });
+        changed(); drawWords();
+      }
+      toast(`Черновик Gemini: ${ok} строк${fallback ? `, ещё ${fallback} — по звуку (Gemini ответил не по формату)` : ''}. Проверь на слух`);
+    } catch (e) { toast(`Gemini: ${e.message}`); changed(); drawWords(); }
+    busy = false;
+  }
+
   // --- Структура
   function paneStructure() {
     if (!state.lines.length) { $('#pane').innerHTML = '<div class="empty">Сначала напиши текст на вкладке «Текст».</div>'; return; }
@@ -856,8 +1286,26 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
   }
 
   // клавиатура: пробел — отметить, ↑↓ — строка, ←→ — сдвиг (Shift — 0,5 с), Enter — играть со строки, Delete — убрать время
+  // слова: пробел — отметить, ← → — слово, ↑ ↓ — строка, , . — сдвиг 0,05 с (Shift — 0,2 с), Enter — проиграть слово, Delete — убрать время
+  const wordKey = (e) => {
+    const w = state.lines[wl] && wordsOf(state.lines[wl])[wi];
+    let handled = true;
+    if (e.code === 'Space') stampWord();
+    else if (e.key === 'ArrowRight') { moveWord(1); drawWords(); }
+    else if (e.key === 'ArrowLeft') { moveWord(-1); drawWords(); }
+    else if (e.key === 'ArrowDown') { if (wl < state.lines.length - 1) { wl++; wi = 0; } drawWords(); }
+    else if (e.key === 'ArrowUp') { if (wl > 0) { wl--; wi = 0; } drawWords(); }
+    else if (e.code === 'Comma' || e.code === 'Period') nudge((e.code === 'Comma' ? -1 : 1) * (e.shiftKey ? 200 : 50));
+    else if (e.key === 'Enter') playWord();
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && w) { w.at = null; changed(); drawWords(); }
+    else if (e.code === 'KeyP') player.toggle();
+    else handled = false;
+    if (handled) e.preventDefault();
+  };
   const key = (e) => {
-    if (tab !== 'sync' || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (tab === 'words' && state.lines.length && state.lines.every((l) => l.at != null)) return wordKey(e);
+    if (tab !== 'sync') return;
     const l = state.lines[cur];
     if (!l) return;
     let handled = true;
@@ -875,15 +1323,40 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
   show(tab);
   return {
     done,
-    shift(ms) { state.lines.forEach((l) => { if (l.at != null) l.at = Math.max(0, l.at + ms); }); changed(); if (tab === 'sync') drawSync(); },
+    shift(ms) {
+      state.lines.forEach((l) => {
+        if (l.at != null) l.at = Math.max(0, l.at + ms);
+        if (l.words) l.words.forEach((w) => { if (w.at != null) w.at = Math.max(0, w.at + ms); });
+        if (l.wend != null) l.wend = Math.max(0, l.wend + ms);
+      });
+      changed(); if (tab === 'sync') drawSync(); if (tab === 'words') drawWords();
+    },
     payload() {
-      if (state.instrumental) return { plain: '', synced: '', instrumental: true, structure: [] };
+      if (state.instrumental) return { plain: '', synced: '', instrumental: true, structure: [], words: '' };
       const set = state.lines.filter((l) => l.at != null).length;
       if (set && set < state.lines.length) throw new Error(`Время есть не у всех строк (${set} из ${state.lines.length}) — отметь остальные или сбрось синхронизацию`);
       for (let i = 1; i < state.lines.length; i++) if (set && state.lines[i].at < state.lines[i - 1].at) throw new Error(`Строка «${state.lines[i].text}» раньше предыдущей — проверь время`);
+      // слова: строка либо размечена целиком, либо нет; текст строки поменялся — её слова не в счёт
+      const marked = (l) => l.words && l.words.length && squash(l.text) === l.words.map((w) => w.text).join(' ') && l.words.some((w) => w.at != null);
+      let words = '';
+      if (set && state.lines.some(marked)) {
+        state.lines.forEach((l, i) => {
+          if (!marked(l)) return;
+          const n = l.words.filter((w) => w.at != null).length;
+          if (n < l.words.length) throw new Error(`В строке «${l.text}» отмечены не все слова (${n} из ${l.words.length}) — доделай на вкладке «Слова» или сбрось слова строки`);
+          const nx = state.lines.slice(i + 1).find((x) => x.at > l.at);
+          const b = nx ? nx.at : Infinity;
+          l.words.forEach((w, k) => {
+            if (w.at < l.at - 500 || w.at > b + 1000) throw new Error(`В строке «${l.text}» слово «${w.text}» вне своей строки — проверь время на вкладке «Слова»`);
+            if (k && w.at < l.words[k - 1].at) throw new Error(`В строке «${l.text}» слово «${w.text}» раньше предыдущего`);
+          });
+        });
+        words = state.lines.map((l) => `[${fmtLrc(l.at)}] ${marked(l) ? l.words.map((w) => `<${fmtLrc(w.at)}>${w.text}`).join(' ') + (l.wend != null && l.wend >= l.words[l.words.length - 1].at ? ` <${fmtLrc(l.wend)}>` : '') : l.text}`).join('\n');
+      }
       return {
         plain: toPlain(state.lines),
         synced: set ? state.lines.map((l) => `[${fmtLrc(l.at)}] ${l.text}`).join('\n') : '',
+        words,
         instrumental: false,
         structure: [...state.structure.entries()].sort((a, b) => a[0] - b[0]).map(([from, type]) => ({ from, type }))
       };
@@ -895,7 +1368,8 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
 function trackCard(t, extra = '') {
   return `<div class="trk">${t.cover ? `<img src="${esc(t.cover)}" alt="">` : `<img src="${LOGO}" alt="">`}<div class="grow"><div style="font-weight:700">${esc(t.title)}</div><div class="muted small">${esc(t.artist)}</div><div class="muted small">${t.album ? esc(t.album) + ' · ' : ''}${fmtDur(t.duration)}</div></div></div>${extra}`;
 }
-const KEYS = `<h3>Клавиши синхронизации</h3><div class="keys"><kbd>Пробел</kbd><span>отметить строку и перейти к следующей</span><kbd>↑ ↓</kbd><span>выбрать строку</span><kbd>← →</kbd><span>сдвиг на 0,1 с (с Shift — 0,5 с)</span><kbd>Enter</kbd><span>играть с выбранной строки</span><kbd>Del</kbd><span>убрать время у строки</span><kbd>P</kbd><span>играть / пауза</span></div>`;
+const KEYS = `<h3>Клавиши синхронизации</h3><div class="keys"><kbd>Пробел</kbd><span>отметить строку и перейти к следующей</span><kbd>↑ ↓</kbd><span>выбрать строку</span><kbd>← →</kbd><span>сдвиг на 0,1 с (с Shift — 0,5 с)</span><kbd>Enter</kbd><span>играть с выбранной строки</span><kbd>Del</kbd><span>убрать время у строки</span><kbd>P</kbd><span>играть / пауза</span></div>
+<h3 style="margin-top:14px">Клавиши на вкладке «Слова»</h3><div class="keys"><kbd>Пробел</kbd><span>отметить слово и перейти к следующему</span><kbd>← →</kbd><span>выбрать слово</span><kbd>↑ ↓</kbd><span>выбрать строку</span><kbd>, .</kbd><span>сдвиг слова на 0,05 с (с Shift — 0,2 с)</span><kbd>Enter</kbd><span>проиграть слово</span><kbd>Del</kbd><span>убрать время у слова</span></div>`;
 
 /** Состояние рабочего места из версии текста */
 function stateFrom(track, v) {
@@ -988,10 +1462,11 @@ function openEditor({ track, version, trackId, note, tab, title, pending }) {
       <div class="card checks">
         <div class="c" data-t="text"><i class="${d && d.text() ? 'done' : ''}">${d && d.text() ? '✓' : '1'}</i>Текст · ${state.instrumental ? 'инструментал' : `${state.lines.length} строк`}</div>
         <div class="c" data-t="sync"><i class="${d && d.sync() ? 'done' : ''}">${d && d.sync() ? '✓' : '2'}</i>Синхронизация · ${state.lines.filter((l) => l.at != null).length} из ${state.lines.length}</div>
-        <div class="c" data-t="structure"><i class="${d && d.structure() ? 'done' : ''}">${d && d.structure() ? '✓' : '3'}</i>Структура · ${state.structure.size} частей</div>
+        <div class="c" data-t="words"><i class="${d && d.words() ? 'done' : ''}">${d && d.words() ? '✓' : '3'}</i>Слова · ${state.lines.reduce((n, l) => n + (l.words ? l.words.filter((w) => w.at != null).length : 0), 0)} из ${state.lines.reduce((n, l) => n + tokens(l.text).length, 0)}</div>
+        <div class="c" data-t="structure"><i class="${d && d.structure() ? 'done' : ''}">${d && d.structure() ? '✓' : '4'}</i>Структура · ${state.structure.size} частей</div>
         <button class="btn primary block" id="send" style="margin-top:12px">Отправить на проверку</button>
         <div id="msg" class="small" style="margin-top:8px"></div>
-        <p class="muted small" style="margin:6px 0 0">Синхронизацию и структуру можно не делать — их добавит кто-нибудь потом.</p>
+        <p class="muted small" style="margin:6px 0 0">Синхронизацию, слова и структуру можно не делать — их добавит кто-нибудь потом.</p>
       </div>
       <div class="card"><h3>Сдвинуть всю синхронизацию</h3><div class="row" style="gap:6px"><button class="btn sm" data-sh="-500">−0,5</button><button class="btn sm" data-sh="-100">−0,1</button><button class="btn sm" data-sh="100">+0,1</button><button class="btn sm" data-sh="500">+0,5</button></div></div>
       <div class="card keys-card">${KEYS}</div>`;
@@ -1200,10 +1675,12 @@ function docsPage() {
   "instrumental": false,
   "plainLyrics": "…",
   "syncedLyrics": "[00:12.30] …",
+  "wordSyncedLyrics": "[00:12.30] &lt;00:12.30&gt;Первое &lt;00:12.85&gt;слово …",
   "sections": [{ "from": 0, "type": "verse" }, { "from": 8, "type": "chorus" }],
   "isrc": "USRC17607839",
   "cover": "https://…"
 }</pre>
+    <p class="muted small"><code>wordSyncedLyrics</code> — расширение Nyao: время каждого слова (Enhanced LRC) для караоке, если слова размечены, иначе <code>null</code>. Строки — те же, что в <code>syncedLyrics</code>; строка без угловых меток — слова в ней не размечены. Сам <code>syncedLyrics</code> остаётся обычным LRC.</p>
     <p class="muted small"><code>sections</code> — части песни: с какой строки текста (без пустых строк, с нуля) начинается куплет, припев и т. д. Типы: ${SECTIONS.map(([k]) => `<code>${k}</code>`).join(', ')}.</p>
     <h2>TTML</h2>
     <pre class="code">GET ${base}/api/get/42/ttml</pre>

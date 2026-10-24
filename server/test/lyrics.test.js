@@ -5,7 +5,7 @@ import { newDb } from 'pg-mem';
 import { migrate } from '../src/db.js';
 import { createApp, sha256 } from '../src/app.js';
 import { Hub } from '../src/hub.js';
-import { checkLyrics, norm, parseLrc } from '../src/lyrics.js';
+import { checkLyrics, checkWords, norm, parseLrc, parseWords, toTtml } from '../src/lyrics.js';
 
 async function setup(opts = {}) {
   const mem = newDb();
@@ -47,7 +47,7 @@ test('тексты: автопроверка и разбор LRC', () => {
   assert.throws(() => checkLyrics({ synced: 'без времени' }), /Строка 1/);
   assert.throws(() => checkLyrics({ plain: 'смотри https://spam.example' }), /Ссылки/);
   assert.throws(() => checkLyrics({ plain: '   ' }), /Пустой/);
-  assert.deepEqual(checkLyrics({ instrumental: true, plain: 'что угодно' }), { plain: '', synced: '', instrumental: true, structure: [] });
+  assert.deepEqual(checkLyrics({ instrumental: true, plain: 'что угодно' }), { plain: '', synced: '', instrumental: true, structure: [], words: '' });
   // текст с куплетами + синхронизация: строки должны совпасть, разбивка на куплеты сохраняется
   const both = checkLyrics({ plain: 'Первая строка\nВторая строка\n\nТретья', synced: LRC });
   assert.equal(both.plain, 'Первая строка\nВторая строка\n\nТретья');
@@ -415,6 +415,65 @@ test('жалобы правообладателя: автоскрытие с л�
     const rep = (await t.call('GET', '/api/admin/reports', { token: owner.token })).json.items.find((r) => r.track.id === ids[0]);
     await t.call('POST', `/api/admin/reports/${rep.id}`, { token: owner.token, body: { action: 'restore' } });
     assert.equal((await t.call('GET', `/api/get/${ids[0]}`)).status, 200);
+  } finally {
+    t.close();
+  }
+});
+
+test('пословное время: разбор, проверка, TTML', () => {
+  const synced = '[00:10.00] Первая строка\n[00:14.50] Вторая\n[00:18.00]\n[00:20.20] Третья тут';
+  const words = '[00:10.00] <00:10.00>Первая <00:10.60>строка <00:11.90>\n[00:14.50] Вторая\n[00:18.00]\n[00:20.20] <00:20.20>Третья <00:20.9>тут';
+  const p = parseWords(words);
+  assert.equal(p.length, 4);
+  assert.deepEqual(p[0].words, [{ at: 10000, text: 'Первая' }, { at: 10600, text: 'строка' }]);
+  assert.equal(p[0].end, 11900);
+  assert.equal(p[1].words, null, 'строка без угловых меток — слова не размечены');
+  // чистый вид: время слов до сотых, неразмеченные строки как в synced
+  assert.equal(checkWords(words, synced, 60), '[00:10.00] <00:10.00>Первая <00:10.60>строка <00:11.90>\n[00:14.50] Вторая\n[00:18.00]\n[00:20.20] <00:20.20>Третья <00:20.90>тут');
+  assert.equal(checkWords('[00:10.00] Первая строка\n[00:14.50] Вторая\n[00:18.00]\n[00:20.20] Третья тут', synced), '', 'ни одного размеченного слова — пусто');
+  assert.equal(checkWords('', synced), '');
+  assert.throws(() => checkWords(words, ''), /без синхронизации строк/);
+  assert.throws(() => checkWords('[00:10.00] <00:10.00>Первая', synced), /строк/);
+  assert.throws(() => checkWords(words.replace('Вторая\n', 'Другая\n'), synced), /строка 2/);
+  assert.throws(() => checkWords(words.replace('[00:14.50] Вторая', '[00:14.40] Вторая'), synced), /время строки/);
+  assert.throws(() => checkWords(words.replace('<00:10.60>строка', '<00:09.00>строка'), synced), /раньше предыдущего|вне своей строки/);
+  assert.throws(() => checkWords(words.replace('<00:20.9>тут', '<00:59.00>тут'), synced, 30), /вне своей строки/);
+  assert.throws(() => checkWords('[00:10.00] Первая <00:10.60>строка\n[00:14.50] Вторая\n[00:18.00]\n[00:20.20] Третья тут', synced), /нет времени/);
+  // в автопроверке: инструментал — без слов, слова без синхронизации — ошибка
+  assert.equal(checkLyrics({ synced, words, duration: 60 }).words.split('\n').length, 4);
+  assert.throws(() => checkLyrics({ plain: 'а', words: '[00:01.00] <00:01.00>а' }), /без синхронизации/);
+  // TTML: размеченные строки — по словам, остальные — целиком
+  const xml = toTtml({ title: 't', artist: 'a', duration: 60, plain: 'Первая строка\nВторая\nТретья тут', synced, words: checkWords(words, synced, 60) });
+  assert.match(xml, /itunes:timing="Word"/);
+  assert.match(xml, /<p begin="00:00:10.000" end="00:00:14.500"><span begin="00:00:10.000" end="00:00:10.600">Первая<\/span> <span begin="00:00:10.600" end="00:00:11.900">строка<\/span><\/p>/);
+  assert.match(xml, /<p begin="00:00:14.500" end="00:00:18.000">Вторая<\/p>/);
+  assert.match(xml, /<span begin="00:00:20.900" end="00:01:00.000">тут<\/span>/);
+  assert.match(toTtml({ title: 't', artist: 'a', plain: 'Первая строка\nВторая\nТретья тут', synced }), /itunes:timing="Line"/);
+});
+
+test('пословное время: отправка, проверка, API', async () => {
+  const t = await setup();
+  try {
+    const owner = await t.user('Takko');
+    const author = await t.user('Автор');
+    const synced = '[00:01.00] Раз два\n[00:05.00] Три';
+    const words = '[00:01.00] <00:01.00>Раз <00:01.80>два\n[00:05.00] Три';
+    const bad = await t.call('POST', '/api/submit', { token: author.token, body: { track: { title: 'Слова', artist: 'Группа', duration: 30 }, synced, words: words.replace('<00:01.80>', '<00:00.10>') } });
+    assert.equal(bad.status, 422);
+    const sub = await t.call('POST', '/api/submit', { token: author.token, body: { track: { title: 'Слова', artist: 'Группа', duration: 30 }, synced, words } });
+    assert.equal(sub.status, 200);
+    const item = await t.call('GET', `/api/review/${sub.json.id}`, { token: owner.token });
+    assert.equal(item.json.words, words);
+    assert.equal((await t.call('GET', '/api/review', { token: owner.token })).json.items[0].words, true);
+    await t.call('POST', `/api/review/${sub.json.id}`, { token: owner.token, body: { action: 'accept' } });
+    const got = await t.call('GET', `/api/get/${sub.json.trackId}`);
+    assert.equal(got.json.wordSyncedLyrics, words);
+    assert.equal(got.json.syncedLyrics, synced, 'обычный LRC без угловых меток — клиенты LRCLIB не ломаются');
+    assert.equal((await t.call('GET', `/api/track/${sub.json.trackId}`)).json.published.words, words);
+    assert.match((await t.call('GET', `/api/get/${sub.json.trackId}/ttml`)).text, /<span begin="00:00:01.000" end="00:00:01.800">Раз<\/span>/);
+    // правка только пословного времени — тоже правка; тот же текст — 409
+    assert.equal((await t.call('POST', '/api/submit', { token: author.token, body: { trackId: sub.json.trackId, synced, words } })).status, 409);
+    assert.equal((await t.call('POST', '/api/submit', { token: author.token, body: { trackId: sub.json.trackId, synced, words: words.replace('01.80', '01.90') } })).status, 200);
   } finally {
     t.close();
   }
