@@ -39,6 +39,13 @@ object Repo {
         private set
     lateinit var radio: Radio
         private set
+    /** Списки медиатеки на диске — чтобы «Мне нравится» и плейлисты открывались без интернета */
+    lateinit var library: LibraryCache
+        private set
+    /** Медиатека показана (хотя бы частью) из кэша на диске: не было сети или сервис не ответил. С появлением сети перечитывается */
+    val libraryCached = MutableStateFlow(false)
+    /** Порядок сервисов в likedTracks()/playlists() — по нему же сливаем свежие ответы с кэшем */
+    private val LIBRARY_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC, SOURCE_VK, SOURCE_SP)
     private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     enum class Mode { LIST, WAVE, RADIO }
@@ -94,6 +101,8 @@ object Repo {
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         prefs = Prefs(context.applicationContext)
+        Net.init(context)
+        library = LibraryCache(context.applicationContext.filesDir)
         org.nyao.music.spotify.Spotify.init(context.applicationContext)
         ya = YandexApi(prefs)
         yt = YtMusicApi(prefs, context.applicationContext.filesDir)
@@ -326,41 +335,81 @@ object Repo {
     }
 
     suspend fun likedTracks(): List<Track> = coroutineScope {
-        val a = async { if (ya.loggedIn) runCatching { ya.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val b = async { if (yt.loggedIn) runCatching { yt.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val c = async { if (sc.loggedIn) runCatching { sc.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val d = async { if (vk.loggedIn) runCatching { vk.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val e = async { if (sp.loggedIn && !sp.regionBlocked) (kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.likedTracks() }.getOrDefault(emptyList()) } ?: emptyList()) else emptyList() }
-        val all = alternateAll(a.await(), b.await(), c.await(), d.await(), e.await())
+        val cached = library.liked()
+        if (!Net.isOnline) {
+            // без интернета — то, что сохранили в прошлый раз (экран сам оставит из этого только скачанное)
+            libraryCached.value = true
+            return@coroutineScope rememberLiked(cached ?: emptyList())
+        }
+        // null — сервис не ответил: на его место встанет кэш, а не пустота
+        val a = async { if (ya.loggedIn) runCatching { ya.likedTracks() }.getOrNull() else emptyList() }
+        val b = async { if (yt.loggedIn) runCatching { yt.likedTracks() }.getOrNull() else emptyList() }
+        val c = async { if (sc.loggedIn) runCatching { sc.likedTracks() }.getOrNull() else emptyList() }
+        val d = async { if (vk.loggedIn) runCatching { vk.likedTracks() }.getOrNull() else emptyList() }
+        val e = async { if (sp.loggedIn && !sp.regionBlocked) kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.likedTracks() }.getOrNull() } else emptyList() }
+        val fresh = listOf(a.await(), b.await(), c.await(), d.await(), e.await())
+        val filled = fillFromCache(fresh, cached, LIBRARY_SOURCES) { it.source }
+        val all = alternateAll(filled[0], filled[1], filled[2], filled[3], filled[4])
+        libraryCached.value = libraryCached.value || fresh.any { it == null }
+        if (fresh.any { it != null }) library.saveLiked(all)
+        rememberLiked(all)
+    }
+
+    private fun rememberLiked(all: List<Track>): List<Track> {
         _liked.value = _liked.value + all.map { it.id }
-        remember(all)
+        return remember(all)
     }
 
     suspend fun playlists(): List<Playlist> = coroutineScope {
-        val a = async { if (ya.loggedIn) runCatching { ya.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        val b = async { if (yt.loggedIn) runCatching { yt.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        val c = async { if (sc.loggedIn) runCatching { sc.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        val d = async { if (vk.loggedIn) runCatching { vk.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        val e = async { if (sp.loggedIn && !sp.regionBlocked) (kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.playlists() }.getOrDefault(emptyList()) } ?: emptyList()) else emptyList() }
-        listOfNotNull(org.nyao.music.playback.Offline.asPlaylist()) + a.await() + b.await() + c.await() + d.await() + e.await()
+        val cached = library.playlists()
+        if (!Net.isOnline) {
+            libraryCached.value = true
+            return@coroutineScope cached ?: emptyList()
+        }
+        val a = async { if (ya.loggedIn) runCatching { ya.playlists() }.getOrNull() else emptyList() }
+        val b = async { if (yt.loggedIn) runCatching { yt.playlists() }.getOrNull() else emptyList() }
+        val c = async { if (sc.loggedIn) runCatching { sc.playlists() }.getOrNull() else emptyList() }
+        val d = async { if (vk.loggedIn) runCatching { vk.playlists() }.getOrNull() else emptyList() }
+        val e = async { if (sp.loggedIn && !sp.regionBlocked) kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.playlists() }.getOrNull() } else emptyList() }
+        val fresh = listOf(a.await(), b.await(), c.await(), d.await(), e.await())
+        val all = fillFromCache(fresh, cached, LIBRARY_SOURCES) { it.source }.flatten()
+        libraryCached.value = libraryCached.value || fresh.any { it == null }
+        if (fresh.any { it != null }) library.savePlaylists(all)
+        all
     }
 
-    suspend fun playlistTracks(id: String): List<Track> = remember(
+    suspend fun playlistTracks(id: String): List<Track> {
+        // «Мне нравится», «Скачанное» и свои миксы собираются из своих хранилищ — их не кэшируем
         when {
-            // «Мне нравится» одного сервиса и свои миксы
-            id == org.nyao.music.playback.Offline.PLAYLIST_ID -> org.nyao.music.playback.Offline.state.value.tracks
-            id == "liked" -> likedTracks()
-            id.startsWith("liked:") -> likedTracks().filter { it.source == id.removePrefix("liked:") }
-            id.startsWith("mix:") -> mixStore.get(id)?.tracks ?: emptyList()
-            id.startsWith("yaalbum:") -> ya.albumTracks(id)
-            id.startsWith("artist:") -> artistTracks(id)
-            id.startsWith("ya:") -> ya.playlistTracks(id)
-            id.startsWith("sc:") -> sc.playlistTracks(id)
-            id.startsWith("vk:") -> vk.playlistTracks(id)
-            id.startsWith("sp:") -> sp.playlistTracks(id)
-            else -> yt.playlistTracks(id)
-        },
-    )
+            id == org.nyao.music.playback.Offline.PLAYLIST_ID -> return remember(org.nyao.music.playback.Offline.state.value.tracks)
+            id == "liked" -> return likedTracks()
+            id.startsWith("liked:") -> return likedTracks().filter { it.source == id.removePrefix("liked:") }
+            id.startsWith("mix:") -> return remember(mixStore.get(id)?.tracks ?: emptyList())
+        }
+        if (!Net.isOnline) library.playlistTracks(id)?.let { libraryCached.value = true; return remember(it) }
+        val list = try {
+            fetchPlaylistTracks(id)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // сервис не ответил — отдаём список из кэша, если плейлист уже открывали
+            val cached = library.playlistTracks(id) ?: throw e
+            libraryCached.value = true
+            return remember(cached)
+        }
+        library.savePlaylistTracks(id, list)
+        return remember(list)
+    }
+
+    private suspend fun fetchPlaylistTracks(id: String): List<Track> = when {
+        id.startsWith("yaalbum:") -> ya.albumTracks(id)
+        id.startsWith("artist:") -> artistTracks(id)
+        id.startsWith("ya:") -> ya.playlistTracks(id)
+        id.startsWith("sc:") -> sc.playlistTracks(id)
+        id.startsWith("vk:") -> vk.playlistTracks(id)
+        id.startsWith("sp:") -> sp.playlistTracks(id)
+        else -> yt.playlistTracks(id)
+    }
 
     suspend fun search(q: String): SearchResult = coroutineScope {
         // Поиск YouTube Music работает и без входа

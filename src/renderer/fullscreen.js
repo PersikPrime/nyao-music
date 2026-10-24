@@ -240,7 +240,7 @@ export class FullScreen {
     const { player } = this.d;
     const q = player.queue || [];
     const from = Math.max(0, player.index - 3);
-    const items = q.slice(from, from + 150);
+    const items = q.slice(from, from + 150).filter(Boolean);
     const list = this.$('.fs-q-list');
     const key = `${player.index}|${q.length}|${q[player.index] && q[player.index].id}`;
     if (this.queueKey === key && !scroll && !force) return;
@@ -312,47 +312,86 @@ export class FullScreen {
     }, 3000);
   }
 
+  /** Промис с пределом ожидания: зависший запрос цвета или текста не держит экран в «Ищу…» */
+  withTimeout(promise, ms, fallback = null) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(fallback), ms);
+      Promise.resolve(promise).then((v) => { clearTimeout(timer); resolve(v); }, () => { clearTimeout(timer); resolve(fallback); });
+    });
+  }
+
+  /** Шаг обновления, который не должен ронять остальные: ошибка в очереди или тексте не трогает название */
+  safe(step) {
+    try {
+      step();
+    } catch (e) {
+      console.warn('[fs]', e);
+    }
+  }
+
   /** Смена трека, паузы, лайка */
   update() {
-    if (!this.open) return;
+    if (!this.open || !this.el) return;
     const { player } = this.d;
     const t = player.current;
     if (!t) return this.close();
     const $ = this.$;
-    $('.fs-play').innerHTML = player.playing ? this.d.icons.pause : this.d.icons.play;
-    $('.fs-play').setAttribute('aria-label', player.playing ? 'Пауза' : 'Играть');
-    const liked = player.liked.has(t.id);
-    $('.fs-like').innerHTML = liked ? this.d.icons.heartOn : this.d.icons.heart;
-    $('.fs-like').classList.toggle('on', liked);
-    if (!player.playing) this.el.classList.remove('idle');
-    this.renderQueue();
-    if (this.trackId === t.id) return this.tick();
+    this.safe(() => {
+      $('.fs-play').innerHTML = player.playing ? this.d.icons.pause : this.d.icons.play;
+      $('.fs-play').setAttribute('aria-label', player.playing ? 'Пауза' : 'Играть');
+      const liked = player.liked.has(t.id);
+      $('.fs-like').innerHTML = liked ? this.d.icons.heartOn : this.d.icons.heart;
+      $('.fs-like').classList.toggle('on', liked);
+      if (!player.playing) this.el.classList.remove('idle');
+    });
+    if (this.trackId === t.id) {
+      this.safe(() => this.renderQueue());
+      return this.tick();
+    }
+    // Сначала название и обложка — это то, что человек видит; очередь, цвет фона и текст идут отдельными
+    // шагами, чтобы сбой в любом из них не оставил на экране прошлый трек
     this.trackId = t.id;
     this.lastLine = -2;
-    const img = $('.fs-art img');
-    img.src = t.cover || '';
-    img.style.visibility = t.cover ? 'visible' : 'hidden';
-    $('.fs-title').textContent = t.title;
-    $('.fs-artist').textContent = t.artist + (t.album ? ` · ${t.album}` : '');
-    this.el.style.setProperty('--fs-bg', backgroundFrom(null));
+    this.safe(() => {
+      const img = $('.fs-art img');
+      img.src = t.cover || '';
+      img.style.visibility = t.cover ? 'visible' : 'hidden';
+      $('.fs-title').textContent = t.title || '';
+      $('.fs-artist').textContent = (t.artist || '') + (t.album ? ` · ${t.album}` : '');
+      this.el.style.setProperty('--fs-bg', backgroundFrom(null));
+    });
+    this.safe(() => this.renderQueue());
     if (t.cover) {
-      this.d.api.coverColor(t.cover).then((rgb) => {
-        if (this.trackId === t.id) this.el.style.setProperty('--fs-bg', backgroundFrom(rgb));
-      }).catch(() => {});
+      let colorPromise;
+      try {
+        colorPromise = this.d.api.coverColor(t.cover);
+      } catch (e) {
+        colorPromise = Promise.resolve(null);
+      }
+      this.withTimeout(colorPromise, 8000).then((rgb) => {
+        if (rgb && this.trackId === t.id && this.el) this.el.style.setProperty('--fs-bg', backgroundFrom(rgb));
+      });
     }
     this.lyrics = undefined;
-    this.renderLyrics();
-    this.d.ensureLyrics().then((data) => {
+    this.safe(() => this.renderLyrics());
+    let lyricsPromise;
+    try {
+      lyricsPromise = this.d.ensureLyrics();
+    } catch (e) {
+      lyricsPromise = Promise.resolve(null);
+    }
+    this.withTimeout(lyricsPromise, 15000).then((data) => {
       if (this.trackId !== t.id) return;
       this.lyrics = data || null;
-      this.renderLyrics();
+      this.safe(() => this.renderLyrics());
     });
-    this.tick();
+    this.safe(() => this.tick());
   }
 
   renderLyrics() {
     if (!this.el) return;
     const box = this.$('.fs-lyrics');
+    if (!box) return;
     const d = this.lyrics;
     const has = this.showLyrics && d && d.lines && d.lines.length;
     const avail = !!(d && d.lines && d.lines.length);
@@ -403,14 +442,17 @@ export class FullScreen {
   /** Время: прогресс и текущая строка */
   tick(force) {
     if (!this.open || !this.el) return;
+    // страховка: если на экране не тот трек, что играет (событие смены потерялось или упало), обновляемся сами
+    const cur = this.d.player.current;
+    if (cur && cur.id !== this.trackId) return this.update();
     const a = this.d.player.audio;
     const dur = this.duration();
-    const cur = a.currentTime || 0;
+    const pos = a.currentTime || 0;
     // пока тянут ползунок, он стоит под курсором, а не там, где играет
-    if (this.seeking == null) this.paintProgress(dur ? Math.min(1, cur / dur) : 0, dur);
+    if (this.seeking == null) this.paintProgress(dur ? Math.min(1, pos / dur) : 0, dur);
     const d = this.lyrics;
     if (!d || !d.synced || !this.showLyrics) return;
-    const time = cur + 0.25;
+    const time = pos + 0.25;
     let idx = -1;
     for (let i = 0; i < d.lines.length; i++) if (d.lines[i].time <= time) idx = i;
     if (idx === this.lastLine && !force) return;

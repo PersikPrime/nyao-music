@@ -135,6 +135,23 @@ class AppModel(private val scope: CoroutineScope) {
         }
     }
 
+    init {
+        // интернет вернулся, а медиатека показана из кэша — перечитываем списки, экран сам снимет «без интернета»
+        scope.launch {
+            org.nyao.music.data.Net.online.collect { on ->
+                if (on && Repo.libraryCached.value) refreshLibrary()
+            }
+        }
+    }
+
+    /** Заново загрузить медиатеку: после появления сети — то, что уже открыто; по кнопке «Повторить» (all) — всё */
+    fun refreshLibrary(all: Boolean = false) {
+        Repo.libraryCached.value = false
+        playlistTracks = emptyMap()
+        if (all || liked != null) loadLiked(force = true)
+        if (all || playlists != null) loadPlaylists(force = true)
+    }
+
     fun loadLiked(force: Boolean = false) {
         if (liked != null && !force) return
         scope.launch {
