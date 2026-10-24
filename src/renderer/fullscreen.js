@@ -1,6 +1,12 @@
 // Полноэкранный режим (макет «Полный экран 2.0»): фон — затемнённый цвет обложки, без подложек.
 // Слева обложка, название и прогресс; справа текст песни по высоте левого блока. Колёсико разворачивает текст
 // на весь экран, через 4 секунды без прокрутки он сжимается обратно. Кнопки прячутся, только если это включено.
+// Фон (макет 8 «Глубокий разворот»): зеркальный пол с отражением обложки, свет за текущей строкой и на полу под текстом.
+// Обложка в покое чуть повёрнута (левая грань ближе); открывается полуоборотом в полёте из плашки плеера,
+// из-за неё веером расходятся обложки соседних треков; при смене трека обложки проезжают как Cover Flow.
+
+/** Поворот обложки в покое, градусы */
+const TILT = 12;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const fmt = (sec) => {
@@ -24,6 +30,16 @@ export function backgroundFrom(rgb) {
     k *= 0.92;
   }
   return `rgb(${Math.round(r0 * k)}, ${Math.round(g0 * k)}, ${Math.round(b0 * k)})`;
+}
+
+/** Цвет света на фоне (за строкой и на полу): цвет обложки, поднятый до заметной яркости */
+export function glowFrom(rgb) {
+  if (!rgb) return 'rgb(182, 156, 255)';
+  const [r, g, b] = rgb;
+  const max = Math.max(r, g, b, 1);
+  const k = max < 190 ? 190 / max : 1;
+  const c = (v) => Math.min(255, Math.round(v * k));
+  return `rgb(${c(r)}, ${c(g)}, ${c(b)})`;
 }
 
 export class FullScreen {
@@ -51,13 +67,19 @@ export class FullScreen {
     el.className = 'fs';
     el.hidden = true;
     el.innerHTML = `
+      <div class="fs-floor" aria-hidden="true"><div class="fs-sweep"></div><div class="fs-pool"></div></div>
       <div class="fs-top">
         <button class="fs-round fs-qbtn" data-fs="queue" aria-label="Очередь" title="Очередь" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h10M17 15v6l4-3z"/></svg></button>
         <button class="fs-round" data-fs="exit" aria-label="Выйти из полного экрана" title="Выйти из полного экрана (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
       </div>
       <div class="fs-stage">
         <div class="fs-left">
-          <div class="fs-art"><img alt=""></div>
+          <div class="fs-art-wrap">
+            <div class="fs-nb fs-nb-prev" aria-hidden="true"><img alt=""></div>
+            <div class="fs-nb fs-nb-next" aria-hidden="true"><img alt=""></div>
+            <div class="fs-art"><div class="fs-face"><img alt=""></div><div class="fs-face fs-back" aria-hidden="true"><img alt=""></div></div>
+            <div class="fs-refl" aria-hidden="true"><img alt=""></div>
+          </div>
           <div class="fs-head">
             <button class="fs-round fs-lyr" data-fs="lyrics" aria-label="Текст" title="Текст"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9"/></svg></button>
             <div class="fs-meta"><h1 class="fs-title"></h1><div class="fs-artist"></div></div>
@@ -181,6 +203,13 @@ export class FullScreen {
   /** Высота текста = высота левого блока; отступы, чтобы текущая строка вставала посередине */
   layout() {
     if (!this.open || !this.el) return;
+    // линия «пола» — по нижнему краю обложки
+    const wrap = this.$('.fs-art-wrap');
+    if (wrap && wrap.getBoundingClientRect && this.el.getBoundingClientRect) {
+      const r = wrap.getBoundingClientRect();
+      const top = this.el.getBoundingClientRect().top || 0;
+      if (r.height) this.el.style.setProperty('--fs-horizon', `${Math.round(r.bottom - top)}px`);
+    }
     const left = this.$('.fs-left');
     if (left) this.el.style.setProperty('--fs-lh', `${left.offsetHeight}px`);
     // без текста обложка встаёт по центру: сдвиг от её места в сетке до середины экрана
@@ -283,6 +312,7 @@ export class FullScreen {
     this.el.classList.add('noanim');
     setTimeout(() => this.el && this.el.classList.remove('noanim'), 400);
     this.trackId = null;
+    this.lastIndex = null;
     this.update();
     this.wake();
     requestAnimationFrame(() => this.layout());
@@ -350,16 +380,25 @@ export class FullScreen {
   }
 
   /** Сдвиг и масштаб, чтобы обложка полного экрана встала точно на место обложки в плашке */
-  flight(from, to) {
-    const s = from.width / to.width;
-    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
-    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+  flight(from, to, k = 1) {
+    const s = 1 + (from.width / to.width - 1) * k;
+    const dx = (from.left + from.width / 2 - (to.left + to.width / 2)) * k;
+    const dy = (from.top + from.height / 2 - (to.top + to.height / 2)) * k;
     return `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${s.toFixed(4)})`;
+  }
+
+  /** Место обложки без поворота в покое — от него считается перелёт */
+  artRect(art) {
+    const prev = art.style.transform;
+    art.style.transform = 'none';
+    const r = art.getBoundingClientRect();
+    art.style.transform = prev;
+    return r;
   }
 
   /** Всё, кроме обложки: кнопки, текст, прогресс — они просто проявляются */
   parts() {
-    return Array.from(this.el.querySelectorAll('.fs-top, .fs-right, .fs-queue, .fs-left > :not(.fs-art)'));
+    return Array.from(this.el.querySelectorAll('.fs-top, .fs-right, .fs-queue, .fs-floor, .fs-left > :not(.fs-art-wrap)'));
   }
 
   animateOpen() {
@@ -370,7 +409,7 @@ export class FullScreen {
       const src = this.sourceEl();
       if (src) src.style.visibility = '';
     };
-    const to = art && art.getBoundingClientRect ? art.getBoundingClientRect() : null;
+    const to = art && art.getBoundingClientRect ? this.artRect(art) : null;
     if (!this.canAnimate() || !to || !to.width || !this.open) return done();
     this.el.getAnimations({ subtree: true }).forEach((a) => a.cancel());
     const src = this.sourceEl();
@@ -378,8 +417,30 @@ export class FullScreen {
     const bg = getComputedStyle(this.el).backgroundColor;
     const ease = 'cubic-bezier(.2, .8, .2, 1)';
     this.el.animate([{ backgroundColor: 'transparent' }, { backgroundColor: bg }], { duration: 420, easing: 'ease-out' });
-    this.parts().forEach((p) => p.animate([{ opacity: 0 }, { opacity: 0, offset: 0.35 }, { opacity: 1 }], { duration: 520, easing: 'ease-out' }));
-    const fly = art.animate([{ transform: this.flight(from, to), borderRadius: '8px' }, { transform: 'none', borderRadius: '10px' }], { duration: 520, easing: ease });
+    const D = 980;
+    this.parts().forEach((p) => p.animate([{ opacity: 0 }, { opacity: 0, offset: 0.45 }, { opacity: 1 }], { duration: D, easing: 'ease-out' }));
+    // перелёт из плашки с полуоборотом: в плашке виден «задник» обложки, лицом она поворачивается к концу
+    // полёта и с пружинкой встаёт под углом покоя
+    const fly = art.animate([
+      { transform: `${this.flight(from, to)} rotateY(180deg)` },
+      { transform: `${this.flight(from, to, 0.28)} rotateY(72deg)`, offset: 0.5 },
+      { transform: `translate(0px, 0px) scale(1.03) rotateY(${TILT - 9}deg)`, offset: 0.78 },
+      { transform: `translate(0px, 0px) scale(1) rotateY(${TILT}deg)` }
+    ], { duration: D, easing: ease });
+    // в момент приземления из-за обложки веером расходятся соседние треки (Cover Flow) и гаснут
+    const fan = (sel, dir) => {
+      const nb = this.$(sel);
+      if (!nb || !nb.animate || !nb.dataset.on) return;
+      nb.animate([
+        { opacity: 0, transform: `translateZ(-160px) rotateY(${dir * 40}deg) scale(.86)` },
+        { opacity: 0.85, offset: 0.3 },
+        { opacity: 0, transform: `translateX(${dir * -72}%) translateZ(-120px) rotateY(${dir * 72}deg) scale(.86)` }
+      ], { duration: 820, delay: D * 0.42, easing: ease, fill: 'backwards' });
+    };
+    fan('.fs-nb-prev', 1);
+    fan('.fs-nb-next', -1);
+    const refl = this.$('.fs-refl');
+    if (refl && refl.animate) refl.animate([{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 0.15 }], { duration: D, easing: 'ease-out' });
     fly.finished.then(done, done);
   }
 
@@ -392,14 +453,17 @@ export class FullScreen {
       if (src) src.style.visibility = '';
       if (!this.open) this.el.hidden = true;
     };
-    const from = art && art.getBoundingClientRect ? art.getBoundingClientRect() : null;
+    const from = art && art.getBoundingClientRect ? this.artRect(art) : null;
     if (!to || !from || !from.width) return finish();
     const src = this.sourceEl();
     if (src) src.style.visibility = 'hidden';
     const bg = getComputedStyle(this.el).backgroundColor;
     this.el.animate([{ backgroundColor: bg }, { backgroundColor: 'transparent' }], { duration: 380, easing: 'ease-in', fill: 'forwards' });
     this.parts().forEach((p) => p.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease-in', fill: 'forwards' }));
-    const fly = art.animate([{ transform: 'none', borderRadius: '10px' }, { transform: this.flight(to, from), borderRadius: '6px' }], { duration: 440, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+    // обратно — без кувырков: поворот покоя распрямляется по пути в плашку
+    const fly = art.animate([{ transform: `translate(0px, 0px) scale(1) rotateY(${TILT}deg)` }, { transform: `${this.flight(to, from)} rotateY(0deg)` }], { duration: 440, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+    const refl = this.$('.fs-refl');
+    if (refl && refl.animate) refl.animate([{ opacity: 0.15 }, { opacity: 0 }], { duration: 160, easing: 'ease-in', fill: 'forwards' });
     const end = () => {
       finish();
       // снимаем «замороженные» конечные кадры уже спрятанного слоя, иначе при следующем открытии всё останется прозрачным
@@ -436,6 +500,43 @@ export class FullScreen {
     }
   }
 
+  /** Обложки предыдущего и следующего трека за текущей (для веера и Cover Flow) */
+  setNeighbors() {
+    const { player } = this.d;
+    const q = player.queue || [];
+    const cur = player.current;
+    const set = (sel, t) => {
+      const nb = this.$(sel);
+      const img = this.$(`${sel} img`);
+      if (!nb || !img) return;
+      const src = (t && t.cover) || (cur && cur.cover) || '';
+      img.src = src;
+      nb.dataset.on = src ? '1' : '';
+    };
+    set('.fs-nb-prev', q[player.index - 1]);
+    set('.fs-nb-next', q[player.index + 1]);
+  }
+
+  /** Смена трека при открытом экране: новая обложка въезжает сбоку с разворота, прошлая уезжает в другую сторону */
+  coverFlow(dir) {
+    const art = this.$('.fs-art');
+    if (!art || typeof art.animate !== 'function' || this.closing) return;
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const ease = 'cubic-bezier(.2, .8, .2, 1)';
+    art.animate([
+      { transform: `translateX(${dir * 34}%) scale(.88) rotateY(${TILT - dir * 55}deg)`, opacity: 0.35 },
+      { transform: `translateX(0%) scale(1) rotateY(${TILT}deg)`, opacity: 1 }
+    ], { duration: 560, easing: ease });
+    // прошлый трек теперь сосед с той стороны, куда уехал: показываем, как он уходит
+    const nb = this.$(dir > 0 ? '.fs-nb-prev' : '.fs-nb-next');
+    if (nb && nb.animate && nb.dataset.on) {
+      nb.animate([
+        { opacity: 0.9, transform: `translateX(0%) scale(1) rotateY(${TILT}deg)` },
+        { opacity: 0, transform: `translateX(${dir * -64}%) scale(.86) rotateY(${dir * 70}deg)` }
+      ], { duration: 560, easing: ease });
+    }
+  }
+
   /** Смена трека, паузы, лайка */
   update() {
     if (!this.open || !this.el) return;
@@ -457,15 +558,26 @@ export class FullScreen {
     }
     // Сначала название и обложка — это то, что человек видит; очередь, цвет фона и текст идут отдельными
     // шагами, чтобы сбой в любом из них не оставил на экране прошлый трек
+    const prevId = this.trackId;
+    const dir = player.index < (this.lastIndex ?? player.index) ? -1 : 1;
+    this.lastIndex = player.index;
     this.trackId = t.id;
     this.lastLine = -2;
     this.safe(() => {
       const img = $('.fs-art img');
       img.src = t.cover || '';
       img.style.visibility = t.cover ? 'visible' : 'hidden';
+      // задник и отражение — та же обложка
+      this.el.querySelectorAll('.fs-back img, .fs-refl img').forEach((i) => {
+        i.src = t.cover || '';
+        i.style.visibility = t.cover ? 'visible' : 'hidden';
+      });
+      this.setNeighbors();
+      if (prevId) this.coverFlow(dir);
       $('.fs-title').textContent = t.title || '';
       $('.fs-artist').textContent = (t.artist || '') + (t.album ? ` · ${t.album}` : '');
       this.el.style.setProperty('--fs-bg', backgroundFrom(null));
+      this.el.style.setProperty('--fs-glow', glowFrom(null));
     });
     this.safe(() => this.renderQueue());
     if (t.cover) {
@@ -476,7 +588,10 @@ export class FullScreen {
         colorPromise = Promise.resolve(null);
       }
       this.withTimeout(colorPromise, 8000).then((rgb) => {
-        if (rgb && this.trackId === t.id && this.el) this.el.style.setProperty('--fs-bg', backgroundFrom(rgb));
+        if (rgb && this.trackId === t.id && this.el) {
+          this.el.style.setProperty('--fs-bg', backgroundFrom(rgb));
+          this.el.style.setProperty('--fs-glow', glowFrom(rgb));
+        }
       });
     }
     this.lyrics = undefined;
@@ -579,6 +694,13 @@ export class FullScreen {
     const L = this.kLine;
     if (!L) return;
     const t = (this.d.player.audio.currentTime || 0) + 0.04; // чуть раньше звука — глаз успевает за голосом
+    // свет за строкой вспыхивает в начале каждого слова и гаснет за треть секунды
+    const w0 = L.words.find((w) => t >= w.time && t < w.end);
+    const beat = w0 ? Math.max(0, 1 - (t - w0.time) / 0.35) : 0;
+    if (Math.abs((this.beat ?? -1) - beat) > 0.02) {
+      this.beat = beat;
+      this.el.style.setProperty('--fs-beat', beat.toFixed(2));
+    }
     const SOFT = 1.8; // на сколько букв растянут подъём одной буквы
     for (const w of L.words) {
       const n = w.chars.length;
