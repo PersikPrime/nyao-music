@@ -3058,6 +3058,7 @@ const fullscreen = new FullScreen({
   api,
   isMac: IS_MAC,
   ensureLyrics: () => ensureLyrics(),
+  source: () => $('#pb-cover'), // обложка в плашке плеера: из неё разворачивается полный экран и в неё сворачивается
   autoHide: () => !!(state.settings && state.settings.fsAutoHide),
   like: () => player.toggleLike(),
   icons: {

@@ -275,30 +275,137 @@ export class FullScreen {
   }
 
   show() {
-    if (!this.d.player.current) return;
+    if (!this.d.player.current || this.closing) return;
     this.build();
     this.open = true;
     this.el.hidden = false;
     // при открытии обложка сразу на своём месте — анимация только при переключении текста
     this.el.classList.add('noanim');
     setTimeout(() => this.el && this.el.classList.remove('noanim'), 400);
-    document.body.classList.add('fs-on');
-    this.d.api.win.fullscreen(true).catch(() => {});
     this.trackId = null;
     this.update();
     this.wake();
     requestAnimationFrame(() => this.layout());
+    if (!this.canAnimate()) {
+      this.d.api.win.fullscreen(true).catch(() => {});
+      document.body.classList.add('fs-on');
+      return;
+    }
+    // окно сначала становится полноэкранным, потом из плашки вылетает обложка — иначе она прыгнет,
+    // когда окно поменяет размер посреди полёта
+    this.el.style.opacity = '0';
+    Promise.resolve(this.d.api.win.fullscreen(true).catch(() => {}))
+      .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+      .then(() => {
+        if (!this.el) return;
+        this.el.style.opacity = '';
+        if (!this.open) return;
+        this.layout();
+        this.animateOpen();
+      });
   }
 
   close() {
     if (!this.open) return;
     this.open = false;
-    this.el.hidden = true;
     this.el.classList.remove('expand');
     this.scrolling = false;
     document.body.classList.remove('fs-on');
     clearTimeout(this.idleTimer);
-    this.d.api.win.fullscreen(false).catch(() => {});
+    const back = this.d.api.win.fullscreen(false).catch(() => {});
+    if (!this.canAnimate()) {
+      this.el.hidden = true;
+      return;
+    }
+    // окно сначала возвращается к обычному размеру, чтобы плашка плеера встала на своё место,
+    // и уже туда уезжает обложка
+    this.closing = true;
+    Promise.resolve(back)
+      .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+      .then(() => this.animateClose());
+  }
+
+  // ---------- Разворот из плашки плеера и обратно ----------
+
+  canAnimate() {
+    if (!this.el || typeof this.el.animate !== 'function') return false;
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+    return !!this.sourceRect();
+  }
+
+  /** Обложка в плашке плеера, откуда разворачивается полный экран */
+  sourceEl() {
+    try {
+      return (this.d.source && this.d.source()) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  sourceRect() {
+    const el = this.sourceEl();
+    if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? r : null;
+  }
+
+  /** Сдвиг и масштаб, чтобы обложка полного экрана встала точно на место обложки в плашке */
+  flight(from, to) {
+    const s = from.width / to.width;
+    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+    return `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${s.toFixed(4)})`;
+  }
+
+  /** Всё, кроме обложки: кнопки, текст, прогресс — они просто проявляются */
+  parts() {
+    return Array.from(this.el.querySelectorAll('.fs-top, .fs-right, .fs-queue, .fs-left > :not(.fs-art)'));
+  }
+
+  animateOpen() {
+    const art = this.$('.fs-art');
+    const from = this.sourceRect();
+    const done = () => {
+      document.body.classList.add('fs-on');
+      const src = this.sourceEl();
+      if (src) src.style.visibility = '';
+    };
+    const to = art && art.getBoundingClientRect ? art.getBoundingClientRect() : null;
+    if (!this.canAnimate() || !to || !to.width || !this.open) return done();
+    this.el.getAnimations({ subtree: true }).forEach((a) => a.cancel());
+    const src = this.sourceEl();
+    if (src) src.style.visibility = 'hidden'; // обложка «улетела» из плашки — там её не показываем
+    const bg = getComputedStyle(this.el).backgroundColor;
+    const ease = 'cubic-bezier(.2, .8, .2, 1)';
+    this.el.animate([{ backgroundColor: 'transparent' }, { backgroundColor: bg }], { duration: 420, easing: 'ease-out' });
+    this.parts().forEach((p) => p.animate([{ opacity: 0 }, { opacity: 0, offset: 0.35 }, { opacity: 1 }], { duration: 520, easing: 'ease-out' }));
+    const fly = art.animate([{ transform: this.flight(from, to), borderRadius: '8px' }, { transform: 'none', borderRadius: '10px' }], { duration: 520, easing: ease });
+    fly.finished.then(done, done);
+  }
+
+  animateClose() {
+    const art = this.$('.fs-art');
+    const to = this.sourceRect();
+    const finish = () => {
+      this.closing = false;
+      const src = this.sourceEl();
+      if (src) src.style.visibility = '';
+      if (!this.open) this.el.hidden = true;
+    };
+    const from = art && art.getBoundingClientRect ? art.getBoundingClientRect() : null;
+    if (!to || !from || !from.width) return finish();
+    const src = this.sourceEl();
+    if (src) src.style.visibility = 'hidden';
+    const bg = getComputedStyle(this.el).backgroundColor;
+    this.el.animate([{ backgroundColor: bg }, { backgroundColor: 'transparent' }], { duration: 380, easing: 'ease-in', fill: 'forwards' });
+    this.parts().forEach((p) => p.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease-in', fill: 'forwards' }));
+    const fly = art.animate([{ transform: 'none', borderRadius: '10px' }, { transform: this.flight(to, from), borderRadius: '6px' }], { duration: 440, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+    const end = () => {
+      finish();
+      // снимаем «замороженные» конечные кадры уже спрятанного слоя, иначе при следующем открытии всё останется прозрачным
+      this.el.getAnimations({ subtree: true }).forEach((a) => a.cancel());
+    };
+    fly.finished.then(end, end);
   }
 
   /** Мышь двинулась — показываем кнопки; прячем через 3 секунды, только если включено «Прятать кнопки» */
