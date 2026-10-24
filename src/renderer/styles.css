@@ -623,6 +623,19 @@ body.fs-on .toast { z-index: 1000; }
 .fs-lyrics p.next { color: rgba(255,255,255,.62); }
 .fs-lyrics p.on { color: #fff; transform: scale(1.15); }
 .fs-lyrics p:hover { color: rgba(255,255,255,.85); }
+/* караоке: строка с пословным временем — буквы заливаются и чуть поднимаются по ходу слова (--k: 0…1 от fullscreen.js) */
+.fs-lyrics p.kw .kw-w { display: inline-block; white-space: nowrap; }
+.fs-lyrics p.kw .kw-c { display: inline-block; }
+.fs-lyrics p.kw.on { color: rgba(255,255,255,.4); }
+.fs-lyrics p.kw.on .kw-c {
+  color: rgb(255 255 255 / calc(.4 + .6 * var(--k, 0)));
+  transform: translateY(calc(var(--k, 0) * -0.06em));
+  /* лёгкое свечение только пока буква поднимается: пик посередине перехода */
+  text-shadow: 0 0 calc(var(--k, 0) * (1 - var(--k, 0)) * 40px) rgb(255 255 255 / calc(var(--k, 0) * (1 - var(--k, 0)) * 2.4));
+  will-change: transform;
+}
+.fs-lyrics p.kw:not(.on) .kw-c { transform: none; text-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .fs-lyrics p.kw.on .kw-c { transform: none; text-shadow: none; } }
 .fs-lyrics.plain { padding: 8% 0 16%; gap: 12px; }
 .fs-lyrics.plain p { max-width: none; font-size: 22px; font-weight: 600; color: rgba(255,255,255,.88); cursor: default; }
 .fs-plain-label { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: rgba(255,255,255,.6); }

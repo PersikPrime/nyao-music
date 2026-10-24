@@ -524,9 +524,12 @@ export class FullScreen {
       return;
     }
     box.dataset.track = this.trackId;
+    // строки с пословным временем — каждое слово из букв: буквы заливаются по ходу слова (караоке)
+    const kw = (l) => l.words.map((w, j) => `<span class="kw-w" data-j="${j}">${Array.from(w.text).map((c) => `<span class="kw-c">${esc(c)}</span>`).join('')}</span>`).join(' ');
     box.innerHTML = (d.synced ? '' : '<div class="fs-plain-label">Текст без таймингов</div>') +
-      d.lines.map((l, i) => `<p data-i="${i}" ${d.synced ? `data-t="${l.time}"` : ''}>${esc(l.text) || '♪'}</p>`).join('');
+      d.lines.map((l, i) => `<p data-i="${i}" ${d.synced ? `data-t="${l.time}"` : ''}${d.synced && l.words ? ' class="kw"' : ''}>${d.synced && l.words ? kw(l) : esc(l.text) || '♪'}</p>`).join('');
     this.lastLine = -2;
+    this.kLine = null;
     requestAnimationFrame(() => {
       this.layout();
       this.tick(true);
@@ -546,6 +549,51 @@ export class FullScreen {
     this.$('.fs-left-time').textContent = '−' + fmt(Math.max(0, dur - cur));
   }
 
+  /**
+   * Караоке: у текущей строки с пословным временем каждый кадр пересчитываем заливку букв.
+   * Буква k слова из n букв начинает подниматься, когда пройдено k/n слова, и подъём перекрывает соседние
+   * буквы — заливка идёт волной: длинное «аааа» тянется долго, короткое «дом» проходит быстро.
+   */
+  karaoke(idx) {
+    const d = this.lyrics;
+    const line = d && d.lines[idx];
+    if (!line || !line.words) { this.kLine = null; return; }
+    if (!this.kLine || this.kLine.idx !== idx) {
+      const p = this.$(`.fs-lyrics p[data-i="${idx}"]`);
+      if (!p) return;
+      this.kLine = { idx, words: line.words.map((w, j) => ({ ...w, chars: [...p.querySelectorAll(`.kw-w[data-j="${j}"] .kw-c`)].map((el) => ({ el, k: -1 })) })) };
+    }
+    this.paintKaraoke();
+    if (!this.kRaf && this.d.player.playing) {
+      const frame = () => {
+        this.kRaf = 0;
+        if (!this.open || !this.kLine || !this.d.player.playing) return;
+        this.paintKaraoke();
+        this.kRaf = requestAnimationFrame(frame);
+      };
+      this.kRaf = requestAnimationFrame(frame);
+    }
+  }
+
+  paintKaraoke() {
+    const L = this.kLine;
+    if (!L) return;
+    const t = (this.d.player.audio.currentTime || 0) + 0.04; // чуть раньше звука — глаз успевает за голосом
+    const SOFT = 1.8; // на сколько букв растянут подъём одной буквы
+    for (const w of L.words) {
+      const n = w.chars.length;
+      const wp = Math.max(0, Math.min(1, (t - w.time) / Math.max(0.05, w.end - w.time)));
+      for (let k = 0; k < n; k++) {
+        let x = Math.max(0, Math.min(1, (wp * (n + SOFT) - k) / SOFT));
+        x = x * x * (3 - 2 * x); // плавно в начале и в конце
+        const c = w.chars[k];
+        if (Math.abs(c.k - x) < 0.004) continue;
+        c.k = x;
+        c.el.style.setProperty('--k', x.toFixed(3));
+      }
+    }
+  }
+
   /** Время: прогресс и текущая строка */
   tick(force) {
     if (!this.open || !this.el) return;
@@ -562,6 +610,7 @@ export class FullScreen {
     const time = pos + 0.25;
     let idx = -1;
     for (let i = 0; i < d.lines.length; i++) if (d.lines[i].time <= time) idx = i;
+    if (d.words) this.karaoke(idx);
     if (idx === this.lastLine && !force) return;
     this.lastLine = idx;
     const box = this.$('.fs-lyrics');

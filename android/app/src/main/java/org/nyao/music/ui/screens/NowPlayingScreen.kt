@@ -48,6 +48,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -509,6 +513,42 @@ private fun Tool(icon: ImageVector, label: String, on: Boolean, pal: CoverPalett
 }
 
 
+/**
+ * Караоке: текущая строка с пословным временем (Nyao LyricLabs). Каждая буква — свой слой: яркость и подъём
+ * считаются от времени плеера на каждом кадре прямо при отрисовке, без перестройки экрана. Буква k слова из n букв
+ * начинает подниматься, когда пройдено k/n слова, подъём перекрывает соседние буквы — заливка идёт волной.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun KaraokeLine(words: List<org.nyao.music.data.LyricWord>, pal: CoverPalette, modifier: Modifier) {
+    val clock = remember { mutableFloatStateOf(PlayerConnection.positionMs() / 1000f) }
+    LaunchedEffect(words) {
+        while (true) {
+            withFrameNanos { }
+            clock.floatValue = PlayerConnection.positionMs() / 1000f + 0.04f // чуть раньше звука — глаз успевает за голосом
+        }
+    }
+    val style = MaterialTheme.typography.headlineSmall
+    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        words.forEach { w ->
+            val chars = remember(w.text) { w.text.codePoints().toArray().map { String(Character.toChars(it)) } }
+            Row {
+                chars.forEachIndexed { k, ch ->
+                    Text(ch, style = style, color = pal.accent, modifier = Modifier.graphicsLayer {
+                        val n = chars.size
+                        val soft = 1.8f
+                        val wp = ((clock.floatValue - w.time) / maxOf(0.05, w.end - w.time)).toFloat().coerceIn(0f, 1f)
+                        var x = ((wp * (n + soft) - k) / soft).coerceIn(0f, 1f)
+                        x = x * x * (3 - 2 * x) // плавно в начале и в конце
+                        alpha = 0.4f + 0.6f * x
+                        translationY = -x * 0.06f * style.fontSize.toPx()
+                    })
+                }
+            }
+        }
+    }
+}
+
 /** Синхронный текст (Яндекс Музыка, LRCLIB или YouTube Music): текущая строка крупнее и ярче, панель сама прокручивается, тап по строке — перемотка */
 @Composable
 private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: CoverPalette) {
@@ -536,6 +576,13 @@ private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: Cove
                 itemsIndexed(l.lines) { i, line ->
                     val active = i == currentLine
                     val past = l.synced && i < currentLine
+                    val words = line.words
+                    if (active && l.synced && words != null) {
+                        KaraokeLine(words, pal, Modifier.fillMaxWidth()
+                            .clickable(enabled = line.time != null) { line.time?.let { PlayerConnection.seekTo((it * 1000).toLong()) } }
+                            .padding(horizontal = 22.dp, vertical = 7.dp))
+                        return@itemsIndexed
+                    }
                     Text(
                         line.text.ifEmpty { "♪" },
                         style = if (active) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
