@@ -67,8 +67,10 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.nyao.music.data.Net
 import org.nyao.music.data.Playlist
 import org.nyao.music.data.Repo
+import org.nyao.music.playback.Offline
 import org.nyao.music.data.SOURCE_YA
 import org.nyao.music.data.SOURCE_YT
 import kotlinx.coroutines.launch
@@ -164,9 +166,13 @@ private fun PlayButtons(tracks: List<Track>, label: String, modifier: Modifier =
 fun LibraryScreen(model: AppModel, wide: Boolean) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var filter by rememberSaveable { mutableStateOf("all") }
-    LaunchedEffect(tab) { if (tab == 0) model.loadLiked() else if (tab == 1) model.loadPlaylists() else Repo.importYaArtists() }
+    LaunchedEffect(tab) { if (tab == 0) model.loadLiked() else if (tab == 1) model.loadPlaylists() else runCatching { Repo.importYaArtists() } }
     val current by PlayerConnection.current.collectAsState()
     val likedIds by Repo.liked.collectAsState()
+    // без интернета медиатека как в Spotify: в «Мне нравится» остаются только скачанные треки,
+    // в «Плейлистах» — «Скачанное» и плейлисты, скачанные целиком
+    val online by Net.online.collectAsState()
+    val off by Offline.state.collectAsState()
 
     val mono = org.nyao.music.ui.theme.Look.current.mono
     val header: @Composable () -> Unit = {
@@ -209,13 +215,16 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
         return
     }
     if (tab == 0) {
-        val liked = model.liked
+        val all = model.liked
+        val liked = if (online || all == null) all else all.filter { it.id in off.ids }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
             item { header() }
             when {
                 liked == null -> item { Loading() }
+                !online && liked.isEmpty() -> item { OfflineEmpty(model, off.tracks.isNotEmpty()) }
                 liked.isEmpty() -> item { Hint("Пока пусто. Лайкай треки — они появятся здесь из обоих сервисов.") }
                 else -> {
+                    if (!online) item { OfflineBanner("Нет интернета — показаны только скачанные треки") }
                     val ya = liked.count { it.source == SOURCE_YA }
                     val sc = liked.count { it.source == org.nyao.music.data.SOURCE_SC }
                     val vk = liked.count { it.source == org.nyao.music.data.SOURCE_VK }
@@ -260,9 +269,11 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
         val settings by Repo.prefs.settings.collectAsState()
         val mixes by Repo.mixStore.mixes.collectAsState()
         LaunchedEffect(settings.splitLiked) { if (settings.splitLiked) model.loadLiked() }
-        // лайки по сервисам (если включено) + свои миксы + плейлисты сервисов
+        // лайки по сервисам (если включено) + свои миксы + плейлисты сервисов;
+        // без интернета — «Скачанное», свои миксы и плейлисты, скачанные целиком
         val lists = model.playlists?.let { pl ->
-            (if (settings.splitLiked) likedPlaylists(model.liked, true).filter { it.id != "liked" } else emptyList()) + mixes.map { it.asPlaylist() } + pl
+            if (!online) listOfNotNull(Offline.asPlaylist()) + mixes.map { it.asPlaylist() } + pl.filter { it.id in off.playlists }
+            else (if (settings.splitLiked) likedPlaylists(model.liked, true).filter { it.id != "liked" } else emptyList()) + mixes.map { it.asPlaylist() } + pl
         }
         LazyVerticalGrid(
             GridCells.Adaptive(if (wide) 180.dp else 150.dp),
@@ -285,8 +296,10 @@ fun LibraryScreen(model: AppModel, wide: Boolean) {
                     }
                 }
             }
+            if (!online && !lists.isNullOrEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { OfflineBanner("Нет интернета — показано только скачанное", inset = 0.dp) }
             when {
                 lists == null -> item(span = { GridItemSpan(maxLineSpan) }) { Loading() }
+                !online && lists.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) { OfflineEmpty(model, false, inset = 0.dp) }
                 lists.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) { Hint("Плейлистов нет или сервисы не подключены.") }
                 else -> itemsIndexed(lists) { i, p ->
                     Box(Modifier.appear(if (i < 12) i else 0)) { GridPlaylist(p, TILE_SHAPES[i % TILE_SHAPES.size]) { model.go(Route.PlaylistPage(p)) } }
@@ -313,8 +326,14 @@ private fun GridPlaylist(p: Playlist, shape: Shape, onClick: () -> Unit) {
 
 @Composable
 fun PlaylistScreen(model: AppModel, playlist: Playlist) {
-    LaunchedEffect(playlist.id) { model.loadPlaylist(playlist.id) }
-    val tracks = model.playlistTracks[playlist.id]
+    val loaded = model.playlistTracks[playlist.id]
+    // список перечитывается и тогда, когда его сбросили (например, вернулся интернет)
+    LaunchedEffect(playlist.id, loaded == null) { if (loaded == null) model.loadPlaylist(playlist.id) }
+    val online by Net.online.collectAsState()
+    val off by Offline.state.collectAsState()
+    // без интернета играет только скачанное — остальное не показываем, чтобы не тыкать в тишину
+    val tracks = if (online || loaded == null) loaded else loaded.filter { it.id in off.ids }
+    val hidden = if (loaded != null && tracks != null) loaded.size - tracks.size else 0
     val current by PlayerConnection.current.collectAsState()
     val likedIds by Repo.liked.collectAsState()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
@@ -349,7 +368,69 @@ fun PlaylistScreen(model: AppModel, playlist: Playlist) {
                 OfflineButton(model, playlist, tracks)
             }
         }
+        if (!online && loaded != null) item {
+            OfflineBanner(
+                when {
+                    loaded.isEmpty() -> "Нет интернета — этот плейлист ещё не открывали с сетью"
+                    hidden > 0 -> "Нет интернета — показаны только скачанные треки ($hidden скрыто)"
+                    else -> "Нет интернета — все треки скачаны"
+                },
+            )
+        }
         if (tracks == null) item { Loading() } else trackGroup(model, tracks, playlist.title, current?.id, likedIds)
+    }
+}
+
+/** Плашка «нет интернета» над списком, который показан из кэша или урезан до скачанного */
+@Composable
+fun OfflineBanner(text: String, inset: androidx.compose.ui.unit.Dp = 16.dp) {
+    Row(
+        Modifier.padding(horizontal = inset).padding(bottom = 10.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(NyaoColors.Tonal).padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(NyaoIcons.Block, null, tint = NyaoColors.Muted, modifier = Modifier.size(18.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+    }
+}
+
+/**
+ * Нет интернета и показывать нечего: как в Яндекс Музыке — объяснение, кнопка к скачанным трекам
+ * (если они есть) и «Повторить»
+ */
+@Composable
+fun OfflineEmpty(model: AppModel, hasDownloads: Boolean, inset: androidx.compose.ui.unit.Dp = 16.dp) {
+    Column(
+        Modifier.padding(horizontal = inset).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(NyaoColors.Tonal).padding(22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(64.dp).clip(PolarShape(9, 0.08f)).background(NyaoColors.S3), contentAlignment = Alignment.Center) {
+            Icon(NyaoIcons.Block, null, tint = NyaoColors.Muted, modifier = Modifier.size(28.dp))
+        }
+        Text("Нет интернета", style = MaterialTheme.typography.titleLarge, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text(
+            if (hasDownloads) "Скачанные треки играют и без сети. Остальная медиатека вернётся, как только появится подключение."
+            else "Пока ничего не скачано. С интернетом открой плейлист или «Мне нравится» и нажми «Скачать» — тогда музыка будет играть и без сети.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = NyaoColors.Muted,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        if (hasDownloads) Row(
+            Modifier.fillMaxWidth().height(52.dp).bouncy().clip(RoundedCornerShape(26.dp)).background(NyaoColors.Lavender)
+                .clickable { Offline.asPlaylist()?.let { model.go(Route.PlaylistPage(it)) } },
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(NyaoIcons.DownloadDone, null, tint = NyaoColors.OnLavender)
+            Spacer(Modifier.size(8.dp))
+            Text("Скачанные треки", style = MaterialTheme.typography.labelLarge, color = NyaoColors.OnLavender)
+        }
+        TextButton(onClick = { model.refreshLibrary(all = true) }) {
+            Icon(NyaoIcons.Refresh, null, tint = NyaoColors.Text, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(6.dp))
+            Text("Повторить", color = NyaoColors.Text)
+        }
     }
 }
 
@@ -456,7 +537,7 @@ private fun LikesDownloadChip(model: AppModel, liked: List<Track>) {
                         org.nyao.music.playback.Offline.cancel(id)
                         model.message("Загрузка лайков остановлена")
                     }
-                    done -> model.message("Все лайки уже скачаны — удалить можно в «Скачанном»")
+                    done -> Offline.asPlaylist()?.let { model.go(Route.PlaylistPage(it)) } ?: model.message("Все лайки уже скачаны")
                     else -> {
                         org.nyao.music.playback.Offline.download(ctx, id, "Мне нравится", liked)
                         model.message("Скачиваю лайки (${can - have}) — можно слушать дальше")
