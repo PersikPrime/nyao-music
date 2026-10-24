@@ -61,5 +61,10 @@ jobs:
             console.log(JSON.stringify(s, null, 2));
           '
           SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
-          $SSH "cd /opt/nyao/server && docker compose exec -T api sh -c 'mkdir -p /data/status && cat > /data/status/status.json'" < status.json
+          # пишем от root: том /data/status создан Docker'ом с владельцем root, а сервер внутри работает как node;
+          # файл остаётся читаемым для всех (644) — серверу этого хватает
+          if ! $SSH "cd /opt/nyao/server && docker compose exec -T -u root api sh -c 'mkdir -p /data/status && cat > /data/status/status.json && chmod 644 /data/status/status.json'" < status.json 2> ssh.err; then
+            echo "::error::Не удалось записать статус: $(tail -n 3 ssh.err | tr '\n' ' ')"
+            exit 1
+          fi
           echo "::notice::Статус записан: техработы — $MODE, сбои — ${OUTAGES:-нет}"
