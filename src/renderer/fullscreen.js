@@ -387,6 +387,11 @@ export class FullScreen {
     return `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${s.toFixed(4)})`;
   }
 
+  /** Поворот обложки в покое: без текста она одна по центру и стоит прямо */
+  tilt() {
+    return this.el && this.el.classList.contains('nolyrics') ? 0 : TILT;
+  }
+
   /** Место обложки без поворота в покое — от него считается перелёт */
   artRect(art) {
     const prev = art.style.transform;
@@ -424,8 +429,8 @@ export class FullScreen {
     const fly = art.animate([
       { transform: `${this.flight(from, to)} rotateY(180deg)` },
       { transform: `${this.flight(from, to, 0.28)} rotateY(72deg)`, offset: 0.5 },
-      { transform: `translate(0px, 0px) scale(1.03) rotateY(${TILT - 9}deg)`, offset: 0.78 },
-      { transform: `translate(0px, 0px) scale(1) rotateY(${TILT}deg)` }
+      { transform: `translate(0px, 0px) scale(1.03) rotateY(${this.tilt() - 9}deg)`, offset: 0.78 },
+      { transform: `translate(0px, 0px) scale(1) rotateY(${this.tilt()}deg)` }
     ], { duration: D, easing: ease });
     // в момент приземления из-за обложки веером расходятся соседние треки (Cover Flow) и гаснут
     const fan = (sel, dir) => {
@@ -461,7 +466,7 @@ export class FullScreen {
     this.el.animate([{ backgroundColor: bg }, { backgroundColor: 'transparent' }], { duration: 380, easing: 'ease-in', fill: 'forwards' });
     this.parts().forEach((p) => p.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease-in', fill: 'forwards' }));
     // обратно — без кувырков: поворот покоя распрямляется по пути в плашку
-    const fly = art.animate([{ transform: `translate(0px, 0px) scale(1) rotateY(${TILT}deg)` }, { transform: `${this.flight(to, from)} rotateY(0deg)` }], { duration: 440, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+    const fly = art.animate([{ transform: `translate(0px, 0px) scale(1) rotateY(${this.tilt()}deg)` }, { transform: `${this.flight(to, from)} rotateY(0deg)` }], { duration: 440, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
     const refl = this.$('.fs-refl');
     if (refl && refl.animate) refl.animate([{ opacity: 0.15 }, { opacity: 0 }], { duration: 160, easing: 'ease-in', fill: 'forwards' });
     const end = () => {
@@ -524,14 +529,14 @@ export class FullScreen {
     if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const ease = 'cubic-bezier(.2, .8, .2, 1)';
     art.animate([
-      { transform: `translateX(${dir * 34}%) scale(.88) rotateY(${TILT - dir * 55}deg)`, opacity: 0.35 },
-      { transform: `translateX(0%) scale(1) rotateY(${TILT}deg)`, opacity: 1 }
+      { transform: `translateX(${dir * 34}%) scale(.88) rotateY(${this.tilt() - dir * 55}deg)`, opacity: 0.35 },
+      { transform: `translateX(0%) scale(1) rotateY(${this.tilt()}deg)`, opacity: 1 }
     ], { duration: 560, easing: ease });
     // прошлый трек теперь сосед с той стороны, куда уехал: показываем, как он уходит
     const nb = this.$(dir > 0 ? '.fs-nb-prev' : '.fs-nb-next');
     if (nb && nb.animate && nb.dataset.on) {
       nb.animate([
-        { opacity: 0.9, transform: `translateX(0%) scale(1) rotateY(${TILT}deg)` },
+        { opacity: 0.9, transform: `translateX(0%) scale(1) rotateY(${this.tilt()}deg)` },
         { opacity: 0, transform: `translateX(${dir * -64}%) scale(.86) rotateY(${dir * 70}deg)` }
       ], { duration: 560, easing: ease });
     }

@@ -595,10 +595,17 @@ body.fs-on .toast { z-index: 1000; }
 .fs-art { position: relative; width: 100%; height: 100%; border-radius: 10px; transform-style: preserve-3d; transform: translate(0px, 0px) scale(1) rotateY(12deg); }
 .fs-face { position: absolute; inset: 0; border-radius: 10px; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: rgba(0,0,0,.25); box-shadow: 0 30px 80px rgba(0,0,0,.5); }
 .fs-back { transform: rotateY(180deg); }
+/* без текста обложка одна по центру — стоит прямо; текст появился — поворачивается, пока уезжает влево */
+.fs-art, .fs-refl { transition: transform .6s cubic-bezier(.2, .8, .2, 1); }
+.fs.nolyrics .fs-art { transform: translate(0px, 0px) scale(1) rotateY(0deg); }
+.fs.nolyrics .fs-refl { transform: rotateY(0deg) scaleY(-1); }
+.fs-pool { transition: opacity .5s ease; }
+.fs.nolyrics .fs-pool { opacity: 0; animation-play-state: paused; }
+.fs.noanim .fs-art, .fs.noanim .fs-refl { transition: none; }
 .fs-back img { filter: brightness(.7) saturate(.9); }
 .fs-face img, .fs-nb img, .fs-refl img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* отражение в «полу» — та же обложка вверх ногами, быстро тает */
-.fs-refl { position: absolute; left: 0; top: calc(100% + 6px); width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; opacity: .15; pointer-events: none; transform: rotateY(12deg) scaleY(-1); -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 45%); mask-image: linear-gradient(to top, #000 0%, transparent 45%); }
+.fs-refl { position: absolute; left: 0; top: calc(100% + 6px); width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; opacity: .15; pointer-events: none; transform: rotateY(12deg) scaleY(-1); -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 36%); mask-image: linear-gradient(to top, #000 0%, transparent 36%); }
 /* соседние треки — видны только в веере при открытии и в Cover Flow при смене трека */
 .fs-nb { position: absolute; inset: 7%; z-index: -1; border-radius: 10px; overflow: hidden; opacity: 0; pointer-events: none; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
 .fs-left > :not(.fs-art-wrap) { position: relative; z-index: 1; }
