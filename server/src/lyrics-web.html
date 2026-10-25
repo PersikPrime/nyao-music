@@ -1247,10 +1247,11 @@ ${lines.map((l, n) => `${n + 1}. [${((l.at - from) / 1000).toFixed(2)}s] ${token
   // --- Whisper: в браузере через transformers.js, без ключа. Расшифровка сопоставляется с уже написанным текстом
   const WH_MODEL = 'nyao-whisper-model';
   const WH_LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1';
+  // кодировщик Large в полной точности — ≈2,5 ГБ одним куском, столько браузер не выделяет: берём половинную точность
   const WH_MODELS = [
-    ['onnx-community/whisper-small_timestamped', 'Small — точнее (≈250 МБ)'],
-    ['onnx-community/whisper-base_timestamped', 'Base — быстрее (≈80 МБ)'],
-    ['onnx-community/whisper-large-v3-turbo_timestamped', 'Large v3 Turbo — лучшая, тяжёлая (≈800 МБ, нужна видеокарта)']
+    ['onnx-community/whisper-small_timestamped', 'Small — точнее (≈250 МБ)', 'fp32'],
+    ['onnx-community/whisper-base_timestamped', 'Base — быстрее (≈80 МБ)', 'fp32'],
+    ['onnx-community/whisper-large-v3-turbo_timestamped', 'Large v3 Turbo — лучшая, тяжёлая (≈1,3 ГБ, только с видеокартой)', 'fp16', true]
   ];
   const whModel = () => gemGet(WH_MODEL) || WH_MODELS[0][0];
   /** Слово для сравнения: без регистра, знаков и «ё» */
@@ -1321,13 +1322,24 @@ ${lines.map((l, n) => `${n + 1}. [${((l.at - from) / 1000).toFixed(2)}s] ${token
   let whPipe = null, whPipeModel = '';
   async function whisperPipe(model) {
     if (whPipe && whPipeModel === model) return whPipe;
+    const info = WH_MODELS.find((m) => m[0] === model) || [model, model, 'fp32'];
+    const gpu = !!navigator.gpu;
+    if (info[3] && !gpu) throw new Error('эта модель работает только с видеокартой (WebGPU) — выбери Small или Base');
     toast('Whisper: загружаю…');
     const lib = await import(WH_LIB);
-    const gpu = !!navigator.gpu;
     const seen = new Map();
-    whPipe = await lib.pipeline('automatic-speech-recognition', model, {
+    // часть ошибок загрузки (например, нехватка памяти) библиотека не возвращает, а роняет мимо — ловим их сами,
+    // иначе черновик молча висит
+    let onFail = null;
+    const failed = new Promise((_, reject) => {
+      onFail = (e) => { e.preventDefault(); reject(e.reason || new Error('модель не загрузилась')); };
+      window.addEventListener('unhandledrejection', onFail);
+    });
+    whPipe = null;
+    try {
+      whPipe = await Promise.race([failed, lib.pipeline('automatic-speech-recognition', model, {
       device: gpu ? 'webgpu' : 'wasm',
-      dtype: gpu ? { encoder_model: 'fp32', decoder_model_merged: 'q4' } : 'q8',
+      dtype: gpu ? { encoder_model: info[2], decoder_model_merged: 'q4' } : 'q8',
       progress_callback: (p) => {
         if (p.status !== 'progress' || !p.total) return;
         seen.set(p.file, [p.loaded, p.total]);
@@ -1335,7 +1347,15 @@ ${lines.map((l, n) => `${n + 1}. [${((l.at - from) / 1000).toFixed(2)}s] ${token
         seen.forEach(([x, y]) => { l += x; t += y; });
         toast(`Whisper: скачиваю модель — ${Math.round((l / t) * 100)}% (один раз, потом из кэша)`);
       }
-    });
+    })]);
+    } catch (e) {
+      whPipe = null;
+      whPipeModel = '';
+      if (e instanceof RangeError || /allocation|out of memory|memory/i.test(String(e && e.message))) throw new Error('браузеру не хватило памяти для этой модели — выбери модель полегче');
+      throw e;
+    } finally {
+      window.removeEventListener('unhandledrejection', onFail);
+    }
     whPipeModel = model;
     return whPipe;
   }
@@ -1387,7 +1407,7 @@ ${lines.map((l, n) => `${n + 1}. [${((l.at - from) / 1000).toFixed(2)}s] ${token
       }
       toast(`Черновик Whisper: ${ok} строк${fallback ? `, ещё ${fallback} — по звуку (Whisper не расслышал)` : ''}. Проверь на слух`);
     } catch (e) {
-      toast(`Whisper: ${e && e.message ? e.message : e}. Попробуй модель полегче (⚙) или Chrome/Edge`);
+      toast(`Whisper: ${e && e.message ? e.message : e}. Модель меняется в настройках (⚙)`);
       changed(); drawWords();
     }
     busy = false;
