@@ -939,6 +939,7 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
         <span class="muted small" id="wprog"></span><span style="flex:1"></span>
         <button class="btn sm" id="wdraft" title="Расставить слова в неразмеченных строках — по звуку своего файла или по длине слов">Черновик</button>
         <button class="btn sm" id="wgem" title="Черновик через Gemini со своим ключом">Черновик Gemini</button>
+        <button class="btn sm" id="wwh" title="Черновик через Whisper — работает прямо в браузере, без ключа">Черновик Whisper</button>
         <button class="btn sm" id="wgset" title="Ключ Gemini">⚙</button>
         <button class="btn sm" id="wclr">Сбросить слова</button>
       </div>
@@ -949,6 +950,7 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
     $('#wclr').onclick = () => { if (confirm('Сбросить время у всех слов?')) { state.lines.forEach((l) => { l.words = null; l.wend = null; wordsOf(l); }); wl = 0; wi = 0; changed(); drawWords(); } };
     $('#wdraft').onclick = (e) => { e.currentTarget.blur(); draftLocal(); };
     $('#wgem').onclick = (e) => { e.currentTarget.blur(); draftGemini(); };
+    $('#wwh').onclick = (e) => { e.currentTarget.blur(); draftWhisper(); };
     $('#wgset').onclick = () => gemSettings(true);
     $('#wlist').onclick = (e) => {
       if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -1144,12 +1146,15 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
       <p class="muted small" style="margin-top:0">Нужен свой ключ Gemini API — его можно получить в <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>. Ключ хранится только в этом браузере и отправляется только в Google. Для черновика отрезки твоего аудиофайла уходят в Gemini с твоим ключом — загружай только то, на что у тебя есть право.</p>
       <label>Ключ</label><input type="password" id="gk" value="${esc(gemGet(GEM_KEY))}" placeholder="AIza…" autocomplete="off">
       <label>Модель</label><input type="text" id="gm" value="${esc(gemGet(GEM_MODEL) || GEM_DEFAULT)}">
-      <div class="row"><button class="btn primary sm" id="gsave">Сохранить</button><button class="btn sm" id="gdel">Удалить ключ</button></div></div>`;
-    box.querySelector('#gsave').onclick = () => { gemSet(GEM_KEY, box.querySelector('#gk').value.trim()); gemSet(GEM_MODEL, box.querySelector('#gm').value.trim()); box.innerHTML = ''; toast('Сохранено в этом браузере'); };
+      <h3 style="margin-top:14px">Whisper</h3>
+      <p class="muted small" style="margin-top:0">Работает прямо в браузере, без ключа: аудио никуда не отправляется. Модель скачивается один раз и остаётся в кэше браузера.</p>
+      <label for="wm">Модель</label><select id="wm">${WH_MODELS.map(([id, name]) => `<option value="${id}" ${id === whModel() ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>
+      <div class="row" style="margin-top:10px"><button class="btn primary sm" id="gsave">Сохранить</button><button class="btn sm" id="gdel">Удалить ключ Gemini</button></div></div>`;
+    box.querySelector('#gsave').onclick = () => { gemSet(GEM_KEY, box.querySelector('#gk').value.trim()); gemSet(GEM_MODEL, box.querySelector('#gm').value.trim()); gemSet(WH_MODEL, box.querySelector('#wm').value); box.innerHTML = ''; toast('Сохранено в этом браузере'); };
     box.querySelector('#gdel').onclick = () => { gemSet(GEM_KEY, ''); box.innerHTML = ''; toast('Ключ удалён'); };
   }
-  /** Отрезок аудио → WAV 16 кГц моно (base64) */
-  async function wavB64(buf, from, to) {
+  /** Отрезок аудио → 16 кГц моно (Float32Array) */
+  async function pcm16k(buf, from, to) {
     const sr = 16000;
     const len = Math.max(1, Math.ceil(((to - from) / 1000) * sr));
     const off = new OfflineAudioContext(1, len, sr);
@@ -1157,7 +1162,12 @@ function workspace(root, state, { tab = 'text', side, onChange = () => {} } = {}
     src.buffer = buf;
     src.connect(off.destination);
     src.start(0, from / 1000, (to - from) / 1000);
-    const pcm = (await off.startRendering()).getChannelData(0);
+    return (await off.startRendering()).getChannelData(0);
+  }
+  /** Отрезок аудио → WAV 16 кГц моно (base64) */
+  async function wavB64(buf, from, to) {
+    const sr = 16000;
+    const pcm = await pcm16k(buf, from, to);
     const out = new DataView(new ArrayBuffer(44 + pcm.length * 2));
     const str = (o, t) => { for (let k = 0; k < t.length; k++) out.setUint8(o + k, t.charCodeAt(k)); };
     str(0, 'RIFF'); out.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
@@ -1231,6 +1241,155 @@ ${lines.map((l, n) => `${n + 1}. [${((l.at - from) / 1000).toFixed(2)}s] ${token
       }
       toast(`Черновик Gemini: ${ok} строк${fallback ? `, ещё ${fallback} — по звуку (Gemini ответил не по формату)` : ''}. Проверь на слух`);
     } catch (e) { toast(`Gemini: ${e.message}`); changed(); drawWords(); }
+    busy = false;
+  }
+
+  // --- Whisper: в браузере через transformers.js, без ключа. Расшифровка сопоставляется с уже написанным текстом
+  const WH_MODEL = 'nyao-whisper-model';
+  const WH_LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1';
+  const WH_MODELS = [
+    ['onnx-community/whisper-small_timestamped', 'Small — точнее (≈250 МБ)'],
+    ['onnx-community/whisper-base_timestamped', 'Base — быстрее (≈80 МБ)'],
+    ['onnx-community/whisper-large-v3-turbo_timestamped', 'Large v3 Turbo — лучшая, тяжёлая (≈800 МБ, нужна видеокарта)']
+  ];
+  const whModel = () => gemGet(WH_MODEL) || WH_MODELS[0][0];
+  /** Слово для сравнения: без регистра, знаков и «ё» */
+  const wnorm = (w) => String(w || '').toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, '');
+  /** Похожесть слов 0…1 (расстояние Левенштейна) — Whisper часто слышит «почти то же» слово */
+  function wsim(a, b) {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    const m = a.length, n = b.length;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return 1 - prev[n] / Math.max(m, n);
+  }
+  /**
+   * Наши слова ↔ расслышанные (выравнивание как в сравнении последовательностей): для каждого нашего слова —
+   * номер расслышанного или -1. Совпадения не перескакивают друг через друга.
+   */
+  function alignWords(ours, heard) {
+    const A = ours.map(wnorm), B = heard.map(wnorm);
+    const m = A.length, n = B.length, GAP = -0.4;
+    const sc = Array.from({ length: m + 1 }, () => new Float32Array(n + 1));
+    const bt = Array.from({ length: m + 1 }, () => new Uint8Array(n + 1)); // 1 — пара, 2 — пропуск нашего, 3 — пропуск расслышанного
+    for (let i = 1; i <= m; i++) { sc[i][0] = i * GAP; bt[i][0] = 2; }
+    for (let j = 1; j <= n; j++) { sc[0][j] = j * GAP; bt[0][j] = 3; }
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        const s = wsim(A[i - 1], B[j - 1]);
+        const pair = sc[i - 1][j - 1] + (s >= 0.5 ? 1 + s : -1);
+        const up = sc[i - 1][j] + GAP, left = sc[i][j - 1] + GAP;
+        if (pair >= up && pair >= left) { sc[i][j] = pair; bt[i][j] = 1; }
+        else if (up >= left) { sc[i][j] = up; bt[i][j] = 2; }
+        else { sc[i][j] = left; bt[i][j] = 3; }
+      }
+    }
+    const out = new Array(m).fill(-1);
+    for (let i = m, j = n; i > 0 || j > 0;) {
+      if (i > 0 && j > 0 && bt[i][j] === 1) { if (wsim(A[i - 1], B[j - 1]) >= 0.5) out[i - 1] = j - 1; i--; j--; }
+      else if (i > 0 && (j === 0 || bt[i][j] === 2)) i--;
+      else j--;
+    }
+    return out;
+  }
+  /** Время слов строки по совпадениям; несовпавшие — между соседями пропорционально длине, нет ни одного — null */
+  function timesFromMatches(i, known) {
+    const ws = wordsOf(state.lines[i]);
+    if (!known.some((t) => t != null)) return null;
+    const [a, b] = lineSpan(i);
+    const len = ws.map((w) => w.text.length + 1);
+    const out = known.slice();
+    let n = 0;
+    while (n < out.length) {
+      if (out[n] != null) { n++; continue; }
+      let e = n;
+      while (e < out.length && out[e] == null) e++;
+      const lo = n > 0 ? out[n - 1] : a;
+      const hi = e < out.length ? out[e] : Math.max(lo + 200, b - 80);
+      const total = len.slice(n - (n > 0 ? 1 : 0), e).reduce((x, y) => x + y, 0) || 1;
+      let acc = n > 0 ? len[n - 1] : 0;
+      for (let k = n; k < e; k++) { out[k] = lo + ((hi - lo) * acc) / total; acc += len[k]; }
+      n = e;
+    }
+    return out;
+  }
+  let whPipe = null, whPipeModel = '';
+  async function whisperPipe(model) {
+    if (whPipe && whPipeModel === model) return whPipe;
+    toast('Whisper: загружаю…');
+    const lib = await import(WH_LIB);
+    const gpu = !!navigator.gpu;
+    const seen = new Map();
+    whPipe = await lib.pipeline('automatic-speech-recognition', model, {
+      device: gpu ? 'webgpu' : 'wasm',
+      dtype: gpu ? { encoder_model: 'fp32', decoder_model_merged: 'q4' } : 'q8',
+      progress_callback: (p) => {
+        if (p.status !== 'progress' || !p.total) return;
+        seen.set(p.file, [p.loaded, p.total]);
+        let l = 0, t = 0;
+        seen.forEach(([x, y]) => { l += x; t += y; });
+        toast(`Whisper: скачиваю модель — ${Math.round((l / t) * 100)}% (один раз, потом из кэша)`);
+      }
+    });
+    whPipeModel = model;
+    return whPipe;
+  }
+  async function draftWhisper() {
+    if (busy) return;
+    if (!player.hasFile()) { toast('Загрузи аудиофайл кнопкой «Свой файл» внизу — Whisper нужно слышать трек'); return; }
+    const todo = todoLines();
+    if (!todo.length) { toast('Все слова уже размечены — сбрось строку крестиком, чтобы расставить заново'); return; }
+    busy = true;
+    let ok = 0, fallback = 0;
+    try {
+      const buf = await player.buffer();
+      let o = null;
+      try { o = await onsets(); } catch {}
+      const asr = await whisperPipe(whModel());
+      // язык: кириллица в тексте — русский, иначе Whisper определит сам
+      const text = todo.map((i) => state.lines[i].text).join(' ');
+      const cyr = (text.match(/[а-яё]/gi) || []).length, lat = (text.match(/[a-z]/gi) || []).length;
+      const language = cyr > lat ? 'russian' : null;
+      // куски, как у Gemini: подряд идущие строки, до 6 строк и 25 секунд
+      const chunks = [];
+      for (const i of todo) {
+        const last = chunks[chunks.length - 1];
+        if (last && last[last.length - 1] === i - 1 && last.length < 6 && lineSpan(i)[1] - state.lines[last[0]].at <= 25000) last.push(i);
+        else chunks.push([i]);
+      }
+      for (let c = 0; c < chunks.length; c++) {
+        toast(`Whisper: слушаю часть ${c + 1} из ${chunks.length}…`);
+        const ids = chunks[c];
+        const from = Math.max(0, state.lines[ids[0]].at - 300);
+        const to = Math.min(buf.duration * 1000, lineSpan(ids[ids.length - 1])[1] + 300);
+        const res = await asr(await pcm16k(buf, from, to), { return_timestamps: 'word', task: 'transcribe', ...(language ? { language } : {}) });
+        const heard = (res && res.chunks ? res.chunks : []).filter((x) => x && x.timestamp && Number.isFinite(x.timestamp[0]) && wnorm(x.text));
+        // все слова куска подряд: так строка, которую Whisper услышал «с перехлёстом», всё равно сопоставится
+        const ours = [];
+        ids.forEach((i) => wordsOf(state.lines[i]).forEach((w, k) => ours.push({ i, k, text: w.text })));
+        const match = alignWords(ours.map((x) => x.text), heard.map((x) => x.text));
+        ids.forEach((i) => {
+          const ws = wordsOf(state.lines[i]);
+          const known = ws.map((w, k) => {
+            const n = ours.findIndex((x) => x.i === i && x.k === k);
+            return match[n] >= 0 ? from + heard[match[n]].timestamp[0] * 1000 : null;
+          });
+          const times = timesFromMatches(i, known);
+          if (times) { applyDraft(i, times); ok++; }
+          else { applyDraft(i, o ? byOnsets(i, o) : proportional(i)); fallback++; }
+        });
+        changed(); drawWords();
+      }
+      toast(`Черновик Whisper: ${ok} строк${fallback ? `, ещё ${fallback} — по звуку (Whisper не расслышал)` : ''}. Проверь на слух`);
+    } catch (e) {
+      toast(`Whisper: ${e && e.message ? e.message : e}. Попробуй модель полегче (⚙) или Chrome/Edge`);
+      changed(); drawWords();
+    }
     busy = false;
   }
 
