@@ -67,9 +67,9 @@ import org.nyao.music.ui.theme.NyaoColors
 
 val DIVERSITY = listOf(
     Triple("any", "Всё", "Без ограничений: и любимое, и новое, и популярное — как обычная «Моя волна»."),
-    Triple("favorite", "Любимое", "В основном твои лайки и похожее на них. Если лайков немного, треки будут повторяться."),
+    Triple("favorite", "Любимое", "В основном твои лайки из всех сервисов. Свежесть задаёт долю недавнего."),
     Triple("discover", "Незнакомое", "Только новое: в поток не попадёт ничего из твоих лайков."),
-    Triple("popular", "Популярное", "Хиты и то, что сейчас слушают чаще всего."),
+    Triple("popular", "Популярное", "Больше рекомендаций сервисов, меньше личных лайков."),
 )
 
 private data class Mood(val key: String, val title: String, val color: Color, val shape: Shape)
@@ -263,11 +263,12 @@ fun WaveScreen(model: AppModel) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                SourceTag(t.source)
+                org.nyao.music.ui.components.TrackSourceTag(t)
                 Text(t.title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 Text(t.artist, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             }
         }
+        if (t?.waveReason != null) Text(t.waveReason, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
         WaveSettings(onChanged = { model.refreshWave() }, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp))
     }
 }
@@ -311,6 +312,7 @@ fun WaveSettings(onChanged: () -> Unit, modifier: Modifier = Modifier, showMood:
                 }
             }
         }
+        Text("Если свежих лайков мало, подбор расширится до остальных любимых и рекомендаций.", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
         // Свежесть: насколько волна тянется к недавним лайкам
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             var liveFresh by remember { mutableStateOf<Float?>(null) }
@@ -320,7 +322,7 @@ fun WaveSettings(onChanged: () -> Unit, modifier: Modifier = Modifier, showMood:
                 Spacer(Modifier.weight(1f))
                 Text(
                     when {
-                        fresh >= 80 -> "Почти только недавние лайки"
+                        fresh >= 80 -> "Приоритет недавних лайков"
                         fresh >= 50 -> "Недавнее чаще"
                         fresh >= 20 -> "Немного свежее"
                         else -> "Все лайки поровну"
@@ -343,10 +345,11 @@ fun WaveSettings(onChanged: () -> Unit, modifier: Modifier = Modifier, showMood:
         }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             val ya = accounts[SOURCE_YA] != null
-            val yt = accounts[SOURCE_YT] != null || accounts[org.nyao.music.data.SOURCE_SC] != null
+            val extras = listOf("yt" to "YouTube", "sc" to "SoundCloud", "vk" to "VK", "sp" to "Spotify").filter { accounts[it.first] != null }.joinToString(" + ") { it.second }
+            val yt = extras.isNotEmpty()
             Row(Modifier.padding(horizontal = 4.dp)) {
                 Text("Яндекс ${100 - share}%", style = MaterialTheme.typography.labelMedium, color = NyaoColors.Muted, modifier = Modifier.weight(1f))
-                Text(if (accounts[org.nyao.music.data.SOURCE_SC] != null) "$share% YouTube и SoundCloud" else "$share% YouTube Music", style = MaterialTheme.typography.labelMedium, color = NyaoColors.Muted)
+                Text("$share% ${extras.ifEmpty { "Другие сервисы" }}", style = MaterialTheme.typography.labelMedium, color = NyaoColors.Muted)
             }
             BalanceBar(share, onChange = { liveShare = it }, onFinish = {
                 liveShare = null
@@ -354,7 +357,7 @@ fun WaveSettings(onChanged: () -> Unit, modifier: Modifier = Modifier, showMood:
                 onChanged()
             })
             if (!ya || !yt) Text(
-                if (!ya && !yt) "Сервисы не подключены" else if (!yt) "YouTube Music и SoundCloud не подключены — волна только из Яндекса" else "Яндекс не подключён — волна из YouTube Music / SoundCloud",
+                if (!ya && !yt) "Сервисы не подключены" else if (!yt) "Другие сервисы не подключены — волна только из Яндекса" else "Яндекс не подключён — волна из остальных сервисов",
                 style = MaterialTheme.typography.bodySmall,
                 color = NyaoColors.Muted,
                 modifier = Modifier.padding(start = 4.dp),

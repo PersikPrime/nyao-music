@@ -1,5 +1,7 @@
 package org.nyao.music.spotify
 
+import org.nyao.music.data.Diagnostics
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.SystemClock
@@ -91,7 +93,7 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
     private val log = ArrayDeque<String>()
     fun debugText(): String = synchronized(log) { log.joinToString("\n") }
     private fun note(s: String) = synchronized(log) {
-        log.addLast(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + s.take(400))
+        log.addLast(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + Diagnostics.safe(s).take(400))
         while (log.size > 80) log.removeFirst()
     }
 
@@ -135,7 +137,7 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
                 }
 
                 override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-                    Log.d(TAG, "JS: ${message.message()}")
+                    Log.d(TAG, Diagnostics.safe("JS: ${message.message()}"))
                     if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR || message.messageLevel() == ConsoleMessage.MessageLevel.WARNING) note("console: ${message.message()}")
                     return true
                 }
@@ -208,7 +210,7 @@ class SpotifyEngine(context: Context, private val auth: SpotifyAuth, private val
     }
 
     private fun fail(kind: String, message: String) {
-        Log.w(TAG, "$kind: $message")
+        Log.w(TAG, Diagnostics.safe("$kind: $message"))
         note("ошибка $kind: $message")
         _status.value = Status.Failed(kind, message)
         _errors.tryEmit(kind to message)

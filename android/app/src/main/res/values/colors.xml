@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#13111C</color>
+    <!-- временная иконка с котом (до 0.10), прежняя — в build/icon-backup -->
+    <color name="ic_launcher_background_art">#000000</color>
     <color name="nyao_bg">#0E0D12</color>
 </resources>

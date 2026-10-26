@@ -4,11 +4,24 @@ import { createPool, migrate } from './db.js';
 import { TelegramOIDC } from './telegram.js';
 import { ReleaseMirror } from './mirror.js';
 import { createApp } from './app.js';
+import { YaCatalog } from './catalog-ya.js';
 import { StatusFile } from './status.js';
 import { FcmPush, parseServiceAccount } from './push.js';
 
 const env = process.env;
+// PUBLIC_URL — адрес, на который Telegram возвращает после входа и откуда раздаются файлы обновлений
 const PUBLIC_URL = env.PUBLIC_URL || 'https://api.nmusic.bixtl.cc';
+// WEB_URL — сайт и ссылки «Поделиться» (music.withnyao.app/share/…)
+const WEB_URL = (env.WEB_URL || 'https://music.withnyao.app').replace(/\/$/, '');
+const WEB_HOSTS = String(env.WEB_HOSTS || new URL(WEB_URL).host).split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+// отпечатки SHA-256 ключа подписи APK — для Android App Links (ссылки открывают приложение сразу)
+const ANDROID_CERTS = String(env.ANDROID_CERT_SHA256 || '').split(',').map((h) => h.trim().toUpperCase()).filter((h) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(h));
+
+// тексты песен: сайт и публичный API (у API свой домен), админы — Telegram ID через запятую
+const hosts = (v, d) => String(v || d).split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+const LYRICS_HOSTS = hosts(env.LYRICS_HOSTS, 'lyrics.withnyao.app');
+const LYRICS_API_HOSTS = hosts(env.LYRICS_API_HOSTS, 'api.corrode5-15.withnyao.app');
+const LYRICS_ADMINS = String(env.LYRICS_ADMINS || '').split(',').map((x) => x.trim()).filter((x) => /^\d{3,20}$/.test(x));
 
 const pool = createPool(env.DATABASE_URL);
 for (let i = 0; ; i++) {
@@ -38,7 +51,7 @@ const status = new StatusFile(env.STATUS_FILE || '/data/status/status.json');
 const fcm = parseServiceAccount(env.FCM_SERVICE_ACCOUNT);
 const push = fcm ? new FcmPush(fcm) : null;
 console.log(push ? `[push] Firebase: ${fcm.project_id}` : '[push] FCM_SERVICE_ACCOUNT не задан — push выключены');
-const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL }));
+const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS, yaCatalog: new YaCatalog({ log: console.log }) }));
 server.listen(Number(env.PORT) || 8080, () => console.log(`[nyao] сервер слушает :${server.address().port}`));
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

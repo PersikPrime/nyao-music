@@ -363,12 +363,12 @@ class YandexApi(private val prefs: Prefs) {
 
     suspend fun likedTracks(limit: Int = 10000): List<Track> {
         val res = obj("GET", "/users/${uid()}/likes/tracks")
-        val ids = res.path("library")?.arr("tracks").objects().take(limit).map {
-            val id = it.optString("id")
-            val album = it.str("albumId")
-            if (album != null) "$id:$album" else id
+        val entries = res.path("library")?.arr("tracks").objects().map { item ->
+            item to runCatching { java.time.Instant.parse(item.optString("timestamp")).toEpochMilli() }.getOrDefault(0L)
         }
-        return tracksByIds(ids)
+        val picked = (if (entries.isNotEmpty() && entries.all { it.second > 0 }) entries.sortedByDescending { it.second } else entries).take(limit)
+        val tracks = tracksByIds(picked.map { (item, _) -> item.optString("id") + (item.str("albumId")?.let { ":$it" } ?: "") }).associateBy { it.srcId }
+        return picked.mapNotNull { (item, at) -> tracks[item.optString("id")]?.copy(likedAt = at) }
     }
 
     private fun mapPlaylist(p: JSONObject): Playlist {

@@ -1,4 +1,5 @@
 // HTTP API сервера Nyao Music. Без фреймворков: маршрутов мало, зависимостей меньше — меньше дыр.
+import { sharePage, shareRoutes } from './share.js';
 import crypto from 'node:crypto';
 import { normalizeStatus } from './status.js';
 import fs from 'node:fs';
@@ -6,6 +7,8 @@ import { pkce } from './telegram.js';
 import { Hub } from './hub.js';
 import { summarize, periodRange } from './stats.js';
 import { socialRoutes } from './social.js';
+import { lyricsRoutes, lrclibError } from './lyrics.js';
+import { lyricsPage } from './lyrics-web.js';
 
 const LOGIN_TTL = 10 * 60_000;
 const MAX_BODY = 512 * 1024;
@@ -96,7 +99,7 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '' }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [], yaCatalog = null }) {
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
   setInterval(() => {
     const now = Date.now();
@@ -140,7 +143,9 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     Object.assign(login, { status: 'done', token, user: publicUser(user) });
   }
 
-  const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl });
+  const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl, webUrl, sharePage: (o) => sharePage({ ...o, mirror }) });
+  const share = shareRoutes({ q, mirror, androidCerts, webHosts });
+  const lyrics = lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins: lyricsAdmins, catalog: yaCatalog });
   const routes = [
     ['GET', /^\/health$/, async () => ({ ok: true, minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
     // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)
@@ -216,6 +221,16 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         if (!p || !p.trackId) continue;
         const at = new Date(p.playedAt || Date.now());
         if (Number.isNaN(at.getTime())) continue;
+        // прослушивание из истории самого сервиса (Spotify «недавно прослушанное»): то же, что уже
+        // записал Nyao (или другое устройство уже прислало), не дублируем — ищем этот трек рядом по времени
+        if (p.imported) {
+          const win = Math.max(0, Math.round(Number(p.duration) || 0)) + 600;
+          const { rows } = await q(
+            'SELECT 1 FROM plays WHERE user_id = $1 AND track_id = $2 AND played_at BETWEEN $3 AND $4 LIMIT 1',
+            [s.uid, clip(p.trackId, 128), new Date(at.getTime() - win * 1000), new Date(at.getTime() + win * 1000)]
+          );
+          if (rows.length) continue;
+        }
         await q(
           `INSERT INTO plays (user_id, session_id, track_id, source, title, artist, cover, duration, listened, skipped, played_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
@@ -384,10 +399,6 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       if (!hub.react(m[1].toUpperCase(), s.sid, body.emoji)) throw new HttpError(400, 'Не получилось отправить реакцию');
       return { ok: true };
     }, true],
-    ['GET', /^\/join\/([A-Za-z0-9]{6})$/, async ({ m }) => {
-      const code = m[1].toUpperCase();
-      return page(`Код комнаты: ${code}`, 'Открой Nyao Music → «Слушать вместе» → «Войти по коду» и введи этот код. Музыка будет играть у тебя в том сервисе, где ты вошёл.');
-    }],
 
     // ---------- Итоги ----------
     ['GET', /^\/stats$/, async ({ s, url }) => {
@@ -409,7 +420,9 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       if (!rel) throw new HttpError(503, 'Сервер ещё не знает о релизах');
       return { ...rel, min_build: minBuild };
     }],
-    ...social
+    ...lyrics,
+    ...social,
+    ...share
   ];
 
   return async function handler(req, res) {
@@ -421,6 +434,14 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       // файлы зеркала отдаём потоком, с поддержкой докачки
       const dl = /^\/dl\/([^/]+)\/([^/]+)$/.exec(url.pathname);
       if (dl && (req.method === 'GET' || req.method === 'HEAD')) return serveFile(req, res, mirror && mirror.file(dl[1], dl[2]));
+      // тексты песен: сайт на lyrics.withnyao.app (все страницы — одна, дальше разбирается сама), API — на своём домене
+      const host = String(req.headers.host || '').split(':')[0].toLowerCase();
+      if (req.method === 'GET' && lyricsHosts.includes(host) && !/^\/(api|auth)\//.test(url.pathname)) {
+        return send(res, 200, lyricsPage(), { 'Cache-Control': 'no-cache' });
+      }
+      if (req.method === 'GET' && lyricsApiHosts.includes(host) && url.pathname === '/') {
+        return send(res, 200, { ok: true, service: 'nyao-lyrics', docs: lyricsHosts[0] ? `https://${lyricsHosts[0]}/docs` : null });
+      }
       for (const [method, re, fn, needAuth] of routes) {
         const m = re.exec(url.pathname);
         if (!m || method !== req.method) continue;
@@ -428,7 +449,8 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         if (needAuth) {
           apiLimit(ip);
           // слишком старая сборка: синхронизацию не даём, просим обновиться
-          if (minBuild && clientBuild(req) < minBuild) {
+          // (сайт текстов /api/… — не приложение, сборки у него нет)
+          if (minBuild && !url.pathname.startsWith('/api/') && clientBuild(req) < minBuild) {
             const e = new HttpError(426, 'Эта версия Nyao Music устарела — обнови приложение в настройках');
             e.extra = { minBuild };
             throw e;
@@ -436,14 +458,28 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
           s = await auth(req);
         }
         const out = await fn({ req, res, url, m, s, ip });
+        // файл не-JSON (например, TTML с текстом песни): { __raw: { type, body, filename? } }
+        if (out && out.__raw) {
+          const r = out.__raw;
+          return send(res, 200, r.body, { 'Content-Type': r.type, ...(r.filename ? { 'Content-Disposition': contentDisposition(r.filename) } : {}) });
+        }
         return send(res, 200, out);
       }
       throw new HttpError(404, 'Нет такого адреса');
     } catch (e) {
+      const lr = lrclibError(e);
+      if (lr) return send(res, lr.status, lr.body);
       if (!(e instanceof HttpError)) log(`[api] ${req.method} ${url.pathname}: ${e.stack || e.message}`);
       return send(res, e.status || 500, { error: e instanceof HttpError ? e.message : 'Ошибка сервера', ...(e.extra || {}) });
     }
   };
+}
+
+/** Имя файла для скачивания: ASCII-запасное filename и точное filename* (RFC 5987) */
+export function contentDisposition(name) {
+  const ascii = String(name).normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/["\\]/g, '').trim() || 'download';
+  const star = encodeURIComponent(name).replace(/['()*!]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${star}`;
 }
 
 function serveFile(req, res, file) {

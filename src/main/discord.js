@@ -32,7 +32,9 @@ const SOURCES = {
   ya: { name: 'Яндекс Музыка', icon: 'yandex', open: 'Открыть в Яндекс Музыке' },
   yt: { name: 'YouTube Music', icon: 'youtube', open: 'Открыть в YouTube Music' },
   sc: { name: 'SoundCloud', icon: 'soundcloud', open: 'Открыть в SoundCloud' },
-  vk: { name: 'VK Музыка', icon: 'vk', open: 'Открыть во VK' }
+  vk: { name: 'VK Музыка', icon: 'vk', open: 'Открыть во VK' },
+  // своего значка Spotify в приложении Discord нет — показываем логотип Nyao
+  sp: { name: 'Spotify', icon: 'logo', open: 'Открыть в Spotify' }
 };
 
 export function trackLink(track) {
@@ -40,6 +42,7 @@ export function trackLink(track) {
     return track.albumId ? `https://music.yandex.ru/album/${track.albumId}/track/${track.srcId}` : `https://music.yandex.ru/track/${track.srcId}`;
   }
   if (track.source === 'vk') return `https://vk.com/audio${track.srcId}`;
+  if (track.source === 'sp') return `https://open.spotify.com/track/${track.srcId}`;
   if (track.source === 'sc') return track.url && /^https:\/\/soundcloud\.com\//.test(track.url) ? track.url : null;
   return `https://music.youtube.com/watch?v=${track.srcId}`;
 }

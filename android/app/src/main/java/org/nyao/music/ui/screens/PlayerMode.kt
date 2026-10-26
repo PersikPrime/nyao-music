@@ -216,7 +216,7 @@ fun PlayerHome(model: AppModel, name: String?) {
                         Text(t.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(t.artist, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    SourceTag(t.source)
+                    org.nyao.music.ui.components.TrackSourceTag(t)
                     Text("$n ×", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
                 }
             }

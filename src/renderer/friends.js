@@ -1,3 +1,4 @@
+import { profileLink } from './social.js';
 // Мини-соцсеть на ПК: друзья и что они слушают, профиль, заявки, входящие, приглашения,
 // совпадение вкусов и «Микс на двоих». Экран собирается из HTML-строк, как и остальное приложение.
 // ctx — то, что даёт app.js: api, state, view, esc, coverHtml, badge, toast, go, player, copyText, ago.
@@ -211,7 +212,7 @@ export function createFriends(ctx) {
       <section class="card"><form data-form="fr-profile" class="fr-form">
         <label>Ник<div class="fr-nick"><span>@</span><input name="nick" value="${esc(p.nick)}" maxlength="24" autocomplete="off" spellcheck="false"></div><span class="hint">Латиница, цифры, точка и _ · по нему тебя найдут</span></label>
         <label>О себе<textarea name="bio" maxlength="160" rows="2">${esc(p.bio)}</textarea></label>
-        <div><button class="btn primary">Сохранить</button></div></form></section>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary">Сохранить</button>${p.nickSet ? '<button class="btn" type="button" data-action="fr-share-profile">Поделиться профилем</button>' : ''}</div></form></section>
       <section class="card"><div class="eyebrow">Кто видит профиль</div>
         <div class="chips">${chip('all', 'Все')}${chip('friends', 'Друзья')}${chip('nobody', 'Никто')}</div>
         <span class="hint">${p.visibility === 'all' ? 'Профиль и статистику видят все, кто тебя найдёт. Что ты слушаешь сейчас — только друзья.' : p.visibility === 'nobody' ? 'Тебя находят только по точному нику, профиль закрыт даже для друзей.' : 'Профиль открыт только друзьям. Остальные видят ник и аватар.'}</span>
@@ -344,6 +345,13 @@ export function createFriends(ctx) {
         }
         s.profile = await call('PUT', '/profile', { [k]: el.checked });
         if (k === 'invisible' && el.checked) toast('Невидимка включена');
+        return true;
+      }
+      case 'fr-share-profile': {
+        const nick = s.profile && s.profile.nick;
+        if (!nick) return true;
+        ctx.copyText(profileLink(nick));
+        toast('Ссылка на профиль скопирована — откроется прямо в Nyao Music');
         return true;
       }
       default:

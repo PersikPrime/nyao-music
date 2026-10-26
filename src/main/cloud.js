@@ -1,10 +1,12 @@
-// Аккаунт Nyao и синхронизация через свой сервер (api.nmusic.bixtl.cc).
+// Аккаунт Nyao и синхронизация через свой сервер (api.music.withnyao.app; прежний адрес api.nmusic.bixtl.cc тоже работает).
 // Важно: токены Яндекса, YouTube и SoundCloud остаются только на этом компьютере — на сервер уходят
 // лишь история прослушиваний, «сейчас играет», миксы и настройки волны.
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const API_BASE = 'https://api.nmusic.bixtl.cc';
+export const API_BASE = 'https://api.music.withnyao.app';
+/** Прежний адрес сервера — запасной, пока новый домен где-то не открывается */
+export const LEGACY_API_BASE = 'https://api.nmusic.bixtl.cc';
 const HISTORY_MAX = 1500;
 const OUTBOX_MAX = 2000;
 
@@ -73,11 +75,20 @@ export class NyaoCloud {
 
   async request(method, p, body) {
     const token = this.getToken();
-    const res = await this.fetch(this.base + p, {
+    const opts = {
       method,
       headers: { 'Content-Type': 'application/json', 'User-Agent': 'NyaoMusic', ...(this.build ? { 'X-Nyao-Build': String(this.build) } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body)
-    });
+    };
+    let res;
+    try {
+      res = await this.fetch(this.base + p, opts);
+    } catch (e) {
+      // новый домен не открывается (сеть, DNS) — дальше через прежний адрес
+      if (this.base !== API_BASE) throw e;
+      this.base = LEGACY_API_BASE;
+      res = await this.fetch(this.base + p, opts);
+    }
     const text = await res.text();
     let json = null;
     try {
@@ -184,6 +195,20 @@ export class NyaoCloud {
       writeJson(this.file('cloud-outbox.json'), out.slice(-OUTBOX_MAX));
       if (out.length >= 10) this.flush().catch(() => {});
     }
+  }
+
+  /**
+   * Прослушивания из истории самого сервиса (Spotify «недавно прослушанное») — сразу на сервер,
+   * для итогов. Сервер не дублирует то, что уже записал Nyao или прислало другое устройство
+   */
+  async importPlays(plays) {
+    if (!this.loggedIn || !plays.length) return 0;
+    const out = plays.map(({ track, at }) => {
+      const t = slimTrack(track);
+      return t && { trackId: t.id, source: t.source, title: t.title, artist: t.artist, cover: t.cover, duration: t.duration, listened: t.duration || 0, skipped: false, playedAt: at, imported: true };
+    }).filter(Boolean);
+    for (let i = 0; i < out.length; i += 200) await this.request('POST', '/history', { plays: out.slice(i, i + 200) });
+    return out.length;
   }
 
   async flush() {

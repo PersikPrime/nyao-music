@@ -1,5 +1,7 @@
-# HTTPS-сертификат Caddy получает и продлевает сам (Let's Encrypt)
-{$DOMAIN} {
+# HTTPS-сертификаты Caddy получает и продлевает сам (Let's Encrypt).
+# DOMAIN — прежний адрес API (старые сборки), API_DOMAIN — новый адрес API, WEB_DOMAIN — сайт и ссылки «Поделиться».
+# LYRICS_DOMAIN — сайт текстов, LYRICS_API_DOMAIN — его открытый API.
+{$DOMAIN}, {$API_DOMAIN}, {$WEB_DOMAIN}, {$LYRICS_DOMAIN}, {$LYRICS_API_DOMAIN} {
 	encode gzip
 	reverse_proxy api:8080
 }

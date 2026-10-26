@@ -24,6 +24,7 @@
   --yt-bright: #ff453a;
   --sc: #ff5500;
   --vk: #0077ff;
+  --sp: #1ed760;
   --font: 'Onest', 'Segoe UI', system-ui, sans-serif;
   --display: 'Unbounded', 'Onest', sans-serif;
   --card-radius: 20px;
@@ -53,6 +54,13 @@ img { display: block; }
 .acc.off { opacity: .55; }
 .acc .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .winctl { display: flex; height: 44px; }
+/* тема Nyao на macOS: родные «светофоры» слева вместо своих кнопок окна */
+body.win.macos .winctl { display: none; }
+body.win.macos .titlebar { padding-left: 84px; padding-right: 12px; }
+.theme-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.theme-seg button { height: auto; min-height: 56px; padding: 8px 12px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; text-align: left; }
+.theme-seg button b { font-size: 14px; color: var(--text); }
+.theme-seg button span { font-size: 12px; font-weight: 500; color: var(--muted); }
 .winctl button { width: 46px; height: 44px; border: 0; background: none; color: var(--muted); display: grid; place-items: center; }
 .winctl button:hover { background: var(--s3); color: var(--text); }
 .winctl button.close:hover { background: #c42b1c; color: #fff; }
@@ -84,6 +92,8 @@ h2.sec { margin: 0; font-size: 20px; font-weight: 600; }
 .back:hover { color: var(--text); border-color: #3a3a40; }
 
 /* ---------- Общие элементы ---------- */
+.badge-sub { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
+.badge-sub i { font-style: normal; font-size: 10px; color: var(--muted, #9a97a6); }
 .badge { flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 5px; line-height: 1.4; }
 .badge.ya { background: var(--ya); color: #000; }
 .badge.yt { background: var(--yt); color: #fff; }
@@ -91,6 +101,8 @@ h2.sec { margin: 0; font-size: 20px; font-weight: 600; }
 .badge.sc.dim { background: #3a1e0c; color: #d08a5c; }
 .badge.vk { background: var(--vk); color: #fff; }
 .badge.vk.dim { background: #0a1e36; color: #6fa8e6; }
+.badge.sp { background: var(--sp); color: #000; }
+.badge.sp.dim { background: #0b2e1a; color: #7fe3a6; }
 .badge.mix { background: #2a2540; color: #e2daff; }
 .badge.ya.dim { background: #3a3410; color: #c9b44a; }
 .badge.yt.dim { background: #3a1414; color: #c97a74; }
@@ -441,7 +453,9 @@ details textarea, details input[type=text] { flex: 1; min-width: 0; background: 
 .dotsrc.sc { background: var(--sc); }
 .cover.sc-bg { background: #2a1408; }
 .dotsrc.vk { background: var(--vk); }
+.dotsrc.sp { background: var(--sp); }
 .cover.vk-bg { background: #0a1e36; }
+.cover.sp-bg { background: #0b2e1a; }
 .update-bar { height: 6px; border-radius: 3px; background: var(--s3); overflow: hidden; margin-top: 10px; }
 .update-bar span { display: block; height: 100%; background: var(--accent); transition: width .2s; }
 
@@ -581,10 +595,39 @@ body.fs-on .toast { z-index: 1000; }
 .fs-round:hover, .fs-pill:hover { background: rgba(255,255,255,.22); }
 .fs-like.on { color: #fff; background: rgba(255,255,255,.22); }
 .fs-like svg { width: 20px; height: 20px; }
-.fs-stage { position: relative; flex: 1; width: 100%; max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); gap: clamp(48px, 6vw, 110px); align-items: center; padding: 0 clamp(56px, 7vw, 120px); min-height: 0; box-sizing: border-box; }
+.fs-stage { position: relative; z-index: 1; flex: 1; width: 100%; max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); gap: clamp(48px, 6vw, 110px); align-items: center; padding: 0 clamp(56px, 7vw, 120px); min-height: 0; box-sizing: border-box; }
 .fs-left { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.fs-art { width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,.5); background: rgba(0,0,0,.25); }
-.fs-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fs-art-wrap { position: relative; z-index: 0; width: 100%; aspect-ratio: 1; perspective: 1600px; }
+/* обложка — карточка с лицом и задником; в покое чуть повёрнута: левая грань ближе, правая уходит вглубь */
+.fs-art { position: relative; width: 100%; height: 100%; border-radius: 10px; transform-style: preserve-3d; transform: translate(0px, 0px) scale(1) rotateY(12deg); }
+.fs-face { position: absolute; inset: 0; border-radius: 10px; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: rgba(0,0,0,.25); box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+.fs-back { transform: rotateY(180deg); }
+/* без текста обложка одна по центру — стоит прямо; текст появился — поворачивается, пока уезжает влево */
+.fs-art, .fs-refl { transition: transform .6s cubic-bezier(.2, .8, .2, 1); }
+.fs.nolyrics .fs-art { transform: translate(0px, 0px) scale(1) rotateY(0deg); }
+.fs.nolyrics .fs-refl { transform: rotateY(0deg) scaleY(-1); }
+.fs-pool { transition: opacity .5s ease; }
+.fs.nolyrics .fs-pool { opacity: 0; animation-play-state: paused; }
+.fs.noanim .fs-art, .fs.noanim .fs-refl { transition: none; }
+.fs-back img { filter: brightness(.7) saturate(.9); }
+.fs-face img, .fs-nb img, .fs-refl img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* отражение в «полу» — та же обложка вверх ногами, быстро тает */
+.fs-refl { position: absolute; left: 0; top: calc(100% + 6px); width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; opacity: .15; pointer-events: none; transform: rotateY(12deg) scaleY(-1); -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 36%); mask-image: linear-gradient(to top, #000 0%, transparent 36%); }
+/* соседние треки — видны только в веере при открытии и в Cover Flow при смене трека */
+.fs-nb { position: absolute; inset: 7%; z-index: -1; border-radius: 10px; overflow: hidden; opacity: 0; pointer-events: none; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.fs-left > :not(.fs-art-wrap) { position: relative; z-index: 1; }
+/* пол, блик и свет */
+.fs-floor { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.fs-floor::before { content: ''; position: absolute; left: 0; right: 0; top: var(--fs-horizon, 72%); height: 1px; background: linear-gradient(to right, transparent, rgba(255,255,255,.18), transparent); }
+.fs-floor::after { content: ''; position: absolute; left: 0; right: 0; top: var(--fs-horizon, 72%); bottom: 0; background: linear-gradient(to bottom, rgba(255,255,255,.04), transparent 75%); }
+.fs-sweep { position: absolute; top: var(--fs-horizon, 72%); bottom: 0; width: 26vw; left: -30vw; background: linear-gradient(100deg, transparent, rgba(255,255,255,.055), transparent); animation: fs-sweep 11s ease-in-out infinite; }
+@keyframes fs-sweep { from { left: -30vw; } to { left: 110vw; } }
+.fs-pool { position: absolute; left: 44%; width: 54%; top: calc(var(--fs-horizon, 72%) + 24px); height: 200px; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in srgb, var(--fs-glow, #b69cff) 30%, transparent), transparent); filter: blur(18px); opacity: .4; animation: fs-pulse 3.2s ease-in-out infinite; }
+@keyframes fs-pulse { 0%, 100% { opacity: .3; transform: scaleX(.985); } 50% { opacity: .45; transform: scaleX(1.015); } }
+/* свет за текущей строкой: еле заметный, вспыхивает в начале слова (--fs-beat из караоке) */
+.fs-right::before { content: ''; position: absolute; left: -10%; right: -10%; top: 50%; height: 200px; margin-top: -100px; border-radius: 50%; pointer-events: none; z-index: -1; background: radial-gradient(closest-side, color-mix(in srgb, var(--fs-glow, #b69cff) 14%, transparent), transparent); filter: blur(16px); opacity: calc(.55 + .45 * var(--fs-beat, 0)); transition: opacity .15s; }
+.fs.nolyrics .fs-right::before, .fs:has(.fs-lyrics.plain) .fs-right::before { display: none; }
+@media (prefers-reduced-motion: reduce) { .fs-sweep, .fs-pool { animation: none; } .fs-art, .fs-refl { transform: none; } }
 .fs-head { display: flex; align-items: center; gap: 12px; }
 .fs-meta { flex: 1; min-width: 0; text-align: center; }
 .fs-title { margin: 0; font-family: var(--display); font-size: 26px; font-weight: 600; line-height: 1.15; letter-spacing: -0.01em; overflow-wrap: anywhere; }
@@ -616,6 +659,19 @@ body.fs-on .toast { z-index: 1000; }
 .fs-lyrics p.next { color: rgba(255,255,255,.62); }
 .fs-lyrics p.on { color: #fff; transform: scale(1.15); }
 .fs-lyrics p:hover { color: rgba(255,255,255,.85); }
+/* караоке: строка с пословным временем — буквы заливаются и чуть поднимаются по ходу слова (--k: 0…1 от fullscreen.js) */
+.fs-lyrics p.kw .kw-w { display: inline-block; white-space: nowrap; }
+.fs-lyrics p.kw .kw-c { display: inline-block; }
+.fs-lyrics p.kw.on { color: rgba(255,255,255,.4); }
+.fs-lyrics p.kw.on .kw-c {
+  color: rgb(255 255 255 / calc(.4 + .6 * var(--k, 0)));
+  transform: translateY(calc(var(--k, 0) * -0.06em));
+  /* лёгкое свечение только пока буква поднимается: пик посередине перехода */
+  text-shadow: 0 0 calc(var(--k, 0) * (1 - var(--k, 0)) * 40px) rgb(255 255 255 / calc(var(--k, 0) * (1 - var(--k, 0)) * 2.4));
+  will-change: transform;
+}
+.fs-lyrics p.kw:not(.on) .kw-c { transform: none; text-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .fs-lyrics p.kw.on .kw-c { transform: none; text-shadow: none; } }
 .fs-lyrics.plain { padding: 8% 0 16%; gap: 12px; }
 .fs-lyrics.plain p { max-width: none; font-size: 22px; font-weight: 600; color: rgba(255,255,255,.88); cursor: default; }
 .fs-plain-label { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: rgba(255,255,255,.6); }
@@ -793,6 +849,7 @@ body.fs-on .toast { z-index: 1000; }
 .st-src .b-yt { background: var(--yt-bright); }
 .st-src .b-sc { background: var(--sc); }
 .st-src .b-vk { background: var(--vk); }
+.st-src .b-sp { background: var(--sp); }
 
 /* ---------- Перенос плейлиста ---------- */
 .xf-targets { display: flex; flex-direction: column; gap: 8px; }

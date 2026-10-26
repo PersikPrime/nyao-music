@@ -24,7 +24,8 @@ contextBridge.exposeInMainWorld('nyao', {
   onControl: (cb) => ipcRenderer.on('control', (_e, cmd) => cb(cmd)),
   radio: {
     start: (track) => call('radio:start', track),
-    more: (ids) => call('radio:more', ids)
+    more: (ids) => call('radio:more', ids),
+    feedback: (type, track, played) => call('radio:feedback', type, track, played)
   },
   lastfm: {
     status: () => call('lastfm:status'),
@@ -38,6 +39,31 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   openExternal: (url) => call('open:external', url),
   vkLog: () => call('vk:openLog'),
+  // ссылки nyao:// и music.withnyao.app/share/…: приглашение, комната, профиль, трек
+  deepLinks: {
+    take: () => call('deeplink:take'),
+    on: (fn) => on('deeplink', fn)
+  },
+  // Spotify: вход со своим Client ID, плеер — Web Playback SDK в скрытом окне главного процесса
+  spotify: {
+    status: () => call('spotify:status'),
+    setClientId: (id) => call('spotify:setClientId', id),
+    login: () => call('spotify:login'),
+    logout: () => call('spotify:logout'),
+    prewarm: () => call('spotify:prewarm'),
+    play: (uris, positionMs) => call('spotify:play', uris, positionMs),
+    pause: () => call('spotify:pause'),
+    resume: () => call('spotify:resume'),
+    seek: (ms) => call('spotify:seek', ms),
+    next: () => call('spotify:next'),
+    volume: (v) => call('spotify:volume', v),
+    modes: () => call('spotify:modes'),
+    snapshot: () => call('spotify:snapshot'),
+    debug: () => call('spotify:debug'),
+    onState: (fn) => on('spotify:state', fn),
+    // трек Spotify играет копией из другого сервиса (нет Premium): { id, track }
+    onSubstitute: (fn) => on('stream:substitute', fn)
+  },
   ytLog: () => call('yt:openLog'),
   version: () => call('app:version'),
   onOutdated: (cb) => ipcRenderer.on('app:outdated', (_e, min) => cb(min)),
@@ -45,6 +71,9 @@ contextBridge.exposeInMainWorld('nyao', {
     check: () => call('update:check'),
     download: (asset) => call('update:download', asset),
     onProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p))
+  },
+  theme: {
+    set: (v) => call('theme:set', v)
   },
   settings: {
     get: () => call('settings:get'),

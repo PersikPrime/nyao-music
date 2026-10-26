@@ -27,11 +27,13 @@ object Updates {
     }
 
     /** Зеркало релизов на сервере Nyao: из РФ качается быстрее, чем с GitHub */
-    const val MIRROR = "https://api.nmusic.bixtl.cc/updates/latest"
+    const val MIRROR = "https://api.music.withnyao.app/updates/latest"
+    /** Прежний адрес зеркала — на случай, если новый домен где-то не открывается */
+    private const val LEGACY_MIRROR = "https://api.nmusic.bixtl.cc/updates/latest"
 
     private suspend fun latest(): JSONObject? {
-        runCatching {
-            val (code, text) = Net.call(Request.Builder().url(MIRROR).header("User-Agent", "NyaoMusic-Android").build())
+        for (url in listOf(MIRROR, LEGACY_MIRROR)) runCatching {
+            val (code, text) = Net.call(Request.Builder().url(url).header("User-Agent", "NyaoMusic-Android").build())
             if (code in 200..299) JSONObject(text).takeIf { it.has("tag_name") }?.let { return it }
         }
         val req = Request.Builder()

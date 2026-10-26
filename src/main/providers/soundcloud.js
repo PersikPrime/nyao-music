@@ -42,12 +42,13 @@ export class CaptchaError extends Error {
 }
 
 export class SoundCloudProvider {
-  constructor({ token = null, fetch = globalThis.fetch, writeFetch = null } = {}) {
+  constructor({ token = null, fetch = globalThis.fetch, writeFetch = null, onAccount = () => {} } = {}) {
     this.token = token;
     this.fetch = fetch;
     // Запросы на запись (лайки) идут через сессию браузера, где ты входил: там cookie защиты DataDome
     // и отпечаток настоящего Chromium. Без них SoundCloud отвечает 403 и капчей.
     this.writeFetch = writeFetch;
+    this.onAccount = onAccount;
     this.clientId = null;
     this.account = null;
     this.raw = new Map(); // id → исходный объект трека (нужен для потока)
@@ -83,7 +84,9 @@ export class SoundCloudProvider {
   }
 
   async request(method, path, { query = {}, retry = true } = {}) {
+    const token = this.token;
     const clientId = await this.getClientId();
+    if (token !== this.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
     const url = new URL(path.startsWith('http') ? path : API + path);
     url.searchParams.set('client_id', clientId);
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
@@ -91,7 +94,7 @@ export class SoundCloudProvider {
     const headers = { Accept: 'application/json', Origin: 'https://soundcloud.com', Referer: 'https://soundcloud.com/' };
     if (!write) headers['User-Agent'] = UA; // в сессии браузера свой User-Agent — не подменяем его
     if (this.token) headers.Authorization = `OAuth ${this.token}`;
-    const res = await (write ? this.writeFetch : this.fetch)(url.toString(), { method, headers });
+    const res = await (write ? this.writeFetch : this.fetch)(url.toString(), { method, headers, signal: AbortSignal.timeout(12_000) });
     if ((res.status === 401 || res.status === 403) && retry && !this.token) {
       // client_id протух — берём свежий и повторяем
       await this.getClientId(true);
@@ -102,7 +105,7 @@ export class SoundCloudProvider {
       const m = text.match(/https:\/\/[a-z.]*captcha-delivery\.com\/[^"\s]+/);
       if (m) throw new CaptchaError(m[0].replace(/\\u0026/g, '&'));
     }
-    if (!res.ok) throw new Error(`SoundCloud ${method} ${url.pathname}: ${res.status} ${text.slice(0, 160)}`);
+    if (!res.ok) throw Object.assign(new Error(`SoundCloud ${method}: HTTP ${res.status}`), { status: res.status });
     return text ? JSON.parse(text) : null;
   }
 
@@ -113,8 +116,11 @@ export class SoundCloudProvider {
 
   async getAccount() {
     if (this.account) return this.account;
+    const token = this.token;
     const me = await this.request('GET', '/me');
+    if (token !== this.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
     this.account = { uid: me.id, name: me.username || me.full_name || 'SoundCloud', plus: /go/i.test((me.creator_subscriptions || []).map((s) => s.product && s.product.id).join(',')) };
+    this.onAccount(me.id);
     return this.account;
   }
 
@@ -134,11 +140,12 @@ export class SoundCloudProvider {
     let res = await this.request('GET', `/users/${uid}/track_likes`, { query: { limit: 200 } });
     const out = [];
     for (let page = 0; res && page < 30; page++) {
-      out.push(...(res.collection || []).map((x) => x.track).filter(Boolean));
+      out.push(...(res.collection || []).filter(x => x.track).map(x => ({ ...x.track, nyaoLikedAt: Date.parse(x.created_at || '') || 0 })));
       if (out.length >= limit || !res.next_href) break;
       res = await this.request('GET', res.next_href);
     }
-    return this.remember(out.slice(0, limit));
+    const dates = new Map(out.map(t => [String(t.id), t.nyaoLikedAt || 0]));
+    return this.remember(out.slice(0, limit)).map(t => ({ ...t, likedAt: dates.get(String(t.srcId)) || 0 }));
   }
 
   async playlists() {
@@ -188,7 +195,9 @@ export class SoundCloudProvider {
   }
 
   async like(track, on = true) {
+    const token = this.token;
     const { uid } = await this.getAccount();
+    if (token !== this.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
     await this.request(on ? 'PUT' : 'DELETE', `/users/${uid}/track_likes/${track.srcId}`);
   }
 
@@ -259,7 +268,9 @@ export class SoundCloudProvider {
           return { url: res.url, hls, mime: hls ? (/mpeg/.test(best.format.mime_type) ? 'audio/mpeg' : 'audio/mp4') : 'audio/mpeg', headers: { 'User-Agent': UA }, ttl: 20 * 60_000 };
         } catch (e) {
           last = e;
-          if (e instanceof CaptchaError || !/: (40[134]|429|5\d\d)\b/.test(e.message)) throw e;
+          // по коду ответа (текст ошибки менялся — проверка по нему уже ломалась)
+          const st = e.status || Number((/\b(?:HTTP |: )(\d{3})\b/.exec(e.message || '') || [])[1]) || 0;
+          if (e instanceof CaptchaError || !(st === 401 || st === 403 || st === 404 || st === 429 || st >= 500)) throw e;
         }
       }
     }

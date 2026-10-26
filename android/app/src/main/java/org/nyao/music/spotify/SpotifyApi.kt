@@ -1,5 +1,7 @@
 package org.nyao.music.spotify
 
+import org.nyao.music.data.Diagnostics
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -43,7 +45,7 @@ class SpotifyApi(private val auth: SpotifyAuth) {
     private val log = ArrayDeque<String>()
     fun debugText(): String = synchronized(log) { log.joinToString("\n") }
     private fun note(s: String) = synchronized(log) {
-        log.addLast(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + s)
+        log.addLast(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + Diagnostics.safe(s))
         while (log.size > 60) log.removeFirst()
     }
 
@@ -53,6 +55,16 @@ class SpotifyApi(private val auth: SpotifyAuth) {
         val me = JSONObject(request("GET", "me"))
         val name = me.str("display_name") ?: me.str("id") ?: "Spotify"
         return Account(name, me.str("product")?.let { it == "premium" }, me.str("id"))
+    }
+
+    /** «Недавно прослушанное» в самом Spotify (до 50 последних), новее [after] (мс) → трек и время */
+    suspend fun recentlyPlayed(after: Long = 0): List<Pair<Track, Long>> {
+        val q = buildMap { put("limit", "50"); if (after > 0) put("after", after.toString()) }
+        return JSONObject(request("GET", "me/player/recently-played", q)).arr("items").objects().mapNotNull { it ->
+            val t = track(it.obj("track")) ?: return@mapNotNull null
+            val at = runCatching { java.time.Instant.parse(it.optString("played_at")).toEpochMilli() }.getOrNull() ?: return@mapNotNull null
+            t to at
+        }
     }
 
     suspend fun search(q: String): List<Track> {
@@ -66,7 +78,9 @@ class SpotifyApi(private val auth: SpotifyAuth) {
     }
 
     /** «Любимые треки» — до 1000 последних */
-    suspend fun likedTracks(): List<Track> = pages("me/tracks", 20).mapNotNull { track(it.obj("track") ?: it.obj("item")) }
+    suspend fun likedTracks(limit: Int = 1000): List<Track> = pages("me/tracks", (limit + 49) / 50).take(limit).mapNotNull { item ->
+        track(item.obj("track") ?: item.obj("item"))?.copy(likedAt = runCatching { java.time.Instant.parse(item.optString("added_at")).toEpochMilli() }.getOrDefault(0L))
+    }
 
     suspend fun playlists(): List<Playlist> = pages("me/playlists", 6).map { p ->
         val id = p.optString("id")
@@ -149,6 +163,7 @@ class SpotifyApi(private val auth: SpotifyAuth) {
             cover = album?.arr("images").objects().firstOrNull()?.str("url"),
             available = o.optBoolean("is_playable", true) && !o.optBoolean("is_local", false),
             artistId = artists.firstOrNull()?.str("id"),
+            isrc = o.obj("external_ids")?.str("isrc"),
         )
     }
 

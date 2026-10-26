@@ -8,7 +8,7 @@ import { Hub } from '../src/hub.js';
 import { nickProblem } from '../src/social.js';
 
 // Несколько пользователей сразу: заводим их прямо в базе (вход через Telegram проверяет api.test.js)
-async function setup() {
+async function setup(opts = {}) {
   const mem = newDb();
   const { Pool } = mem.adapters.createPg();
   const pool = new Pool();
@@ -17,7 +17,7 @@ async function setup() {
   const push = { send: async (token, msg) => { sent.push({ token, msg }); return true; } };
   const hub = new Hub({ waitMs: 50 });
   const tg = { configured: false };
-  const server = http.createServer(createApp({ db: pool, tg, hub, push, publicUrl: 'https://api.test', log: () => {} }));
+  const server = http.createServer(createApp({ db: pool, tg, hub, push, publicUrl: 'https://api.test', log: () => {}, ...opts }));
   await new Promise((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, path, { body, token } = {}) => {
@@ -310,6 +310,43 @@ test('проверка кода: id событий, «никто» по id, ни
     assert.equal(hid.stats, null);
     assert.deepEqual(hid.badges, []);
     assert.ok((await t.call('GET', `/users/${a.id}`, { token: a.token })).json.stats, 'себе — видно');
+  } finally {
+    t.close();
+  }
+});
+
+test('ссылки «Поделиться» на сайте: приглашение, комната, профиль, трек, App Links', async () => {
+  const cert = Array.from({ length: 32 }, () => 'AB').join(':');
+  const t = await setup({ webUrl: 'https://music.test', webHosts: ['music.test'], androidCerts: [cert], mirror: { latest: () => ({ tag_name: 'v0.8.75', assets: [{ name: 'NyaoMusic-0.8-75.apk', browser_download_url: 'https://api.test/dl/v0.8.75/NyaoMusic-0.8-75.apk' }] }), file: () => null } });
+  try {
+    const a = await t.user('Takko');
+    await t.call('PUT', '/profile', { token: a.token, body: { nick: 'Takko' } });
+    const inv = (await t.call('POST', '/invites', { token: a.token })).json;
+    assert.match(inv.url, /^https:\/\/music\.test\/share\/add\/[a-z0-9]{10}$/, 'приглашение — ссылка на сайт');
+    const add = await t.call('GET', `/share/add/${inv.code}`);
+    assert.match(add.text, /зовёт в Nyao Music/);
+    assert.match(add.text, new RegExp(`nyao://add/${inv.code}`));
+    assert.match(add.text, /NyaoMusic-0\.8-75\.apk/, 'есть ссылка на скачивание');
+    assert.match((await t.call('GET', `/add/${inv.code}`)).text, /зовёт/, 'старый адрес работает');
+
+    const room = await t.call('GET', '/share/room/abc123');
+    assert.match(room.text, /nyao:\/\/join\/ABC123/);
+    assert.match((await t.call('GET', '/join/ABC123')).text, /nyao:\/\/join\/ABC123/, 'старый адрес комнаты');
+
+    const prof = await t.call('GET', '/share/u/TAKKO');
+    assert.match(prof.text, /@Takko/);
+    assert.ok(!/Takko · @/.test(prof.text), 'имя скрыто, пока профиль не открыт всем');
+    assert.match(prof.text, /nyao:\/\/u\/Takko/);
+    assert.match((await t.call('GET', '/share/u/nobody_here')).text, /не найден/);
+
+    const tr = await t.call('GET', '/share/track/ya:123?t=' + encodeURIComponent('Песня <b>') + '&a=Кто&d=180');
+    assert.match(tr.text, /Песня &lt;b&gt;/, 'данные из ссылки экранируются');
+    assert.match(tr.text, /nyao:\/\/track\/ya:123\?t=/);
+    assert.equal((await t.call('GET', '/share/track/evil:1')).status, 404);
+
+    const links = (await t.call('GET', '/.well-known/assetlinks.json')).json;
+    assert.equal(links[0].target.package_name, 'org.nyao.music');
+    assert.deepEqual(links[0].target.sha256_cert_fingerprints, [cert]);
   } finally {
     t.close();
   }

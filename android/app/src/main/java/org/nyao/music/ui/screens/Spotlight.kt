@@ -241,7 +241,7 @@ private fun TrackHit(t: Track, playing: Boolean, onClick: () -> Unit) {
             Text(t.artist, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DownloadedMark(t)
-        SourceTag(t.source)
+        org.nyao.music.ui.components.TrackSourceTag(t)
     }
 }
 

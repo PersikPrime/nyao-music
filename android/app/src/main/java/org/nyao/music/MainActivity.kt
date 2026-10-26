@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch {
                 runCatching {
                     org.nyao.music.spotify.Spotify.auth.handleRedirect(u)
+                    org.nyao.music.spotify.Spotify.blocked = null
                     Repo.refreshAccounts()
                 }.onSuccess { org.nyao.music.playback.PlaybackEvents.emit("Spotify подключён") }
                     .onFailure { org.nyao.music.playback.PlaybackEvents.emit(it.message ?: "Не удалось войти в Spotify") }
@@ -71,6 +72,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         org.nyao.music.ui.screens.inviteCode(uri)?.let { org.nyao.music.playback.Friends.inviteLinks.value = it }
+        // комната, профиль, трек из ссылки «Поделиться» (music.withnyao.app/share/… или nyao://…)
+        org.nyao.music.ui.screens.roomCode(uri)?.let { org.nyao.music.playback.Friends.roomLinks.value = it to null }
+        org.nyao.music.ui.screens.profileNick(uri)?.let { org.nyao.music.playback.Friends.profileLinks.value = it }
+        org.nyao.music.ui.screens.sharedTrack(uri)?.let { org.nyao.music.playback.Friends.trackLinks.value = it }
         // вход в комнату — только после подтверждения: такой intent может прислать любое приложение
         intent.getStringExtra("room")?.takeIf { Regex("^[A-Za-z0-9]{6}$").matches(it) }?.let { org.nyao.music.playback.Friends.roomLinks.value = it to intent.getStringExtra("roomFrom") }
         // ссылку обработали — повторный поворот экрана не должен добавлять друга ещё раз

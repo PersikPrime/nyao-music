@@ -14,6 +14,7 @@ data class Mix(val id: String, val title: String, val tracks: List<Track>) {
 
 fun trackToJson(t: Track): JSONObject = JSONObject()
     .put("id", t.id).put("source", t.source).put("srcId", t.srcId).put("title", t.title).put("artist", t.artist)
+    .put("likedAt", t.likedAt).put("isrc", t.isrc ?: JSONObject.NULL).put("waveReason", t.waveReason ?: JSONObject.NULL)
     .put("album", t.album).put("albumId", t.albumId ?: JSONObject.NULL).put("duration", t.duration).put("cover", t.cover ?: JSONObject.NULL)
 
 fun trackFromJson(o: JSONObject): Track? {
@@ -30,6 +31,9 @@ fun trackFromJson(o: JSONObject): Track? {
         albumId = o.str("albumId"),
         duration = o.optInt("duration"),
         cover = o.str("cover"),
+        likedAt = o.optLong("likedAt"),
+        isrc = o.str("isrc"),
+        waveReason = o.str("waveReason"),
     )
 }
 

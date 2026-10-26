@@ -188,9 +188,10 @@ class VkApi(private val prefs: Prefs) {
     val debugLog = ArrayDeque<String>()
 
     private fun debug(msg: String) {
-        Log.w(TAG, msg)
+        val clean = Diagnostics.safe(msg)
+        Log.w(TAG, clean)
         synchronized(debugLog) {
-            debugLog.addLast("${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} ${msg.take(1500)}")
+            debugLog.addLast("${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} ${clean.take(1500)}")
             while (debugLog.size > 40) debugLog.removeFirst()
         }
     }
@@ -207,6 +208,9 @@ class VkApi(private val prefs: Prefs) {
     @Volatile var appContext: android.content.Context? = null
     private val refreshLock = kotlinx.coroutines.sync.Mutex()
     @Volatile private var lastRefresh = 0L
+    @Volatile private var lastRefreshOk = false
+    /** VK при продлении отправил на страницу входа — сессии точно нет (а не просто сеть подвела) */
+    @Volatile private var lastRefreshLoggedOut = false
 
     /**
      * Тихое продление сессии: vk.com сам обновляет свои cookie, когда открыт его сайт.
@@ -216,7 +220,10 @@ class VkApi(private val prefs: Prefs) {
      */
     suspend fun refreshSession(force: Boolean = false): Boolean = refreshLock.withLock {
         val ctx = appContext ?: return false
-        if (!force && System.currentTimeMillis() - lastRefresh < 60_000) return true
+        // неудачная попытка — следующая не раньше чем через 10 минут: не гоняем невидимый WebView каждую минуту
+        val wait = if (lastRefreshOk) 60_000L else 10 * 60_000L
+        if (!force && System.currentTimeMillis() - lastRefresh < wait) return lastRefreshOk
+        lastRefreshLoggedOut = false
         val result = kotlinx.coroutines.withTimeoutOrNull(25_000) {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 kotlinx.coroutines.suspendCancellableCoroutine<Boolean> { cont ->
@@ -238,7 +245,14 @@ class VkApi(private val prefs: Prefs) {
                         override fun onPageFinished(view: android.webkit.WebView, url: String) {
                             val login = url.contains("login") || url.contains("/join") || url.contains("id.vk.")
                             // даём скриптам VK пару секунд обновить cookie
-                            view.postDelayed({ finish(!login) }, if (login) 0 else 3000)
+                            if (login) {
+                                lastRefreshLoggedOut = true
+                                finish(false)
+                            } else view.postDelayed({
+                                if (!done) view.evaluateJavascript("(window.vk && Number(window.vk.id)) || 0") { value ->
+                                    finish(value.trim('"').toLongOrNull() == uid)
+                                }
+                            }, 3000)
                         }
                     }
                     cont.invokeOnCancellation { android.os.Handler(android.os.Looper.getMainLooper()).post { finish(false) } }
@@ -247,6 +261,7 @@ class VkApi(private val prefs: Prefs) {
             }
         } ?: false
         lastRefresh = System.currentTimeMillis()
+        lastRefreshOk = result
         debug(if (result) "сессия VK продлена" else "продлить сессию VK не удалось")
         if (result) prefs.vkRefreshedAt = System.currentTimeMillis()
         result
@@ -266,16 +281,19 @@ class VkApi(private val prefs: Prefs) {
         postOnce(act, params)
     } catch (e: SessionExpired) {
         // VK говорит «не вошёл»: сначала пробуем тихо продлить сессию и повторить, и только потом просим войти заново
-        if (refreshSession(force = true)) {
+        if (refreshSession()) {
             try {
                 postOnce(act, params)
             } catch (e2: SessionExpired) {
                 prefs.vkUid = null
                 throw ApiException("Сессия VK закончилась — войди заново", 401)
             }
-        } else {
+        } else if (lastRefreshLoggedOut) {
+            // VK отправил на вход — как на ПК: выходим из аккаунта, чтобы не повторять попытки впустую
             prefs.vkUid = null
             throw ApiException("Сессия VK закончилась — войди заново", 401)
+        } else {
+            throw ApiException("VK не подтвердил вход — попробуй позже или войди заново", 401)
         }
     }
 
@@ -292,11 +310,11 @@ class VkApi(private val prefs: Prefs) {
                 .header("Referer", "$base/audios$me"),
         )
         val json = runCatching { JSONObject(text.replaceFirst(Regex("^\\s*<!--"), "")) }.getOrElse {
-            debug("$act $params → HTTP $code, не JSON:\n${text.take(1500)}")
+            debug("$act → HTTP $code, не JSON (ответ скрыт)")
             throw ApiException("VK ответил не тем, что ждали (HTTP $code)", code)
         }
         val payload = json.optJSONArray("payload") ?: run {
-            debug("$act → нет payload:\n${text.take(1500)}")
+            debug("$act → нет payload (ответ скрыт)")
             throw ApiException("VK изменил формат ответа")
         }
         when (payload.opt(0)?.toString()) {
@@ -334,7 +352,7 @@ class VkApi(private val prefs: Prefs) {
             val pl = findPlaylist(data)
             val items = collect(pl?.optJSONArray("list") ?: data)
             if (items.isEmpty()) {
-                if (page == 0) debug("load_section: треков не нашлось:\n${data.toString().take(2000)}")
+                if (page == 0) debug("load_section: треков не нашлось (ответ скрыт)")
                 break
             }
             out += items
@@ -387,7 +405,7 @@ class VkApi(private val prefs: Prefs) {
     private suspend fun section(name: String, extra: Map<String, Any?> = emptyMap()): List<Track> {
         val data = post("section", mapOf("owner_id" to uid, "section" to name, "claim" to 0, "is_layer" to 0) + extra)
         val items = collect(data)
-        if (items.isEmpty()) debug("section $name $extra: треков не нашлось:\n${data.toString().take(2000)}")
+        if (items.isEmpty()) debug("section $name: треков не нашлось (ответ скрыт)")
         return remember(items)
     }
 
@@ -400,9 +418,9 @@ class VkApi(private val prefs: Prefs) {
                 .post(FormBody.Builder().add("version", "1").add("app_id", "6287487").build())
                 .header("Origin", base).header("Referer", "$base/"),
         )
-        val j = runCatching { JSONObject(text) }.getOrElse { throw ApiException("web_token: HTTP $code, не JSON: ${text.take(300)}") }
+        val j = runCatching { JSONObject(text) }.getOrElse { throw ApiException("web_token: HTTP $code, не JSON: [ответ скрыт]") }
         val data = j.optJSONObject("data")
-        val t = data?.str("access_token") ?: throw ApiException("web_token: нет токена: ${text.take(300)}")
+        val t = data?.str("access_token") ?: throw ApiException("web_token: нет токена: [ответ скрыт]")
         val exp = data.optLong("expires")
         token = t to (if (exp > 1_000_000_000L) exp * 1000 - 60_000 else System.currentTimeMillis() + 30 * 60_000)
         return t
@@ -436,7 +454,7 @@ class VkApi(private val prefs: Prefs) {
         val mBase = base.replace("://", "://m.")
         val (code, text) = send(Request.Builder().url("$mBase$path").header("X-Requested-With", "XMLHttpRequest"))
         val items = collect(text.replaceFirst(Regex("^\\s*<!--"), ""))
-        if (items.isEmpty()) debug("m$path: треков не нашлось (HTTP $code):\n${text.take(1200)}")
+        if (items.isEmpty()) debug("mobile: треков не нашлось (HTTP $code, ответ скрыт)")
         remember(items)
     }
 
@@ -519,9 +537,9 @@ class VkApi(private val prefs: Prefs) {
                 val data = post("reload_audio", mapOf("ids" to full))
                 val all = collect(data)
                 found = all.firstOrNull { "${it.opt(I_OWNER)}_${it.opt(I_ID)}" == srcId } ?: all.firstOrNull()
-                if (found?.optString(I_URL).isNullOrEmpty()) debug("reload_audio $full: ссылки нет:\n${data.toString().take(1500)}")
+                if (found?.optString(I_URL).isNullOrEmpty()) debug("reload_audio: ссылки нет (ответ скрыт)")
             } catch (e: Exception) {
-                debug("reload_audio $full: ${e.message}")
+                debug("reload_audio: ${e.message}")
             }
             if (found?.optString(I_URL).isNullOrEmpty()) {
                 // трек пришёл из api.vk.com без хешей — спрашиваем ссылку там же

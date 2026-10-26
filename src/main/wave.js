@@ -1,288 +1,172 @@
-// Общая «Моя волна»: основа — поток Яндекса, в него подмешиваются треки YouTube Music.
-// Доля YTM задаётся в процентах; если войти только в один сервис, волна строится из него одного.
-// Недавно звучавшие треки (история всех устройств) волна пропускает, а начало каждый раз новое.
-
-import { recencyPick, boostShare } from './freshness.js';
-
-export function interleave(base, extra, sharePercent) {
-  const share = Math.max(0, Math.min(100, sharePercent)) / 100;
-  if (!base.length || share >= 1) return { out: [...extra], usedExtra: extra.length };
-  if (share <= 0 || !extra.length) return { out: [...base], usedExtra: 0 };
-  const perBase = share / (1 - share); // сколько YT-треков на один трек Яндекса
-  const out = [];
-  let credit = 0;
-  let used = 0;
-  for (const t of base) {
-    out.push(t);
-    credit += perBase;
-    while (credit >= 1 && used < extra.length) {
-      out.push(extra[used++]);
-      credit -= 1;
-    }
-  }
-  return { out, usedExtra: used };
-}
+// Unified wave: all services supply candidates, one policy owns the resulting queue.
+import { recencyPick } from './freshness.js';
+import { WavePolicy, artistKey, sameRecording, recentAffinity } from './wave-policy.js';
 
 export function shuffle(list) {
   const a = [...list];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
   return a;
 }
-
+// Retained for callers/tests outside the wave. WavePolicy uses session-wide quotas instead.
+export function interleave(base, extra, percent) {
+  const share = Math.max(0, Math.min(100, percent)) / 100;
+  if (!base.length || share >= 1) return { out: [...extra], usedExtra: extra.length };
+  if (!extra.length || share <= 0) return { out: [...base], usedExtra: 0 };
+  const out = []; let credit = 0, usedExtra = 0;
+  for (const t of base) { out.push(t); credit += share / (1 - share); while (credit >= 1 && usedExtra < extra.length) { out.push(extra[usedExtra++]); credit--; } }
+  return { out, usedExtra };
+}
+const bounded = async (work, fallback = [], timeout = 8000) => {
+  let timer;
+  try { return await Promise.race([Promise.resolve().then(work), new Promise(resolve => { timer = setTimeout(() => resolve(fallback), timeout); })]); }
+  catch { return fallback; }
+  finally { clearTimeout(timer); }
+};
+const DAY = 86400000;
 export class WaveMixer {
-  /**
-   * getRecent — async () => Set id треков, звучавших недавно (на всех устройствах), чтобы волна не повторялась.
-   * memory — { get(), set(v) }: что волна помнит между запусками (какими треками она начиналась).
-   */
-  constructor({ ya, yt, sc, vk = null, getSettings, getRecent = async () => new Set(), getFavorites = async () => [], memory = null, isDown = () => false }) {
-    this.getFavorites = getFavorites; // любимые исполнители (лайк на странице исполнителя)
-    this.boost = []; // подмес: треки любимых исполнителей и похожее на свежие лайки
-    this.boosting = null;
-    this.favCount = 0;
-    this.likedCache = {};
-    this.isDown = isDown; // сервис временно лежит (статус с сервера Nyao) — его пропускаем
-    this.ya = ya;
-    this.yt = yt;
-    this.sc = sc;
-    this.vk = vk;
-    this.getSettings = getSettings;
-    this.getRecent = getRecent;
-    this.memory = memory;
-    this.pool = [];
-    this.seen = new Set();
-    this.recent = new Set();
-    this.last = [];
-    this.refilling = null;
+  constructor({ ya, yt, sc, vk = null, sp = null, getSettings, getRecent = async () => new Set(), getHistory = () => [], getFavorites = async () => [], profile = null, isDown = () => false }) {
+    Object.assign(this, { ya, yt, sc, vk, sp, getSettings, getRecent, getHistory, getFavorites, profile, isDown });
+    this.generation = 0;
+    this.session = null;
+    try { this.state = profile?.get() || {}; } catch { this.state = {}; }
+    this.state.played ||= []; this.state.disliked ||= []; this.state.libraries ||= {}; this.state.taste = Object.assign(Object.create(null), this.state.taste || {});
+    this.libraryCache = new Map();
   }
-
-  /** Яндекс подключён и не лежит */
-  get yaUp() {
-    return this.ya.loggedIn && !this.isDown('ya');
+  sources() { return [['ya', this.ya], ['yt', this.yt], ['sc', this.sc], ['vk', this.vk], ['sp', this.sp]].filter(([id, p]) => p?.loggedIn && !p.regionBlocked && !this.isDown(id)); }
+  opts() { const s = this.getSettings(); return { diversity: s.waveDiversity || 'any', mood: s.waveMood, fresh: s.waveFresh ?? 60, share: Math.max(0, Math.min(100, s.ytmShare ?? 30)) }; }
+  save() { try { this.profile?.set(this.state); } catch { /* The wave can run if disk is unavailable. */ } }
+  invalidateLikes() { this.libraryCache.clear(); if (this.yt) this.yt.likedCache = null; if (this.session) this.session.hydrated = false; }
+  async start(queueIds = []) {
+    const generation = ++this.generation;
+    const policy = new WavePolicy(); this.state.disliked.forEach(t => policy.block(t));
+    const s = { generation, policy, candidates: [], libraries: [], recent: new Set(), history: [], loads: 0, loading: null, hydrated: false, excludedIds: new Set(queueIds), seedHistory: [] };
+    this.session = s;
+    s.recent = await bounded(() => this.getRecent(), new Set());
+    this.ensure(s);
+    const now = Date.now();
+    s.history = [...this.getHistory().filter(p => now - p.playedAt < (p.skipped ? 30 : 14) * DAY).map(p => ({ ...p, id: p.trackId || p.id })),
+      ...this.state.played.filter(p => now - p.at < (p.skipped ? 30 : 14) * DAY).map(p => p.track)];
+    return this.batch(s, true);
   }
-
-  opts() {
-    const s = this.getSettings();
-    return { diversity: s.waveDiversity, mood: s.waveMood, share: s.ytmShare, fresh: s.waveFresh == null ? 60 : Number(s.waveFresh) };
-  }
-
-  /** «Дополнительные» сервисы волны: YouTube Music и SoundCloud — что подключено */
-  get extras() {
-    return [[this.yt, 'yt'], [this.sc, 'sc'], [this.vk, 'vk']].filter(([p, id]) => p && p.loggedIn && !this.isDown(id)).map(([p]) => p);
-  }
-
-  async refillPool() {
-    const extras = this.extras;
-    if (!extras.length) return;
-    if (this.refilling) return this.refilling;
-    const { diversity, fresh } = this.opts();
-    const exclude = new Set([...this.seen, ...this.recent]);
-    this.refilling = Promise.all(extras.map((p) => p.wavePool({ diversity, exclude, fresh }).catch(() => [])))
-      .then((raw) => {
-        // сервис дал только недавно звучавшее — лучше пара повторов, чем пропасть из волны
-        const lists = raw.map((l) => {
-          const fresh = l.filter((t) => !exclude.has(t.id));
-          return fresh.length ? fresh : l.filter((t) => !this.seen.has(t.id)).slice(0, 2);
-        });
-        // чередуем сервисы, чтобы YouTube и SoundCloud шли вперемешку
-        const mixed = [];
-        for (let i = 0; i < Math.max(0, ...lists.map((l) => l.length)); i++) for (const l of lists) if (l[i]) mixed.push(l[i]);
-        for (const t of mixed) if (!this.seen.has(t.id) && !this.pool.some((p) => p.id === t.id)) this.pool.push(t);
-      })
-      .catch(() => {})
-      .finally(() => {
-        this.refilling = null;
+  ensure(s) { if (this.session !== s || s.generation !== this.generation) throw new Error('Настройки волны изменились — предыдущий подбор отменён'); }
+  async libraries(s) {
+    const now = Date.now();
+    const lists = await Promise.all(this.sources().map(async ([id, p]) => {
+      let cached = this.libraryCache.get(id);
+      if (!cached || now - cached.at > 120000) {
+        const tracks = await bounded(() => p.likedTracks(300));
+        this.ensure(s);
+        // Never cache a failed request as an empty library for the next two minutes.
+        if (tracks.length) { cached = { at: now, tracks }; this.libraryCache.set(id, cached); }
+      }
+      const tracks = cached?.tracks || [];
+      const previous = this.state.libraries[id];
+      const observed = {};
+      const candidates = tracks.map((track, index) => {
+        const likedAt = track.likedAt || previous?.[track.id] || (previous && !(track.id in previous) ? now : 0);
+        observed[track.id] = likedAt;
+        const t = likedAt ? { ...track, likedAt } : track;
+        return { track: t, liked: true, recency: recentAffinity(t, index, tracks.length, now), affinity: 1 + (this.state.taste[artistKey(t)] || 0) / 5 };
       });
-    return this.refilling;
+      if (tracks.length) this.state.libraries[id] = observed;
+      return candidates;
+    }));
+    this.ensure(s); this.save();
+    s.libraries = lists.flat();
+    // A recent ID from another device also suppresses equivalent versions in other catalogs.
+    s.history.push(...s.libraries.filter(c => s.recent.has(c.track.id)).map(c => c.track));
+    s.candidates = s.candidates.filter(c => !c.liked);
+    s.policy.selected.push(...s.libraries.filter(c => s.excludedIds.has(c.track.id)).map(c => c.track));
+    this.add(s, s.libraries);
   }
-
-  /** Лайки сервиса за эту волну — один раз (они тяжёлые), новые сверху */
-  liked(id, provider, limit) {
-    if (!this.likedCache[id]) this.likedCache[id] = Promise.resolve(provider.likedTracks(limit)).catch(() => []);
-    return this.likedCache[id];
+  add(s, candidates) {
+    this.ensure(s);
+    for (const c of candidates) {
+      if (!c.track?.id || s.excludedIds.has(c.track.id) || c.track.available === false || c.track.preview) continue;
+      const old = s.candidates.find(x => x.track.id === c.track.id);
+      if (old) { if (c.liked) Object.assign(old, c); }
+      else s.candidates.push(c);
+    }
+    // Remove selected candidates, but keep unplayed library candidates and provenance.
+    s.candidates = s.candidates.filter(c => !s.policy.selected.some(t => sameRecording(t, c.track))).slice(-1600);
   }
-
-  /** Популярное исполнителя по ссылке ya:/yt: */
-  async artistTop(ref) {
-    const [src, id] = [String(ref).slice(0, 2), String(ref).slice(3)];
-    if (src === 'ya' && this.yaUp) return this.ya.artistTracks(id, 30);
-    if (src === 'yt' && this.yt && !this.isDown('yt')) return ((await this.yt.artist(id)) || {}).popular || [];
-    return [];
-  }
-
-  /**
-   * Подмес волны: 1) треки любимых исполнителей; 2) свежие лайки и похожее на них —
-   * чтобы волна была про то, что слушаешь сейчас, а не про прошлогоднее.
-   */
-  refillBoost() {
-    if (this.boosting) return this.boosting;
-    this.boosting = (async () => {
-      const { fresh } = this.opts();
-      const favs = await Promise.resolve(this.getFavorites()).catch(() => []);
-      this.favCount = (favs || []).length;
-      const exclude = new Set([...this.seen, ...this.recent]);
-      const ok = (t) => t && t.available !== false && !t.preview && !exclude.has(t.id);
-      const found = [];
-      for (const a of recencyPick(favs || [], 2, 40)) {
-        const list = await this.artistTop((a.refs && (a.refs.ya || a.refs.yt)) || a.ref).catch(() => []);
-        found.push(...shuffle(list.slice(0, 25).filter(ok)).slice(0, 3));
-      }
-      if (fresh > 0) {
-        const sources = [];
-        if (this.yaUp) sources.push(['ya', this.ya, 80, (t) => this.ya.similarTracks(t.srcId)]);
-        if (this.yt && this.yt.loggedIn && !this.isDown('yt')) sources.push(['yt', this.yt, undefined, (t) => this.yt.radio(t.srcId)]);
-        for (const [id, p, limit, similar] of sources) {
-          const liked = await this.liked(id, p, limit);
-          for (const seed of recencyPick(liked, 1, fresh)) {
-            if (ok(seed) && fresh >= 50) found.push(seed); // сам свежий лайк тоже к месту
-            found.push(...shuffle(((await similar(seed).catch(() => [])) || []).filter(ok)).slice(0, 3));
-          }
-        }
-      }
-      for (const t of shuffle(found)) if (!this.seen.has(t.id) && !this.boost.some((b) => b.id === t.id)) this.boost.push(t);
-    })()
-      .catch(() => {})
-      .finally(() => {
-        this.boosting = null;
+  async recommendations(s, first) {
+    const opts = this.opts(), sources = this.sources();
+    const seeds = s.libraries.filter(c => c.track.available !== false).sort((a, b) => b.recency - a.recency);
+    const availableSeeds = seeds.filter(c => !s.seedHistory.some(t => sameRecording(t, c.track)));
+    const seed = recencyPick((availableSeeds.length ? availableSeeds : seeds).slice(0, 100), 1, opts.fresh)[0]?.track;
+    if (seed) s.seedHistory = [...s.seedHistory.slice(-4), seed];
+    const favorites = await bounded(() => this.getFavorites());
+    const favoriteNames = new Set(favorites.map(a => artistKey({ artist: a.name })));
+    const lists = await Promise.all(sources.map(async ([id, p]) => {
+      const tasks = [];
+      if (id === 'ya') tasks.push(bounded(() => first ? p.waveStart(opts) : p.waveMore(s.policy.selected.map(t => t.id))));
+      else if (id === 'vk') tasks.push(bounded(() => p.recommendations()));
+      else if (seed?.source === id && id === 'yt') tasks.push(bounded(() => p.radio(seed.srcId)));
+      else if (seed?.source === id && id === 'sc') tasks.push(bounded(() => p.related(seed.srcId)));
+      if (seed?.source === 'ya' && id === 'ya') tasks.push(bounded(() => p.similarTracks(seed.srcId)));
+      // Cross-service taste transfer uses public metadata, not unavailable recommendation endpoints.
+      if (seed && artistKey(seed)) tasks.push(bounded(async () => (await p.search(String(seed.artist).split(/,| feat\.? /i)[0])).filter(t => artistKey(t) === artistKey(seed))));
+      if (!tasks.length && id === 'yt') tasks.push(bounded(async () => (await p.home()).flatMap(section => section.tracks || [])));
+      const tracks = (await Promise.all(tasks)).flat();
+      return tracks.map(track => {
+        const liked = s.libraries.filter(c => sameRecording(c.track, track));
+        const affinity = (seed && artistKey(track) === artistKey(seed) ? 0.8 : 0.2) + (favoriteNames.has(artistKey(track)) ? 0.2 : 0) + (this.state.taste[artistKey(track)] || 0) / 5;
+        return { track, liked: !!liked.length, recency: Math.max(0, ...liked.map(c => c.recency)), affinity,
+          reason: seed && artistKey(track) === artistKey(seed) ? `Исполнитель из твоих лайков: ${seed.artist}` : 'Рекомендация сервиса' };
       });
-    return this.boosting;
+    }));
+    this.ensure(s); this.add(s, lists.flat()); s.loads++;
   }
-
-  /** Подмешать подмес в готовую пачку */
-  withBoost(out) {
-    const { fresh } = this.opts();
-    const share = boostShare(fresh, this.favCount);
-    if (!this.boost.length || share <= 0 || !out.length) return out;
-    const fresh2 = this.boost.filter((t) => !this.seen.has(t.id) && !out.some((x) => x.id === t.id));
-    const mixed = interleave(out, fresh2, share);
-    const used = fresh2.slice(0, mixed.usedExtra);
-    this.boost = this.boost.filter((t) => !used.includes(t));
-    used.forEach((t) => {
-      this.seen.add(t.id);
-      this.remember(t.id);
-    });
-    if (this.boost.length < 4) this.refillBoost();
-    return mixed.out;
-  }
-
-  /**
-   * Новое из пачки Яндекса. Ступени, чтобы волна не обрывалась:
-   * 1) не звучало ни в этом запуске, ни недавно; 2) недавно звучало, но не в этом запуске;
-   * 3) повтор из этого запуска, но не из последних 30 треков.
-   */
-  pickFresh(list, strict) {
-    const a = list.filter((t) => t && !this.seen.has(t.id) && !this.recent.has(t.id));
-    if (a.length || strict) return a;
-    const b = list.filter((t) => t && !this.seen.has(t.id));
-    if (b.length) return b.slice(0, 4);
-    return list.filter((t) => t && !this.last.includes(t.id)).slice(0, 3);
-  }
-
-  remember(id) {
-    this.last.push(id);
-    if (this.last.length > 30) this.last.shift();
-  }
-
-  async batch(yaPromise, retryPromise = yaPromise) {
-    const { share } = this.opts();
-    const useYt = this.extras.length > 0 && share > 0;
-    if (useYt && this.pool.length < 6) await this.refillPool();
-    let base = [];
-    let gotAny = false;
-    let lastList = [];
-    if (this.yaUp && share < 100) {
-      // Яндекс прислал только уже звучавшее — просим следующую пачку, а не сдаёмся
-      for (let attempt = 0; attempt < 6; attempt++) {
-        let list;
-        try {
-          list = await (attempt === 0 ? yaPromise() : retryPromise());
-        } catch (e) {
-          if (!useYt && attempt === 0) throw e;
-          break;
-        }
-        if (list && list.length) {
-          gotAny = true;
-          lastList = [...lastList, ...list.filter((t) => t && !lastList.some((x) => x.id === t.id))];
-        }
-        base = this.pickFresh(list || [], attempt < 4);
-        if (base.length) break;
+  async batch(s, first = false) {
+    if (s.loading) return s.loading;
+    s.loading = (async () => {
+      this.ensure(s);
+      if (!s.hydrated) { await this.libraries(s); s.hydrated = true; }
+      // Refresh candidate diversity before selecting, not after returning an all-Yandex batch.
+      if (first || s.candidates.filter(c => !c.liked).length < 12 || s.loads % 3 === 0) await this.recommendations(s, first);
+      this.ensure(s);
+      const connected = new Set(this.sources().map(([id]) => id));
+      s.candidates = s.candidates.filter(c => connected.has(c.track.source));
+      let result = s.policy.select(s.candidates, { ...this.opts(), recentIds: s.recent, history: s.history });
+      if (!result.length) {
+        await this.recommendations(s, false);
+        result = s.policy.select(s.candidates, { ...this.opts(), recentIds: s.recent, history: s.history });
       }
-      // новых пачек не дали — лучше повтор из всего полученного, чем тишина
-      if (!base.length && lastList.length) base = this.pickFresh(lastList, false);
-    }
-    base.forEach((t) => {
-      this.seen.add(t.id);
-      this.remember(t.id);
-    });
-    let extraSource = useYt ? this.pool : [];
-    if (!base.length && useYt) extraSource = this.pool.slice(0, 6); // волна только из YT
-    const { out, usedExtra } = interleave(base, extraSource, base.length ? share : 100);
-    const usedTracks = extraSource.slice(0, usedExtra);
-    this.pool = this.pool.filter((t) => !usedTracks.includes(t));
-    usedTracks.forEach((t) => {
-      this.seen.add(t.id);
-      this.remember(t.id);
-    });
-    if (useYt && this.pool.length < 6) this.refillPool();
-    if (out.length) return this.withBoost(out);
-    {
-      if (this.yaUp || this.extras.length) throw new Error(gotAny ? 'Сервисы прислали только уже сыгранное — нажми ещё раз, попробую снова' : 'Сервисы не прислали треков — проверь интернет и попробуй ещё раз');
-      throw new Error('Волна пустая: войди хотя бы в один сервис в настройках');
-    }
-    return out;
+      if (!result.length) throw new Error(this.sources().length ? 'Новых подходящих треков пока нет. Измени настройки волны или добавь лайки.' : 'Войди хотя бы в один сервис для волны');
+      this.add(s, []);
+      if (first && this.ya?.loggedIn) bounded(() => this.ya.waveFeedback('radioStarted', { source: 'ya' }));
+      return result;
+    })();
+    try { return await s.loading; } finally { s.loading = null; }
   }
-
-  async start() {
-    this.pool = [];
-    this.seen = new Set();
-    this.last = [];
-    this.boost = [];
-    this.likedCache = {};
-    try {
-      this.recent = await this.getRecent();
-    } catch {
-      this.recent = new Set();
+  async more(queueIds = []) {
+    if (!this.session) {
+      return this.start(queueIds);
     }
-    const { diversity, mood } = this.opts();
-    // подмес готовим параллельно, но ждём не дольше пары секунд — первый трек важнее
-    await Promise.race([this.refillBoost(), new Promise((r) => setTimeout(r, 2500))]);
-    const tracks = this.freshStart(await this.batch(() => this.ya.waveStart({ diversity, mood }), () => this.ya.waveMore([...this.seen])));
-    if (this.ya.loggedIn) this.ya.waveFeedback('radioStarted', { source: 'ya' });
-    return tracks;
+    const s = this.session;
+    queueIds.forEach(id => s.excludedIds.add(id));
+    // Restored queue IDs must not be re-enqueued, even before feedback/history arrives.
+    s.candidates = s.candidates.filter(c => !queueIds.includes(c.track.id));
+    return this.batch(s);
   }
-
-  /**
-   * Начало волны не должно быть одинаковым: перемешиваем первые треки и не ставим первым тот,
-   * с которого волна уже начиналась в последние запуски (привет, Кобзон).
-   */
-  freshStart(tracks) {
-    if (tracks.length < 2) return tracks;
-    const head = shuffle(tracks.slice(0, Math.min(12, tracks.length)));
-    const out = [...head, ...tracks.slice(head.length)];
-    const firsts = (this.memory && this.memory.get()) || [];
-    const i = out.findIndex((t) => !firsts.includes(t.id));
-    if (i > 0) out.unshift(...out.splice(i, 1));
-    if (this.memory) this.memory.set([out[0].id, ...firsts.filter((id) => id !== out[0].id)].slice(0, 40));
-    return out;
-  }
-
-  async more(queueIds) {
-    // волна восстановлена после перезапуска (start не вызывался) — всё равно не повторяем недавнее
-    if (!this.recent || !this.recent.size) {
-      try {
-        this.recent = await this.getRecent();
-      } catch {
-        this.recent = new Set();
-      }
-      if (!this.seen) this.seen = new Set();
-      for (const id of queueIds || []) this.seen.add(id);
-    }
-    return this.batch(() => this.ya.waveMore(queueIds), () => this.ya.waveMore([...queueIds, ...[...this.seen].slice(-10)]));
-  }
-
   async feedback(type, track, played) {
-    if (track && track.source === 'ya') await this.ya.waveFeedback(type, track, played);
+    if (!track) return;
+    const now = Date.now();
+    if (type === 'dislike') {
+      this.state.disliked = [track, ...this.state.disliked.filter(t => !sameRecording(t, track))].slice(0, 500);
+      this.session?.policy.block(track);
+    }
+    if (['trackStarted', 'trackFinished', 'skip', 'dislike'].includes(type)) {
+      this.state.played = [{ track, at: now, skipped: type === 'dislike' || (type === 'skip' && played < 30) },
+        ...this.state.played.filter(p => !sameRecording(p.track, track))].slice(0, 1500);
+    }
+    const artist = artistKey(track);
+    const delta = type === 'dislike' ? -3 : type === 'like' ? 2 : type === 'skip' && played < 30 ? -1 : type === 'trackFinished' && played >= 30 ? 1 : 0;
+    if (artist && delta) this.state.taste[artist] = Math.max(-5, Math.min(5, (this.state.taste[artist] || 0) * 0.95 + delta));
+    if (Object.keys(this.state.taste).length > 1500) delete this.state.taste[Object.keys(this.state.taste)[0]];
+    if (type === 'like') this.invalidateLikes();
+    this.save();
+    if (track.source === 'ya') await bounded(() => this.ya.waveFeedback(type, track, played));
   }
 }

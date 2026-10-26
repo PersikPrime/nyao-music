@@ -1,5 +1,6 @@
 // Плеер: очередь, режимы «волна» и «список», перемотка, Media Session (медиаклавиши Windows).
 const api = window.nyao;
+import { spMode } from './sp-mode.js';
 
 // Честное перемешивание (Фишер — Йетс): sort(() => Math.random() - 0.5) даёт перекос
 function shuffled(arr) {
@@ -9,6 +10,16 @@ function shuffled(arr) {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+
+/** Ссылка на поток. Трек Spotify — тишина его длины (звук даёт устройство Spotify, см. spotify-sync.js) */
+export function streamSrc(t) {
+  const base = `nyao://stream/${encodeURIComponent(t.id)}`;
+  if (t.source !== 'sp') return base;
+  const q = new URLSearchParams({ d: String(Math.round(t.duration || 0)), t: t.title || '', a: t.artist || '' });
+  if (spMode.fallback) q.set('x', '1'); // x=1 — сыграть копию из другого сервиса
+  return `${base}?${q}`;
 }
 
 export class Player extends EventTarget {
@@ -26,6 +37,7 @@ export class Player extends EventTarget {
     this.errors = 0;
     this.startedAt = 0;
     this.continueSimilar = true; // список доиграл — продолжать похожим
+    this.queueGeneration = 0;
     this.forceContinue = false; // трек из поиска в режиме «дальше похожее»
 
     audio.addEventListener('ended', () => {
@@ -71,10 +83,13 @@ export class Player extends EventTarget {
   }
 
   async startWave() {
+    const generation = ++this.queueGeneration;
+    this.loadingMore = false;
     this.reportLeave(true);
     this.emit('loading', true);
     try {
       const tracks = await api.wave.start();
+      if (generation !== this.queueGeneration) return;
       this.mode = 'wave';
       if (this.repeat === 'all') this.repeat = 'off'; // у волны нет конца — повтор плейлиста не имеет смысла
       this.label = 'Моя волна';
@@ -89,7 +104,10 @@ export class Player extends EventTarget {
   // Перезапуск волны после смены настроек: текущий трек доигрывает, хвост очереди меняется
   async refreshWave() {
     if (this.mode !== 'wave') return;
+    const generation = ++this.queueGeneration;
+    this.loadingMore = false;
     const tracks = await api.wave.start();
+    if (generation !== this.queueGeneration || this.mode !== 'wave') return;
     const cur = this.current;
     this.queue = cur ? [cur, ...tracks.filter((t) => t.id !== cur.id)] : tracks;
     this.index = 0;
@@ -100,6 +118,8 @@ export class Player extends EventTarget {
   playList(tracks, startIndex = 0, label = '') {
     const playable = tracks.filter((t) => t.available !== false);
     if (!playable.length) return;
+    ++this.queueGeneration;
+    this.loadingMore = false;
     this.reportLeave(true);
     this.forceContinue = false;
     const start = Math.max(0, playable.indexOf(tracks[startIndex]));
@@ -184,13 +204,31 @@ export class Player extends EventTarget {
     this.emit('queue');
   }
 
+  /** Тот же трек заново с того же места (например, переключились на копию из другого сервиса) */
+  reload() {
+    const t = this.current;
+    if (!t) return;
+    const pos = this.audio.currentTime;
+    const play = !this.audio.paused;
+    this.audio.src = streamSrc(t);
+    if (pos > 1) {
+      const once = () => {
+        this.audio.removeEventListener('loadedmetadata', once);
+        this.seek(pos);
+      };
+      this.audio.addEventListener('loadedmetadata', once);
+    }
+    if (play) this.audio.play().catch(() => {});
+  }
+
   load() {
     const t = this.current;
     if (!t) return;
-    this.audio.src = `nyao://stream/${encodeURIComponent(t.id)}`;
+    this.audio.src = streamSrc(t);
     this.audio.play().catch(() => {});
     this.startedAt = Date.now();
     if (this.mode === 'wave') api.wave.feedback('trackStarted', t, 0).catch(() => {});
+    if (this.mode === 'radio') api.radio.feedback('trackStarted', t, 0).catch(() => {});
     const nxt = this.queue[this.index + 1];
     if (nxt) api.prepare(nxt.id).catch(() => {});
     this.updateSession();
@@ -222,10 +260,13 @@ export class Player extends EventTarget {
 
   /** Радио по треку: сам трек и бесконечное «похожее» */
   async startRadio(track) {
+    const generation = ++this.queueGeneration;
+    this.loadingMore = false;
     this.reportLeave(true);
     this.emit('loading', true);
     try {
       const tracks = await api.radio.start(track);
+      if (generation !== this.queueGeneration) return;
       this.mode = 'radio';
       if (this.repeat === 'all') this.repeat = 'off';
       this.label = `Радио: ${track.title}`;
@@ -242,16 +283,18 @@ export class Player extends EventTarget {
     if ((this.mode !== 'wave' && this.mode !== 'radio') || this.loadingMore) return;
     if (this.queue.length - this.index > 3) return;
     this.loadingMore = true;
+    const generation = this.queueGeneration;
     try {
       const ids = this.queue.map((t) => t.id);
       const more = this.mode === 'radio' ? await api.radio.more(ids) : await api.wave.more(ids);
+      if (generation !== this.queueGeneration) return;
       const have = new Set(this.queue.map((t) => t.id));
       this.queue.push(...more.filter((t) => !have.has(t.id)));
       this.emit('queue');
     } catch (e) {
       this.emit('error', e.message);
     } finally {
-      this.loadingMore = false;
+      if (generation === this.queueGeneration) this.loadingMore = false;
     }
   }
 
@@ -266,6 +309,7 @@ export class Player extends EventTarget {
     const skip = skipped && played < Math.min(30, dur * 0.5);
     if (played >= 5 || skip) api.cloud && api.cloud.play({ track: t, listened: played, skipped: skip }).catch(() => {});
     if (this.mode === 'wave') api.wave.feedback(skipped ? 'skip' : 'trackFinished', t, played).catch(() => {});
+    if (this.mode === 'radio') api.radio.feedback(skipped ? 'skip' : 'trackFinished', t, played).catch(() => {});
   }
 
   /**
@@ -300,7 +344,7 @@ export class Player extends EventTarget {
     this.repeat = ['off', 'all', 'one'].includes(s.repeat) ? s.repeat : 'off';
     this.original = this.mode === 'list' ? s.tracks.slice() : undefined;
     const t = this.current;
-    this.audio.src = `nyao://stream/${encodeURIComponent(t.id)}`;
+    this.audio.src = streamSrc(t);
     const pos = Number(s.position) || 0;
     if (pos > 2) {
       const once = () => {
@@ -332,6 +376,8 @@ export class Player extends EventTarget {
 
   async next(skipped = true) {
     if (!this.current) return;
+    // переход сам по окончании трека (для Spotify: он перейдёт к следующему по списку без команды)
+    this.lastAuto = !skipped;
     this.reportLeave(skipped);
     if (this.index + 1 >= this.queue.length) {
       if (this.mode === 'wave' || this.mode === 'radio') {
@@ -387,6 +433,7 @@ export class Player extends EventTarget {
     const t = this.current;
     if (!t) return;
     if (this.mode === 'wave') api.wave.feedback('dislike', t, Math.round(this.audio.currentTime)).catch(() => {});
+    if (this.mode === 'radio') api.radio.feedback('dislike', t, Math.round(this.audio.currentTime)).catch(() => {});
     this.next(true);
   }
 
@@ -419,7 +466,7 @@ export class Player extends EventTarget {
       this.emit('error', `Не играет «${t.title}»${why}${stop ? '' : ' — пропускаю'}`);
     });
     // После трёх ошибок подряд останавливаемся, чтобы не пролистать всю очередь
-    if (!stop) setTimeout(() => this.next(true), 1500);
+    if (!stop) { const startedAt = this.startedAt; setTimeout(() => { if (this.current === t && this.startedAt === startedAt) this.next(true); }, 1500); }
     else this.emit('state');
   }
 

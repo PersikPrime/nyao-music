@@ -1,6 +1,12 @@
 package org.nyao.music.data
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -29,6 +35,35 @@ object Net {
         client.newCall(req).execute().use { res -> res.code to (res.body?.string() ?: "") }
 
     suspend fun call(req: Request): Pair<Int, String> = withContext(Dispatchers.IO) { execute(req) }
+
+    // ---- Есть ли интернет ----
+
+    private var cm: ConnectivityManager? = null
+    private val _online = MutableStateFlow(true)
+    /** Есть ли сейчас интернет. Меняется сразу, как система заметила: экраны могут перестроиться без запросов в сеть */
+    val online: StateFlow<Boolean> = _online
+
+    /** Пока система не спрошена (тесты, ранний старт), считаем, что интернет есть */
+    val isOnline: Boolean get() = cm?.let { hasInternet(it) } ?: true
+
+    fun init(context: Context) {
+        if (cm != null) return
+        val m = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        cm = m
+        _online.value = hasInternet(m)
+        runCatching {
+            m.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) { _online.value = true }
+                override fun onLost(network: Network) { _online.value = hasInternet(m) }
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) { _online.value = usable(caps) }
+            })
+        }
+    }
+
+    private fun usable(caps: NetworkCapabilities?): Boolean =
+        caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+
+    private fun hasInternet(m: ConnectivityManager): Boolean = runCatching { usable(m.getNetworkCapabilities(m.activeNetwork)) }.getOrDefault(false)
 }
 
 class ApiException(message: String, val code: Int = 0) : IOException(message)

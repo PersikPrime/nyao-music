@@ -1,3 +1,4 @@
+import { safeDiagnostic } from '../diagnostics.js';
 // VK Музыка (dev-ветка): внутренние запросы сайта vk.com (al_audio.php) от имени сессии,
 // в которую пользователь вошёл в обычном окне VK. Пароль к нам не попадает — только cookie этой сессии.
 //
@@ -187,11 +188,14 @@ export class VKProvider {
    * fetch — запросы через сессию окна входа VK (cookie); getUserId — async () => id или null;
    * debug — запись сырых ответов в vk-debug.log, чтобы чинить, когда VK что-то поменяет
    */
-  constructor({ fetch, getUserId, getBase = () => BASE, debug = () => {} }) {
+  constructor({ fetch, getUserId, getBase = () => BASE, refreshSession = async () => null, debug = () => {} }) {
     this.fetch = fetch;
     this.getUserId = getUserId;
     this.getBase = getBase;
-    this.debug = debug;
+    this.debug = message => debug(safeDiagnostic(message));
+    this.refreshSession = refreshSession;
+    this.recovering = null;
+    this.sessionEpoch = 0;
     this.uid = null;
     this.account = null;
     this.works = {}; // какой способ поиска/рекомендаций сработал
@@ -214,7 +218,8 @@ export class VKProvider {
     this.account = null;
   }
 
-  async post(act, params = {}) {
+  async post(act, params = {}, retry = true) {
+    const epoch = this.sessionEpoch;
     if (!this.uid) await this.refresh();
     if (!this.uid) throw new Error('Нужен вход во VK');
     const body = new URLSearchParams({ al: '1', act, ...params });
@@ -234,16 +239,33 @@ export class VKProvider {
     try {
       json = JSON.parse(text.replace(/^\s*<!--/, ''));
     } catch {
-      this.debug(`${act} ${JSON.stringify(params)} → HTTP ${res.status}, не JSON:\n${text.slice(0, 2000)}`);
+      this.debug(`${act} → HTTP ${res.status}, не JSON (ответ скрыт)`);
       throw new Error(`VK ответил не тем, что ждали (HTTP ${res.status}) — подробности в vk-debug.log`);
     }
     const payload = json && json.payload;
     if (!Array.isArray(payload)) {
-      this.debug(`${act} → нет payload:\n${text.slice(0, 2000)}`);
+      this.debug(`${act} → нет payload (ответ скрыт)`);
       throw new Error('VK изменил формат ответа — подробности в vk-debug.log');
     }
     const code = String(payload[0]);
     if (code === '3') {
+      if (retry) {
+        if (epoch === this.sessionEpoch) {
+          if (!this.recovering) {
+            const uid = this.uid;
+            this.recovering = Promise.resolve().then(() => this.refreshSession(uid, base))
+              .then(result => {
+                if (this.uid !== uid) throw new Error('Аккаунт VK изменился — повтори запрос');
+                if (result === false) { this.setLoggedOut(); throw new Error('Сессия VK закончилась — войди заново'); }
+                if (result !== true) throw new Error('VK не ответил при восстановлении входа — попробуй позже');
+                this.token = null;
+                this.sessionEpoch++;
+              }).finally(() => { this.recovering = null; });
+          }
+          await this.recovering;
+        }
+        return this.post(act, params, false);
+      }
       this.setLoggedOut();
       throw new Error('Сессия VK закончилась — войди заново');
     }
@@ -287,7 +309,7 @@ export class VKProvider {
       const pl = findPlaylist(data);
       const items = collectAudios(pl ? pl.list : data);
       if (!items.length) {
-        if (page === 0) this.debug(`load_section: треков не нашлось:\n${JSON.stringify(data).slice(0, 3000)}`);
+        if (page === 0) this.debug('load_section: треков не нашлось (ответ скрыт)');
         break;
       }
       out.push(...items);
@@ -340,7 +362,7 @@ export class VKProvider {
     if (!this.uid) await this.refresh();
     const data = await this.post('section', { owner_id: this.uid, section: name, claim: 0, is_layer: 0, ...extra });
     const items = collectAudios(data);
-    if (!items.length) this.debug(`section ${name} ${JSON.stringify(extra)}: треков не нашлось:\n${JSON.stringify(data).slice(0, 3000)}`);
+    if (!items.length) this.debug(`section ${name}: треков не нашлось (ответ скрыт)`);
     return this.remember(items);
   }
 
@@ -362,7 +384,7 @@ export class VKProvider {
     try {
       j = JSON.parse(text);
     } catch {
-      throw new Error(`web_token: HTTP ${res.status}, не JSON: ${text.slice(0, 300)}`);
+      throw new Error(`web_token: HTTP ${res.status}, не JSON: [ответ скрыт]`);
     }
     const t = j && j.data && j.data.access_token;
     if (!t) throw new Error(`web_token: нет токена: ${text.slice(0, 300)}`);
@@ -399,7 +421,7 @@ export class VKProvider {
     const res = await this.fetch(`${base}${path}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
     const text = decodeVk(Buffer.from(await res.arrayBuffer()), res.headers.get('content-type'));
     const items = collectAudios(text.replace(/^\s*<!--/, ''));
-    if (!items.length) this.debug(`m${path}: треков не нашлось (HTTP ${res.status}):\n${text.slice(0, 1500)}`);
+    if (!items.length) this.debug(`mobile: треков не нашлось (HTTP ${res.status}, ответ скрыт)`);
     return this.remember(items);
   }
 
@@ -498,7 +520,7 @@ export class VKProvider {
         data = await this.post('reload_audio', { ids: full });
         found = collectAudios(data).find((x) => `${x[I.owner]}_${x[I.id]}` === String(srcId)) || collectAudios(data)[0];
       } catch (e) {
-        this.debug(`reload_audio ${full}: ${e.message}`);
+        this.debug(`reload_audio: ${e.message}`);
       }
       if (!found || !found[I.url]) {
         // трек пришёл из api.vk.com без хешей — спрашиваем ссылку там же
@@ -511,7 +533,7 @@ export class VKProvider {
         }
       }
       if (!found || !found[I.url]) {
-        this.debug(`reload_audio ${full}: ссылки нет:\n${JSON.stringify(data).slice(0, 2000)}`);
+        this.debug('reload_audio: ссылки нет (ответ скрыт)');
         throw new Error('VK не дал ссылку на трек (возможно, он недоступен в твоей стране или нужна подписка)');
       }
       a = found;

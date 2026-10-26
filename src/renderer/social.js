@@ -1,7 +1,19 @@
 // Логика Nyao Connect, «Слушать вместе» и «Итогов» без привязки к экрану — чтобы её можно было проверить отдельно.
 
 export const REACTIONS = ['🔥', '❤️', '😂', '😮', '👏', '🎶'];
-export const JOIN_BASE = 'https://api.nmusic.bixtl.cc/join/';
+/** Сайт и ссылки «Поделиться» */
+export const WEB_BASE = 'https://music.withnyao.app';
+export const JOIN_BASE = `${WEB_BASE}/share/room/`;
+/** Ссылка на профиль по нику */
+export const profileLink = (nick) => `${WEB_BASE}/share/u/${encodeURIComponent(nick)}`;
+/** Ссылка на трек: открывает его в Nyao (или находит копию в другом сервисе) */
+export function trackLink(t) {
+  const q = new URLSearchParams();
+  if (t.title) q.set('t', String(t.title).slice(0, 200));
+  if (t.artist) q.set('a', String(t.artist).slice(0, 200));
+  if (t.duration) q.set('d', String(Math.round(t.duration)));
+  return `${WEB_BASE}/share/track/${encodeURIComponent(t.id).replace(/%3A/g, ':')}?${q}`;
+}
 
 /** Где сейчас трек на другом устройстве: позиция + сколько прошло с последнего сообщения */
 export function livePosition(d, now = Date.now()) {
@@ -13,7 +25,8 @@ export function livePosition(d, now = Date.now()) {
 /** Код комнаты из того, что ввели: «abc-123», ссылка-приглашение… → «ABC123» или null */
 export function parseRoomCode(input) {
   const s = String(input || '').trim();
-  const m = s.match(/join\/([A-Za-z0-9]{6})\b/);
+  // ссылки nyao://join/КОД, …/share/room/КОД (кнопка «Скопировать ссылку») и старые …/join/КОД
+  const m = s.match(/(?:join|share\/room)\/([A-Za-z0-9]{6})\b/);
   const code = (m ? m[1] : s.replace(/[^A-Za-z0-9]/g, '')).toUpperCase();
   return /^[A-Z0-9]{6}$/.test(code) ? code : null;
 }

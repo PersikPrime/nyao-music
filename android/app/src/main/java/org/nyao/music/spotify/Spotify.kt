@@ -19,4 +19,10 @@ object Spotify {
     }
 
     val loggedIn: Boolean get() = ::auth.isInitialized && auth.loggedIn.value
+
+    /**
+     * Почему плеер Spotify сейчас не может играть сам: "account" (нет Premium), "init" (нет Widevine) и т.п.
+     * Тогда треки Spotify играют найденной копией из другого сервиса. Сбрасывается при новом входе/выходе.
+     */
+    @Volatile var blocked: String? = null
 }

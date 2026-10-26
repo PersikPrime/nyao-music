@@ -107,7 +107,70 @@ export const SCHEMA = [
     token TEXT NOT NULL,
     platform TEXT NOT NULL DEFAULT '',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  )`
+  )`,
+  // ---------- Тексты песен (lyrics.withnyao.app): пишут пользователи, проверяют специалисты ----------
+  `CREATE TABLE IF NOT EXISTS lyrics_tracks (
+    id BIGSERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    album TEXT NOT NULL DEFAULT '',
+    duration INTEGER NOT NULL DEFAULT 0,
+    title_norm TEXT NOT NULL,
+    artist_norm TEXT NOT NULL,
+    published_version BIGINT,
+    hidden BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS lyrics_tracks_norm ON lyrics_tracks (artist_norm, title_norm)`,
+  // версии текста: pending (ждёт проверки) → published / returned (на доработку) / rejected
+  `CREATE TABLE IF NOT EXISTS lyrics_versions (
+    id BIGSERIAL PRIMARY KEY,
+    track_id BIGINT NOT NULL REFERENCES lyrics_tracks(id) ON DELETE CASCADE,
+    author_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    plain TEXT NOT NULL DEFAULT '',
+    synced TEXT NOT NULL DEFAULT '',
+    instrumental BOOLEAN NOT NULL DEFAULT false,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reviewer_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_at TIMESTAMPTZ
+  )`,
+  `CREATE INDEX IF NOT EXISTS lyrics_versions_status ON lyrics_versions (status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS lyrics_versions_author ON lyrics_versions (author_id, created_at)`,
+  // роли: specialist (проверяет), admin (назначает, разбирает жалобы)
+  `CREATE TABLE IF NOT EXISTS lyrics_roles (
+    user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // жалобы: copyright (правообладатель — трек скрывается сразу) и wrong (ошибка в тексте)
+  `CREATE TABLE IF NOT EXISTS lyrics_reports (
+    id BIGSERIAL PRIMARY KEY,
+    track_id BIGINT NOT NULL REFERENCES lyrics_tracks(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    contact TEXT NOT NULL DEFAULT '',
+    details TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    resolved_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at TIMESTAMPTZ
+  )`,
+  // трек из каталога Яндекса: точная привязка (одинаковые названия у разных записей не путаются) и обложка
+  `ALTER TABLE lyrics_tracks ADD COLUMN IF NOT EXISTS ya_id TEXT`,
+  `ALTER TABLE lyrics_tracks ADD COLUMN IF NOT EXISTS cover TEXT`,
+  `CREATE INDEX IF NOT EXISTS lyrics_tracks_ya ON lyrics_tracks (ya_id)`,
+  // структура песни: [{ from: номер строки текста, type: 'verse' | 'chorus' | … }] в JSON
+  `ALTER TABLE lyrics_versions ADD COLUMN IF NOT EXISTS structure TEXT NOT NULL DEFAULT ''`,
+  // ISRC — код записи, одинаковый во всех сервисах: точное совпадение без сравнения названий
+  `ALTER TABLE lyrics_tracks ADD COLUMN IF NOT EXISTS isrc TEXT`,
+  `CREATE INDEX IF NOT EXISTS lyrics_tracks_isrc ON lyrics_tracks (isrc)`,
+  // жалобы: скрыл ли трек сам сервер и с какого адреса (хэш) — чтобы ограничить автоскрытие
+  `ALTER TABLE lyrics_reports ADD COLUMN IF NOT EXISTS auto_hidden BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE lyrics_reports ADD COLUMN IF NOT EXISTS ip_hash TEXT NOT NULL DEFAULT ''`,
+  // пословное время (Enhanced LRC: «[00:12.30] <00:12.30>слово <00:12.80>слово <00:13.40>»), строки — как в synced
+  `ALTER TABLE lyrics_versions ADD COLUMN IF NOT EXISTS words TEXT NOT NULL DEFAULT ''`
 ];
 
 export async function migrate(pool) {

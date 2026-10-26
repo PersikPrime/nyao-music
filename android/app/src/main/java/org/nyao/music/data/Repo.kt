@@ -39,6 +39,13 @@ object Repo {
         private set
     lateinit var radio: Radio
         private set
+    /** Списки медиатеки на диске — чтобы «Мне нравится» и плейлисты открывались без интернета */
+    lateinit var library: LibraryCache
+        private set
+    /** Медиатека показана (хотя бы частью) из кэша на диске: не было сети или сервис не ответил. С появлением сети перечитывается */
+    val libraryCached = MutableStateFlow(false)
+    /** Порядок сервисов в likedTracks()/playlists() — по нему же сливаем свежие ответы с кэшем */
+    private val LIBRARY_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC, SOURCE_VK, SOURCE_SP)
     private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     enum class Mode { LIST, WAVE, RADIO }
@@ -51,6 +58,29 @@ object Repo {
 
     private val tracks = ConcurrentHashMap<String, Track>()
     private val yaStreamCache = ConcurrentHashMap<String, Pair<String, Long>>()
+
+    // ---------- Spotify без Premium: тот же трек из другого сервиса ----------
+    private val _substitutes = MutableStateFlow<Map<String, Track>>(emptyMap())
+    /** id трека Spotify → найденная копия, которая играет вместо него (для значка «SP → Я») */
+    val substitutes: StateFlow<Map<String, Track>> = _substitutes
+
+    /** Может ли Spotify сейчас играть сам: вход, Premium (если известен), регион, рабочий плеер */
+    fun spotifyPlayable(): Boolean =
+        sp.loggedIn && !sp.regionBlocked && org.nyao.music.spotify.Spotify.blocked == null && _accounts.value[SOURCE_SP]?.plus != false
+
+    /** Копия трека Spotify в Яндексе или YouTube Music (там поток обычный, без HLS) */
+    private fun substituteFor(spId: String): Track {
+        _substitutes.value["$SOURCE_SP:$spId"]?.let { return it }
+        val t = tracks["$SOURCE_SP:$spId"] ?: throw ApiException("Нет данных о треке Spotify", 404)
+        val found = runBlocking {
+            listOf(SOURCE_YA, SOURCE_YT).filter { usable(it) }.firstNotNullOfOrNull { s ->
+                runCatching { Match.find(t) { q -> searchIn(s, q) } }.getOrNull()
+            }
+        } ?: throw ApiException("Не нашёл «${t.title}» в Яндексе и YouTube Music — без Premium Spotify сам не играет", 404)
+        tracks[found.id] = found
+        _substitutes.value = _substitutes.value + (t.id to found)
+        return found
+    }
 
     private val _accounts = MutableStateFlow<Map<String, Account?>>(mapOf(SOURCE_YA to null, SOURCE_YT to null, SOURCE_SC to null, SOURCE_VK to null, SOURCE_SP to null))
     val accounts: StateFlow<Map<String, Account?>> = _accounts
@@ -71,11 +101,19 @@ object Repo {
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         prefs = Prefs(context.applicationContext)
+        Net.init(context)
+        library = LibraryCache(context.applicationContext.filesDir)
         org.nyao.music.spotify.Spotify.init(context.applicationContext)
         ya = YandexApi(prefs)
         yt = YtMusicApi(prefs, context.applicationContext.filesDir)
         ytStreams = YtStreams(yt)
-        sc = ScApi(prefs)
+        sc = ScApi(prefs).also { api -> api.onAccount = { uid, verifiedToken ->
+            verifiedToken?.let { token ->
+                val key = java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).hex()
+                scLikes.rebind(key, "uid:$uid")
+                prefs.scIdentity = "$key|$uid"
+            }
+        } }
         vk = VkApi(prefs).also { it.appContext = context.applicationContext }
         // сессия vk.com живёт, пока сайт сам обновляет cookie — продлеваем её тихо раз в 12 часов
         if (vk.loggedIn && System.currentTimeMillis() - prefs.vkRefreshedAt > 12 * 3600_000L) {
@@ -90,7 +128,7 @@ object Repo {
         mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
         radio = Radio(ya, yt, sc, vk) { !up(it) }
         _favArtists.value = FavArtist.listFromJson(runCatching { org.json.JSONArray(prefs.favArtists) }.getOrNull())
-        wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) }, favorites = { _favArtists.value })
+        wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) }, favorites = { _favArtists.value }, sp = sp, historyProvider = { cloud.waveHistory() })
     }
 
     fun track(id: String): Track? = tracks[id]
@@ -143,10 +181,32 @@ object Repo {
         }
     }
 
+    @Volatile private var spRecentAt = 0L
+
+    /**
+     * «Недавно прослушанное» Spotify (что слушал в самом Spotify, не в Nyao) → в итоги Nyao. Раз в 30 минут.
+     * Свои прослушивания к этому моменту уже отправлены (flush), поэтому сервер их не задвоит
+     */
+    private suspend fun importSpotifyRecent() {
+        if (!sp.loggedIn || sp.regionBlocked || System.currentTimeMillis() - spRecentAt < 30 * 60_000L) return
+        spRecentAt = System.currentTimeMillis()
+        val after = maxOf(prefs.spRecentAfter, System.currentTimeMillis() - 14 * 86_400_000L)
+        val items = try {
+            sp.recentlyPlayed(after)
+        } catch (e: org.nyao.music.spotify.SpotifyException) {
+            // вход до этой версии — без разрешения на историю; заработает после повторного входа в Spotify
+            if (e.code == 401 || e.code == 403) return else throw e
+        }
+        if (items.isEmpty()) return
+        cloud.importPlays(items)
+        prefs.spRecentAfter = items.maxOf { it.second }
+    }
+
     /** Сверка с сервером: настройки волны, вид приложения и миксы. Возвращает поменявшиеся ключи */
     suspend fun syncCloud(): List<String> {
         if (!cloud.loggedIn) return emptyList()
         runCatching { cloud.flush() }
+        runCatching { importSpotifyRecent() }
         val handlers = mapOf(
             "wave" to NyaoCloud.StateHandler({ stateData("wave") }, { d ->
                 val o = d as? org.json.JSONObject ?: return@StateHandler
@@ -275,41 +335,81 @@ object Repo {
     }
 
     suspend fun likedTracks(): List<Track> = coroutineScope {
-        val a = async { if (ya.loggedIn) runCatching { ya.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val b = async { if (yt.loggedIn) runCatching { yt.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val c = async { if (sc.loggedIn) runCatching { sc.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val d = async { if (vk.loggedIn) runCatching { vk.likedTracks() }.getOrDefault(emptyList()) else emptyList() }
-        val e = async { if (sp.loggedIn && !sp.regionBlocked) (kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.likedTracks() }.getOrDefault(emptyList()) } ?: emptyList()) else emptyList() }
-        val all = alternateAll(a.await(), b.await(), c.await(), d.await(), e.await())
+        val cached = library.liked()
+        if (!Net.isOnline) {
+            // без интернета — то, что сохранили в прошлый раз (экран сам оставит из этого только скачанное)
+            libraryCached.value = true
+            return@coroutineScope rememberLiked(cached ?: emptyList())
+        }
+        // null — сервис не ответил: на его место встанет кэш, а не пустота
+        val a = async { if (ya.loggedIn) runCatching { ya.likedTracks() }.getOrNull() else emptyList() }
+        val b = async { if (yt.loggedIn) runCatching { yt.likedTracks() }.getOrNull() else emptyList() }
+        val c = async { if (sc.loggedIn) runCatching { sc.likedTracks() }.getOrNull() else emptyList() }
+        val d = async { if (vk.loggedIn) runCatching { vk.likedTracks() }.getOrNull() else emptyList() }
+        val e = async { if (sp.loggedIn && !sp.regionBlocked) kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.likedTracks() }.getOrNull() } else emptyList() }
+        val fresh = listOf(a.await(), b.await(), c.await(), d.await(), e.await())
+        val filled = fillFromCache(fresh, cached, LIBRARY_SOURCES) { it.source }
+        val all = alternateAll(filled[0], filled[1], filled[2], filled[3], filled[4])
+        libraryCached.value = libraryCached.value || fresh.any { it == null }
+        if (fresh.any { it != null }) library.saveLiked(all)
+        rememberLiked(all)
+    }
+
+    private fun rememberLiked(all: List<Track>): List<Track> {
         _liked.value = _liked.value + all.map { it.id }
-        remember(all)
+        return remember(all)
     }
 
     suspend fun playlists(): List<Playlist> = coroutineScope {
-        val a = async { if (ya.loggedIn) runCatching { ya.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        val b = async { if (yt.loggedIn) runCatching { yt.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        val c = async { if (sc.loggedIn) runCatching { sc.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        val d = async { if (vk.loggedIn) runCatching { vk.playlists() }.getOrDefault(emptyList()) else emptyList() }
-        val e = async { if (sp.loggedIn && !sp.regionBlocked) (kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.playlists() }.getOrDefault(emptyList()) } ?: emptyList()) else emptyList() }
-        listOfNotNull(org.nyao.music.playback.Offline.asPlaylist()) + a.await() + b.await() + c.await() + d.await() + e.await()
+        val cached = library.playlists()
+        if (!Net.isOnline) {
+            libraryCached.value = true
+            return@coroutineScope cached ?: emptyList()
+        }
+        val a = async { if (ya.loggedIn) runCatching { ya.playlists() }.getOrNull() else emptyList() }
+        val b = async { if (yt.loggedIn) runCatching { yt.playlists() }.getOrNull() else emptyList() }
+        val c = async { if (sc.loggedIn) runCatching { sc.playlists() }.getOrNull() else emptyList() }
+        val d = async { if (vk.loggedIn) runCatching { vk.playlists() }.getOrNull() else emptyList() }
+        val e = async { if (sp.loggedIn && !sp.regionBlocked) kotlinx.coroutines.withTimeoutOrNull(SP_WAIT) { runCatching { sp.playlists() }.getOrNull() } else emptyList() }
+        val fresh = listOf(a.await(), b.await(), c.await(), d.await(), e.await())
+        val all = fillFromCache(fresh, cached, LIBRARY_SOURCES) { it.source }.flatten()
+        libraryCached.value = libraryCached.value || fresh.any { it == null }
+        if (fresh.any { it != null }) library.savePlaylists(all)
+        all
     }
 
-    suspend fun playlistTracks(id: String): List<Track> = remember(
+    suspend fun playlistTracks(id: String): List<Track> {
+        // «Мне нравится», «Скачанное» и свои миксы собираются из своих хранилищ — их не кэшируем
         when {
-            // «Мне нравится» одного сервиса и свои миксы
-            id == org.nyao.music.playback.Offline.PLAYLIST_ID -> org.nyao.music.playback.Offline.state.value.tracks
-            id == "liked" -> likedTracks()
-            id.startsWith("liked:") -> likedTracks().filter { it.source == id.removePrefix("liked:") }
-            id.startsWith("mix:") -> mixStore.get(id)?.tracks ?: emptyList()
-            id.startsWith("yaalbum:") -> ya.albumTracks(id)
-            id.startsWith("artist:") -> artistTracks(id)
-            id.startsWith("ya:") -> ya.playlistTracks(id)
-            id.startsWith("sc:") -> sc.playlistTracks(id)
-            id.startsWith("vk:") -> vk.playlistTracks(id)
-            id.startsWith("sp:") -> sp.playlistTracks(id)
-            else -> yt.playlistTracks(id)
-        },
-    )
+            id == org.nyao.music.playback.Offline.PLAYLIST_ID -> return remember(org.nyao.music.playback.Offline.state.value.tracks)
+            id == "liked" -> return likedTracks()
+            id.startsWith("liked:") -> return likedTracks().filter { it.source == id.removePrefix("liked:") }
+            id.startsWith("mix:") -> return remember(mixStore.get(id)?.tracks ?: emptyList())
+        }
+        if (!Net.isOnline) library.playlistTracks(id)?.let { libraryCached.value = true; return remember(it) }
+        val list = try {
+            fetchPlaylistTracks(id)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // сервис не ответил — отдаём список из кэша, если плейлист уже открывали
+            val cached = library.playlistTracks(id) ?: throw e
+            libraryCached.value = true
+            return remember(cached)
+        }
+        library.savePlaylistTracks(id, list)
+        return remember(list)
+    }
+
+    private suspend fun fetchPlaylistTracks(id: String): List<Track> = when {
+        id.startsWith("yaalbum:") -> ya.albumTracks(id)
+        id.startsWith("artist:") -> artistTracks(id)
+        id.startsWith("ya:") -> ya.playlistTracks(id)
+        id.startsWith("sc:") -> sc.playlistTracks(id)
+        id.startsWith("vk:") -> vk.playlistTracks(id)
+        id.startsWith("sp:") -> sp.playlistTracks(id)
+        else -> yt.playlistTracks(id)
+    }
 
     suspend fun search(q: String): SearchResult = coroutineScope {
         // Поиск YouTube Music работает и без входа
@@ -404,9 +504,12 @@ object Repo {
 
     /** Трек из чужого сервиса → тот, что можно включить здесь (свой сервис или найденный похожий) */
     suspend fun playable(t: Track): Track? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        if (usable(t.source)) return@withContext t.also { rememberTrack(it) }
+        if (usable(t.source)) {
+            val direct = t.source != SOURCE_SP || runCatching { sp.account().plus == true }.getOrDefault(false)
+            if (direct) return@withContext t.also { rememberTrack(it) }
+        }
         for (s in listOf(SOURCE_YA, SOURCE_VK, SOURCE_YT, SOURCE_SC).filter { usable(it) }) {
-            Match.find(t) { q -> searchIn(s, q) }?.let { rememberTrack(it); return@withContext it }
+            Match.find(t, minScore = 0.85) { q -> searchIn(s, q) }?.let { rememberTrack(it); return@withContext it }
         }
         null
     }
@@ -454,18 +557,30 @@ object Repo {
     suspend fun waveStart(): List<Track> = remember(wave.start())
     suspend fun waveMore(queueIds: List<String>): List<Track> = remember(wave.more(queueIds))
 
+    private val scLikes by lazy {
+        PendingLikes(
+            read = { prefs.scPendingLikes }, write = { prefs.scPendingLikes = it },
+            account = { prefs.scToken?.let {
+                val key = java.security.MessageDigest.getInstance("SHA-256").digest(it.toByteArray()).hex()
+                val identity = prefs.scIdentity?.split('|')
+                if (identity?.getOrNull(0) == key) "uid:${identity?.getOrNull(1)}" else key
+            } },
+        )
+    }
+
     suspend fun like(track: Track, on: Boolean) {
+        wave.invalidateLikes()
         when (track.source) {
             SOURCE_YA -> ya.like(track, on)
             SOURCE_VK -> vk.like(track, on)
             SOURCE_SP -> sp.like(track.srcId, on)
-            SOURCE_SC -> try {
-                sc.like(track.srcId, on)
-                flushScLikes()
-            } catch (e: Exception) {
-                // защита SoundCloud не пустила — в Nyao лайк ставим сразу, в SoundCloud дошлём позже
-                prefs.scPendingLikes = prefs.scPendingLikes.filterNot { it.startsWith("${track.srcId}:") }.toSet() + "${track.srcId}:${if (on) 1 else 0}"
-                org.nyao.music.playback.PlaybackEvents.emit("SoundCloud пока не принял лайк — отправлю позже сам")
+            SOURCE_SC -> {
+                scLikes.enqueue(track.srcId, on)
+                val result = flushScLikes(interactive = true)
+                if (result.left > 0) org.nyao.music.playback.PlaybackEvents.emit(
+                    if ((result.error as? ApiException)?.code == 401) "SoundCloud ждёт повторного входа — лайк сохранён"
+                    else "SoundCloud пока не принял изменение — оно сохранено"
+                )
             }
             else -> yt.like(track.srcId, on)
         }
@@ -474,22 +589,12 @@ object Repo {
     }
 
     /** Досылает отложенные лайки SoundCloud */
-    suspend fun flushScLikes() {
-        if (!sc.loggedIn) return
-        val list = prefs.scPendingLikes
-        if (list.isEmpty()) return
-        val left = LinkedHashSet<String>()
-        for (item in list) {
-            val (id, on) = item.split(":").let { it[0] to (it.getOrNull(1) == "1") }
-            try {
-                sc.like(id, on)
-            } catch (_: Exception) {
-                left += item
-            }
-        }
-        prefs.scPendingLikes = left
-        val sent = list.size - left.size
-        if (sent > 0) org.nyao.music.playback.PlaybackEvents.emit("SoundCloud: отложенные лайки доставлены ($sent)")
+    suspend fun flushScLikes(interactive: Boolean = false): PendingLikes.Result {
+        if (!sc.loggedIn) return PendingLikes.Result(0, 0)
+        val token = prefs.scToken
+        val result = scLikes.flush { item -> sc.like(item.id, item.on, interactive, expectedToken = token) }
+        if (result.sent > 0) org.nyao.music.playback.PlaybackEvents.emit("SoundCloud: отправлено изменений — ${result.sent}")
+        return result
     }
 
     // ---------- Воспроизведение ----------
@@ -506,12 +611,19 @@ object Repo {
         return MediaItem.Builder()
             .setMediaId(t.id)
             // Spotify: в ExoPlayer — тишина длиной с трек, звук даёт устройство Spotify (см. SpotifySync)
-            .setUri(if (t.source == SOURCE_SP) org.nyao.music.spotify.SilenceDataSource.uri(t.duration, t.srcId) else "nyao://${t.source}/${Uri.encode(t.srcId)}")
+            .setUri(
+                when {
+                    // Spotify без Premium (или регион/плеер недоступен): играет найденная копия из другого сервиса
+                    t.source == SOURCE_SP && !spotifyPlayable() -> "nyao://$SOURCE_SPX/${Uri.encode(t.srcId)}"
+                    t.source == SOURCE_SP -> org.nyao.music.spotify.SilenceDataSource.uri(t.duration, t.srcId)
+                    else -> "nyao://${t.source}/${Uri.encode(t.srcId)}"
+                },
+            )
             .setMediaMetadata(meta)
             // SoundCloud играет через HLS: тип нужно знать заранее, до получения ссылки
             // VK тоже отдаёт HLS (.m3u8, куски с AES-128 — ExoPlayer расшифровывает сам)
             .apply { if (t.source == SOURCE_SC || t.source == SOURCE_VK) setMimeType(MimeTypes.APPLICATION_M3U8) }
-            .apply { if (t.source == SOURCE_SP) setMimeType(MimeTypes.AUDIO_WAV) }
+            .apply { if (t.source == SOURCE_SP && spotifyPlayable()) setMimeType(MimeTypes.AUDIO_WAV) }
             .build()
     }
 
@@ -524,6 +636,10 @@ object Repo {
     fun resolve(uri: Uri): Resolved {
         val source = uri.host ?: throw ApiException("Плохая ссылка $uri")
         val id = uri.pathSegments.firstOrNull() ?: throw ApiException("Плохая ссылка $uri")
+        if (source == SOURCE_SPX) {
+            val sub = substituteFor(id)
+            return resolve(Uri.parse("nyao://${sub.source}/${Uri.encode(sub.srcId)}"))
+        }
         return if (source == SOURCE_YA) {
             val cached = yaStreamCache[id]
             val url = if (cached != null && cached.second > System.currentTimeMillis()) cached.first
@@ -539,14 +655,15 @@ object Repo {
         }
     }
 
-    fun forgetStream(uri: Uri) {
+    fun forgetStream(uri: Uri, blocked: Boolean = false) {
         val id = uri.pathSegments.firstOrNull() ?: return
         when (uri.host) {
             SOURCE_YA -> yaStreamCache.remove(id)
             SOURCE_SC -> sc.forget(id)
             SOURCE_VK -> vk.forget(id)
             SOURCE_SP -> {}
-            else -> ytStreams.invalidate(id)
+            SOURCE_SPX -> _substitutes.value["$SOURCE_SP:$id"]?.let { forgetStream(Uri.parse("nyao://${it.source}/${Uri.encode(it.srcId)}"), blocked) }
+            else -> ytStreams.invalidate(id, blocked)
         }
     }
 }

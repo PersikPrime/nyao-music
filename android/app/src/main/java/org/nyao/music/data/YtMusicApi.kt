@@ -111,7 +111,7 @@ class YtMusicApi(private val prefs: Prefs, private val diagDir: java.io.File? = 
             if (e != null) sb.append("  ").append(e.toString()).append('\n')
                 .append(e.stackTrace.take(6).joinToString("\n") { "    at $it" }).append('\n')
             if (response != null) sb.append("  shape: ").append(shape(response, 0).toString().take(40_000)).append('\n')
-            f.appendText(sb.toString())
+            f.appendText(Diagnostics.safe(sb.toString()))
         }
     }
 

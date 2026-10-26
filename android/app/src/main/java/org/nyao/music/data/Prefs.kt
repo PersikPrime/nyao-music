@@ -137,6 +137,11 @@ class Prefs(context: Context) {
         set(v) = sp.edit().apply { if (v == null) remove("scToken") else putString("scToken", v) }.apply()
 
     /** VK: id вошедшего пользователя и адрес сайта (vk.com или vk.ru). Сама сессия — cookie WebView */
+    /** До какого момента «недавно прослушанное» Spotify уже перенесено в итоги Nyao */
+    var spRecentAfter: Long
+        get() = sp.getLong("spRecentAfter", 0L)
+        set(v) = sp.edit().putLong("spRecentAfter", v).apply()
+
     var vkUid: Long?
         get() = sp.getLong("vkUid", 0L).takeIf { it != 0L }
         set(v) = sp.edit().apply { if (v == null) remove("vkUid") else putLong("vkUid", v) }.apply()
@@ -169,6 +174,10 @@ class Prefs(context: Context) {
         set(v) = sp.edit().apply { if (v == null) remove("nyaoUser") else putString("nyaoUser", v) }.apply()
 
     /** С каких треков начинались последние запуски волны — чтобы не начинать с одного и того же */
+    var waveProfile: String
+        get() = sp.getString("waveProfileV2", "{}") ?: "{}"
+        set(v) = sp.edit().putString("waveProfileV2", v).apply()
+
     var waveFirsts: List<String>
         get() = sp.getString("waveFirsts", "")!!.split(",").filter { it.isNotEmpty() }
         set(v) = sp.edit().putString("waveFirsts", v.joinToString(",")).apply()
@@ -184,6 +193,10 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putBoolean("favImportedYa", v).apply()
 
     /** Отложенные лайки SoundCloud: "id:1" (поставить) или "id:0" (снять) */
+    var scIdentity: String?
+        get() = sp.getString("scIdentity", null)
+        set(v) = sp.edit().putString("scIdentity", v).apply()
+
     var scPendingLikes: Set<String>
         get() = sp.getStringSet("scPending", emptySet()) ?: emptySet()
         set(v) = sp.edit().putStringSet("scPending", v).apply()

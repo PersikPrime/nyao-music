@@ -20,13 +20,15 @@ data class RemoteNow(val deviceId: String, val device: String, val platform: Str
 data class HandoffQueue(val tracks: List<Track>, val index: Int, val label: String, val mode: String)
 
 /**
- * Аккаунт Nyao на своём сервере (api.nmusic.bixtl.cc): вход через Telegram, история, «сейчас играет».
+ * Аккаунт Nyao на своём сервере (api.music.withnyao.app; прежний api.nmusic.bixtl.cc тоже работает): вход через Telegram, история, «сейчас играет».
  * Токены Яндекса, YouTube и SoundCloud сюда не попадают — они остаются только на телефоне.
  * Перенос src/main/cloud.js.
  */
 class NyaoCloud(private val prefs: Prefs, private val dir: File) {
     companion object {
-        const val BASE = "https://api.nmusic.bixtl.cc"
+        const val BASE = "https://api.music.withnyao.app"
+        /** Прежний адрес сервера — запасной, пока новый домен где-то не открывается */
+        const val LEGACY_BASE = "https://api.nmusic.bixtl.cc"
         private val JSON_TYPE = "application/json; charset=utf-8".toMediaType()
         private const val HISTORY_MAX = 1500
         private const val DAY = 86_400_000L
@@ -48,8 +50,19 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
 
     private fun parseUser(o: JSONObject) = CloudUser(o.optString("name", "Telegram"), o.str("username"), o.str("picture"))
 
-    private suspend fun request(method: String, path: String, body: JSONObject? = null, long: Boolean = false): JSONObject {
-        val b = Request.Builder().url(BASE + path).header("User-Agent", "NyaoMusic-Android")
+    /** Адрес сервера: новый домен, а если он не отвечает (сеть, DNS) — прежний */
+    @Volatile private var base = BASE
+
+    private suspend fun request(method: String, path: String, body: JSONObject? = null, long: Boolean = false): JSONObject = try {
+        requestAt(base, method, path, body, long)
+    } catch (e: java.io.IOException) {
+        if (e is ApiException || base != BASE) throw e
+        base = LEGACY_BASE
+        requestAt(base, method, path, body, long)
+    }
+
+    private suspend fun requestAt(baseUrl: String, method: String, path: String, body: JSONObject?, long: Boolean): JSONObject {
+        val b = Request.Builder().url(baseUrl + path).header("User-Agent", "NyaoMusic-Android")
             .header("X-Nyao-Build", org.nyao.music.BuildConfig.VERSION_CODE.toString())
         prefs.nyaoToken?.let { b.header("Authorization", "Bearer $it") }
         val rb = body?.toString()?.toRequestBody(JSON_TYPE)
@@ -148,6 +161,25 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         }
     }
 
+    /**
+     * Прослушивания из истории самого сервиса (Spotify «недавно прослушанное») — сразу на сервер, для итогов.
+     * Сервер не дублирует то, что уже записал Nyao или прислало другое устройство
+     */
+    suspend fun importPlays(plays: List<Pair<Track, Long>>) {
+        if (!loggedIn || plays.isEmpty()) return
+        plays.chunked(200).forEach { chunk ->
+            val arr = JSONArray()
+            chunk.forEach { (t, at) ->
+                arr.put(
+                    JSONObject().put("trackId", t.id).put("source", t.source).put("title", t.title).put("artist", t.artist)
+                        .put("cover", t.cover ?: JSONObject.NULL).put("duration", t.duration).put("listened", t.duration)
+                        .put("skipped", false).put("playedAt", at).put("imported", true),
+                )
+            }
+            request("POST", "/history", JSONObject().put("plays", arr))
+        }
+    }
+
     suspend fun flush() {
         if (!loggedIn) return
         val out = fileLock.withLock { readArr(outboxFile) }
@@ -193,6 +225,14 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
             ids += remoteRecent
         }
         return ids
+    }
+
+    /** Metadata is needed to suppress the same recording across services. */
+    suspend fun waveHistory(): List<Track> {
+        val now = System.currentTimeMillis()
+        return fileLock.withLock { readArr(historyFile) }.objects()
+            .filter { now - it.optLong("playedAt") < (if (it.optBoolean("skipped")) 30 else 14) * DAY }
+            .mapNotNull { playToTrack(it) }
     }
 
     /** Недавно слушал: уникальные треки из своей истории, без пропущенных */

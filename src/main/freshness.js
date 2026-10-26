@@ -13,7 +13,7 @@ export function recencyPick(list, n, fresh = 60, rnd = Math.random) {
   const tau = Math.max(5, items.length * Math.pow(1 - f, 2) + 5 * f);
   // ключ Эфраимидиса — Спиракиса: random^(1/вес), больший ключ — раньше в выборке
   return items
-    .map((x, i) => ({ x, k: Math.pow(rnd(), 1 / Math.exp(-i / tau)) }))
+    .map((x, i) => ({ x, k: Math.log(Math.max(Number.MIN_VALUE, rnd())) * Math.exp(Math.min(700, i / tau)) }))
     .sort((a, b) => b.k - a.k)
     .slice(0, n)
     .map((e) => e.x);

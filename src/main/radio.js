@@ -52,6 +52,12 @@ export class Radio {
     return [];
   }
 
+  async feedback(type, track, played = 0) {
+    if (!this.seed || !track) return;
+    if (type === 'dislike') this.seen.add(track.id);
+    if (this.seed.source === 'ya' && track.source === 'ya') await this.ya.radioFeedback(type, track, played);
+  }
+
   take(list) {
     const out = [];
     for (const t of list || []) {

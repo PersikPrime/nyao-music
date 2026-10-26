@@ -155,12 +155,55 @@ fun openInvite(model: AppModel, code: String) {
     }
 }
 
+/** Код комнаты из nyao://join/КОД или music.withnyao.app/share/room/КОД (и старого …/join/КОД) */
+fun roomCode(uri: android.net.Uri?): String? {
+    uri ?: return null
+    val code = when {
+        uri.scheme == "nyao" && uri.host == "join" -> uri.pathSegments.firstOrNull()
+        uri.pathSegments.size >= 3 && uri.pathSegments[0] == "share" && uri.pathSegments[1] == "room" -> uri.pathSegments[2]
+        uri.pathSegments.size >= 2 && uri.pathSegments[0] == "join" -> uri.pathSegments[1]
+        else -> null
+    }
+    return code?.takeIf { Regex("^[A-Za-z0-9]{6}$").matches(it) }?.uppercase()
+}
+
+/** Ник из nyao://u/ник или music.withnyao.app/share/u/ник */
+fun profileNick(uri: android.net.Uri?): String? {
+    uri ?: return null
+    val nick = when {
+        uri.scheme == "nyao" && uri.host == "u" -> uri.pathSegments.firstOrNull()
+        uri.pathSegments.size >= 3 && uri.pathSegments[0] == "share" && uri.pathSegments[1] == "u" -> uri.pathSegments[2]
+        else -> null
+    }
+    return nick?.takeIf { Regex("^[A-Za-z0-9_.]{3,24}$").matches(it) }
+}
+
+/** Трек из nyao://track/ya:123?t=…&a=…&d=… или music.withnyao.app/share/track/… */
+fun sharedTrack(uri: android.net.Uri?): org.nyao.music.data.Track? {
+    uri ?: return null
+    val id = when {
+        uri.scheme == "nyao" && uri.host == "track" -> uri.pathSegments.firstOrNull()
+        uri.pathSegments.size >= 3 && uri.pathSegments[0] == "share" && uri.pathSegments[1] == "track" -> uri.pathSegments[2]
+        else -> null
+    } ?: return null
+    if (!Regex("^(ya|yt|sc|vk|sp):[A-Za-z0-9_.:-]{1,80}$").matches(id)) return null
+    val i = id.indexOf(':')
+    return org.nyao.music.data.Track(
+        id = id, source = id.substring(0, i), srcId = id.substring(i + 1),
+        title = (uri.getQueryParameter("t") ?: "").take(200).ifBlank { "Трек" },
+        artist = (uri.getQueryParameter("a") ?: "").take(200),
+        duration = (uri.getQueryParameter("d")?.toIntOrNull() ?: 0).coerceIn(0, 36000),
+    )
+}
+
 /** Код приглашения из ссылки https://…/add/CODE или nyao://add/CODE */
 fun inviteCode(uri: android.net.Uri?): String? {
     uri ?: return null
     val code = when {
         uri.scheme == "nyao" && uri.host == "add" -> uri.pathSegments.firstOrNull()
         uri.pathSegments.size >= 2 && uri.pathSegments[0] == "add" -> uri.pathSegments[1]
+        // music.withnyao.app/share/add/КОД
+        uri.pathSegments.size >= 3 && uri.pathSegments[0] == "share" && uri.pathSegments[1] == "add" -> uri.pathSegments[2]
         else -> null
     }
     return code?.takeIf { Regex("^[a-z0-9]{6,16}$").matches(it) }
@@ -294,7 +337,7 @@ private fun InboxRow(model: AppModel, item: InboxItem) {
                 style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
-        if (t != null && item.kind == "track") SourceTag(t.source)
+        if (t != null && item.kind == "track") org.nyao.music.ui.components.TrackSourceTag(t)
     }
 }
 
@@ -833,10 +876,24 @@ fun EditProfileCard(model: AppModel) {
             label = { Text("О себе") }, modifier = Modifier.fillMaxWidth(), maxLines = 3,
             supportingText = { Text("${bio.length}/160") }, shape = RoundedCornerShape(18.dp),
         )
-        Button(
-            onClick = { save(JSONObject().put("nick", nick).put("bio", bio), "Профиль сохранён") },
-            enabled = nickError == null && (nick != p.nick || bio != p.bio || !p.nickSet),
-        ) { Text("Сохранить") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { save(JSONObject().put("nick", nick).put("bio", bio), "Профиль сохранён") },
+                enabled = nickError == null && (nick != p.nick || bio != p.bio || !p.nickSet),
+            ) { Text("Сохранить") }
+            if (p.nickSet) {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                androidx.compose.material3.OutlinedButton(onClick = {
+                    // ссылка на сайт: у кого есть Nyao — откроется сразу в приложении
+                    val link = org.nyao.music.playback.Together.profileLink(p.nick)
+                    ctx.startActivity(android.content.Intent.createChooser(
+                        android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                            .putExtra(android.content.Intent.EXTRA_TEXT, "Мой профиль в Nyao Music: $link"),
+                        "Поделиться профилем",
+                    ))
+                }) { Text("Поделиться") }
+            }
+        }
     }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(20.dp),

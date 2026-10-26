@@ -28,7 +28,7 @@ export function nickProblem(nick) {
   return null;
 }
 
-export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl = '' }) {
+export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl = '', webUrl = '', sharePage = null }) {
   /** Профиль пользователя; если его ещё нет — заводим с ником user_xxxxxx */
   async function ensureProfile(uid) {
     const cur = await q('SELECT * FROM profiles WHERE user_id = $1', [uid]);
@@ -530,7 +530,8 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
         exp = Date.now() + INVITE_TTL_MS;
         await q('INSERT INTO invites (code, user_id, expires_at) VALUES ($1, $2, $3)', [code, s.uid, new Date(exp)]);
       }
-      return { code, url: `${publicUrl}/add/${code}`, expiresAt: exp };
+      // ссылка на сайт (music.withnyao.app/share/add/…), старые клиенты понимают и её — путь заканчивается на /add/КОД
+      return { code, url: webUrl ? `${webUrl}/share/add/${code}` : `${publicUrl}/add/${code}`, expiresAt: exp };
     }, true],
     // кто зовёт — показать перед тем, как добавлять (ссылку могли подсунуть)
     ['GET', /^\/invites\/([a-z0-9]{6,16})$/, async ({ s, m }) => {
@@ -556,9 +557,10 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       return { relation: 'friends', user: await userCard(other) };
     }, true],
     // ссылка открылась в браузере (у друга нет приложения или Android не перехватил ссылку)
-    ['GET', /^\/add\/([a-z0-9]{6,16})$/, async ({ m }) => {
+    ['GET', /^\/(?:share\/)?add\/([a-z0-9]{6,16})$/, async ({ m }) => {
       const { rows } = await q('SELECT u.name, p.nick FROM invites i JOIN users u ON u.id = i.user_id JOIN profiles p ON p.user_id = u.id WHERE i.code = $1 AND i.expires_at > now()', [m[1]]);
-      if (!rows.length) return page('Приглашение устарело', 'Попроси друга показать новый QR-код или ссылку.', false);
+      if (!rows.length) return sharePage ? sharePage({ title: 'Приглашение устарело', text: 'Попроси друга показать новый QR-код или ссылку.', ok: false, auto: false, badge: '!' }) : page('Приглашение устарело', 'Попроси друга показать новый QR-код или ссылку.', false);
+      if (sharePage) return sharePage({ title: `${rows[0].name || '@' + rows[0].nick} зовёт в Nyao Music`, text: `Открой приглашение в приложении — и вы сразу друзья. Ник: @${rows[0].nick}`, open: `nyao://add/${m[1]}`, badge: '+' });
       return page(`${rows[0].name || '@' + rows[0].nick} зовёт в Nyao Music`, `Если Nyao Music уже стоит — открой приглашение в приложении, и вы сразу станете друзьями. Ник: @${rows[0].nick}`, true, { href: `nyao://add/${m[1]}`, label: 'Открыть в Nyao Music' });
     }],
 

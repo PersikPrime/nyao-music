@@ -2,6 +2,9 @@ import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { PendingLikes } from './pending-likes.js';
+import { parseDeepLink } from './deeplink.js';
+import { safeDiagnostic } from './diagnostics.js';
 import { fileURLToPath } from 'node:url';
 import { settings, secrets } from './store.js';
 import { YandexProvider } from './providers/yandex.js';
@@ -9,6 +12,8 @@ import { YTMusicProvider } from './providers/ytmusic.js';
 import { shapeOf } from './providers/ytraw.js';
 import { SoundCloudProvider } from './providers/soundcloud.js';
 import { VKProvider } from './providers/vk.js';
+import { SpotifyProvider, SP_REDIRECT } from './providers/spotify.js';
+import { SpotifyEngine, silenceResponse } from './spotify/spotify-engine.js';
 import { checkUpdate, downloadAsset } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
@@ -25,7 +30,7 @@ import { transferPlaylist, TARGETS } from './transfer.js';
 import { findMatch } from './match.js';
 import { mergeArtists } from '../renderer/search.js';
 import os from 'node:os';
-import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch } from './auth.js';
+import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch, refreshVkSession } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(__dirname, '..', 'renderer');
@@ -40,6 +45,33 @@ function readVersion() {
   }
 }
 
+// ---------- Ссылки nyao:// (приглашения, комнаты, профили, треки) открывают это приложение ----------
+let pendingLink = null;
+function deepLink(raw) {
+  const link = parseDeepLink(raw);
+  if (!link) return;
+  if (win && !win.isDestroyed() && !win.webContents.isLoading()) {
+    showWindow();
+    win.webContents.send('deeplink', link);
+  } else pendingLink = link;
+}
+// одна копия приложения: ссылка, открытая вторым запуском, уходит в уже открытое окно
+if (!process.env.NYAO_MULTI && !app.requestSingleInstanceLock()) app.quit();
+app.on('second-instance', (_e, argv) => {
+  showWindow();
+  const url = (argv || []).find((a) => String(a).startsWith('nyao://'));
+  if (url) deepLink(url);
+});
+// macOS присылает ссылки событием, в том числе до готовности приложения
+app.on('open-url', (e, url) => {
+  e.preventDefault();
+  deepLink(url);
+});
+{
+  const first = process.argv.find((a) => String(a).startsWith('nyao://'));
+  if (first) pendingLink = parseDeepLink(first);
+}
+
 protocol.registerSchemesAsPrivileged([
   { scheme: 'nyao', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } }
 ]);
@@ -50,7 +82,7 @@ const fetchFn = (url, opts) => net.fetch(url, opts);
 let svcStatus = { maintenance: { active: false }, outages: [] };
 async function pollStatus() {
   try {
-    const res = await net.fetch(`${API_BASE}/status`, { headers: { 'X-Nyao-Build': String(readVersion().build || 0) } });
+    const res = await net.fetch(`${cloud ? cloud.base : API_BASE}/status`, { headers: { 'X-Nyao-Build': String(readVersion().build || 0) } });
     if (!res.ok) return svcStatus;
     const s = await res.json();
     svcStatus = { maintenance: s.maintenance || { active: false }, outages: Array.isArray(s.outages) ? s.outages : [] };
@@ -62,7 +94,36 @@ async function pollStatus() {
 }
 const up = (id) => !svcStatus.outages.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
-let ya, yt, sc, vk, wave, streams, catalog, win, cloud, lastfm, radio, live;
+let ya, yt, sc, vk, sp, spEngine, wave, streams, catalog, win, cloud, lastfm, radio, live;
+
+/**
+ * Widevine (Electron от castlabs): компонент CDM скачивается и проверяется при первом запуске.
+ * В обычном Electron его нет — тогда Spotify-плеер на ПК недоступен, остальное работает как раньше.
+ */
+let widevineState = null;
+function widevineReady() {
+  if (!widevineState) {
+    widevineState = (async () => {
+      try {
+        const { components } = await import('electron');
+        if (!components || typeof components.whenReady !== 'function') return { ok: false, reason: 'в этой сборке Electron нет Widevine' };
+        await Promise.race([components.whenReady(), new Promise((_, rej) => setTimeout(() => rej(new Error('Widevine не загрузился за 60 секунд')), 60_000))]);
+        return { ok: true, status: components.status() };
+      } catch (e) {
+        return { ok: false, reason: e.message || String(e) };
+      }
+    })();
+  }
+  return widevineState;
+}
+
+/** Spotify не должен держать поиск и библиотеку дольше 6 секунд */
+function spSafe(promise, fallback) {
+  return Promise.race([safe(promise, fallback), new Promise((r) => setTimeout(() => r(fallback), 6000))]);
+}
+const spOn = () => sp && sp.loggedIn && !sp.regionBlocked;
+/** Копия трека Spotify из другого сервиса (настраивается при запуске, см. protocol.handle) */
+let spSubstitute = async () => null;
 
 /** Ключи Last.fm кладёт сборка (из секретов GitHub) в lastfm-keys.json рядом; без него Last.fm выключен */
 function lastfmKeys() {
@@ -87,10 +148,33 @@ function send(channel, payload) {
 }
 
 /** Сверка миксов и настроек волны с сервером Nyao */
+/**
+ * «Недавно прослушанное» Spotify (что слушал в самом Spotify, не в Nyao) → в итоги Nyao.
+ * Раз в 30 минут; сначала отправляем свои прослушивания, чтобы сервер не посчитал их дважды
+ */
+let spRecentAt = 0;
+async function importSpotifyRecent() {
+  if (!spOn() || Date.now() - spRecentAt < 30 * 60_000) return;
+  spRecentAt = Date.now();
+  const after = Math.max(Number(settings.get().spRecentAfter) || 0, Date.now() - 14 * 86_400_000);
+  let items;
+  try {
+    items = await sp.recentlyPlayed(after);
+  } catch (e) {
+    // вход до этой версии — без разрешения на историю; заработает после повторного входа в Spotify
+    if (e.code === 401 || e.code === 403) return;
+    throw e;
+  }
+  if (!items.length) return;
+  await cloud.importPlays(items.map((x) => ({ track: x.track, at: x.playedAt })));
+  settings.set({ spRecentAfter: Math.max(...items.map((x) => x.playedAt)) });
+}
+
 async function syncCloud() {
   if (!cloud || !cloud.loggedIn) return;
   try {
     await cloud.flush();
+    await importSpotifyRecent().catch((e) => console.warn(`[spotify] недавно прослушанное: ${e.message}`));
     const changed = await cloud.syncState({
       mixes: {
         get: () => readMixes(),
@@ -138,7 +222,7 @@ function ytLog(op, err, meta = {}) {
     const lines = [`${new Date().toISOString()} [${op}] v${readVersion().name}.${readVersion().build} ${JSON.stringify(rest)}`];
     if (err) lines.push('  ' + String((err && err.stack) || err).split('\n').slice(0, 10).join('\n  '));
     if (response) lines.push('  shape: ' + JSON.stringify(shapeOf(response)).slice(0, 60_000));
-    fs.appendFileSync(file, lines.join('\n') + '\n');
+    fs.appendFileSync(file, safeDiagnostic(lines.join('\n')) + '\n');
     if (err) console.warn('[yt]', op, err && err.message);
   } catch {}
 }
@@ -149,7 +233,11 @@ function initProviders() {
   // по которым googlevideo проверяет ссылку
   const nodeFetch = globalThis.fetch.bind(globalThis);
   yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch, log: ytLog });
-  sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch });
+  sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch, onAccount: uid => {
+    const key = crypto.createHash('sha256').update(sc.token).digest('hex');
+    writePending(readPending().map(x => x.account === key ? { ...x, account: 'uid:' + uid } : x));
+    secrets.set('scIdentity', { key, uid: String(uid) });
+  } });
   // VK Музыка (dev): всё через сессию окна входа VK; сырые ответы при сбоях — в vk-debug.log
   const vkLog = path.join(app.getPath('userData'), 'vk-debug.log');
   vk = new VKProvider({
@@ -157,14 +245,18 @@ function initProviders() {
     // id и домен (vk.com / vk.ru) запоминаем при входе — это не токен, сама сессия живёт в cookie окна входа
     getUserId: async () => Number(secrets.get('vkUid')) || null,
     getBase: () => secrets.get('vkOrigin') || 'https://vk.com',
+    refreshSession: (uid, base) => refreshVkSession(uid, base),
     debug: (msg) => {
       try {
-        fs.appendFileSync(vkLog, `[${new Date().toISOString()}] ${msg}\n\n`);
+        fs.appendFileSync(vkLog, `[${new Date().toISOString()}] ${safeDiagnostic(msg)}\n\n`);
       } catch {
         // лог не критичен
       }
     }
   });
+  // Spotify: официальный Web API + Web Playback SDK в скрытом окне (нужен Premium и свой Client ID)
+  sp = new SpotifyProvider({ store: secrets, fetchFn, openUrl: (url) => shell.openExternal(url) });
+  spEngine = new SpotifyEngine({ sp, widevine: widevineReady(), onChange: (st) => send('spotify:state', st) });
   cloud = new NyaoCloud({
     dir: app.getPath('userData'),
     getToken: () => secrets.get('nyaoToken'),
@@ -202,7 +294,6 @@ function initProviders() {
     log: (m) => console.log(m)
   });
   live.start();
-  const waveMemFile = path.join(app.getPath('userData'), 'wave-memory.json');
   const lk = lastfmKeys();
   lastfm = new LastFm({
     key: lk.key || '',
@@ -222,21 +313,16 @@ function initProviders() {
   radio = new Radio({ ya, yt, sc, vk, isDown: (id) => svcStatus.outages.includes(id) });
 
   wave = new WaveMixer({
-    ya, yt, sc, vk,
+    ya, yt, sc, vk, sp,
     isDown: (id) => svcStatus.outages.includes(id),
     getSettings: () => settings.get(),
     getRecent: () => cloud.recentIds(),
-    getFavorites: async () => readFav(),
-    memory: {
-      get: () => {
-        try {
-          return JSON.parse(fs.readFileSync(waveMemFile, 'utf8'));
-        } catch {
-          return [];
-        }
-      },
-      set: (v) => fs.writeFileSync(waveMemFile, JSON.stringify(v))
-    }
+    getHistory: () => cloud.history(),
+    profile: {
+      get: () => { try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'wave-profile.json'), 'utf8')); } catch { return {}; } },
+      set: (value) => { const file = path.join(app.getPath('userData'), 'wave-profile.json'); fs.writeFileSync(file + '.tmp', JSON.stringify(value)); fs.renameSync(file + '.tmp', file); }
+    },
+    getFavorites: async () => readFav()
   });
   streams = new StreamService({ ya, yt, sc, vk, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch, vk: vkSessionFetch } });
   catalog = new Catalog({ ya, yt });
@@ -247,44 +333,31 @@ function initProviders() {
 const pendingFile = () => path.join(app.getPath('userData'), 'sc-pending-likes.json');
 function readPending() {
   try {
-    return JSON.parse(fs.readFileSync(pendingFile(), 'utf8'));
+    const list = JSON.parse(fs.readFileSync(pendingFile(), 'utf8'));
+    return Array.isArray(list) ? list : [];
   } catch {
     return [];
   }
 }
 function writePending(list) {
-  fs.writeFileSync(pendingFile(), JSON.stringify(list, null, 2));
+  fs.writeFileSync(pendingFile() + '.tmp', JSON.stringify(list, null, 2));
+  fs.renameSync(pendingFile() + '.tmp', pendingFile());
 }
-function queueScLike(track, on) {
-  const list = readPending().filter((x) => x.srcId !== track.srcId);
-  list.push({ srcId: track.srcId, title: track.title, on, at: Date.now() });
-  writePending(list);
-}
-let flushing = false;
-/** Пытается дослать отложенные лайки. Капчу здесь не показываем — только в ответ на действие пользователя */
+const scAccountKey = () => {
+  if (!sc?.token) return null;
+  const key = crypto.createHash('sha256').update(sc.token).digest('hex');
+  const identity = secrets.get('scIdentity');
+  return identity?.key === key ? 'uid:' + identity.uid : key;
+};
+const scLikes = new PendingLikes({
+  read: readPending, write: writePending, account: scAccountKey,
+  send: item => sc.like({ srcId: item.srcId }, item.on)
+});
 async function flushScLikes() {
-  if (flushing || !sc || !sc.loggedIn) return;
-  const list = readPending();
-  if (!list.length) return;
-  flushing = true;
-  const left = [];
-  for (let i = 0; i < list.length; i++) {
-    try {
-      await sc.like({ srcId: list[i].srcId }, list[i].on);
-    } catch (e) {
-      if (e.captcha) {
-        left.push(...list.slice(i)); // защита всё ещё злится — остальное даже не пробуем
-        break;
-      }
-      left.push(list[i]);
-    }
-  }
-  // за время отправки могли добавиться новые лайки — не теряем их
-  const added = readPending().filter((x) => !list.some((y) => y.srcId === x.srcId && y.at === x.at));
-  writePending([...left.filter((x) => !added.some((y) => y.srcId === x.srcId)), ...added]);
-  const done = list.length - left.length;
-  flushing = false;
-  if (done && win && !win.isDestroyed()) win.webContents.send('sc:pending', { sent: done, left: left.length });
+  if (!sc?.loggedIn) return { sent: 0, left: 0 };
+  const result = await scLikes.flush();
+  if (result.sent && win && !win.isDestroyed()) win.webContents.send('sc:pending', { sent: result.sent, left: result.left });
+  return { sent: result.sent, left: result.left };
 }
 
 // ---------- Мои миксы: локальные плейлисты из треков обоих сервисов ----------
@@ -337,7 +410,7 @@ async function safe(promise, fallback) {
   try {
     return await promise;
   } catch (e) {
-    console.warn('[nyao]', e.message);
+    console.warn('[nyao]', safeDiagnostic(e.message));
     return fallback;
   }
 }
@@ -347,8 +420,8 @@ function handle(channel, fn) {
     try {
       return { ok: true, data: await fn(...args) };
     } catch (e) {
-      console.error(`[${channel}]`, e);
-      return { ok: false, error: e.message || String(e) };
+      console.error(`[${channel}]`, safeDiagnostic(e.message));
+      return { ok: false, error: safeDiagnostic(e.message || String(e)) };
     }
   });
 }
@@ -358,32 +431,24 @@ function handle(channel, fn) {
  * если всё равно не вышло, ставим лайк в очередь (в Nyao он уже стоит).
  */
 async function likeSoundCloud(track, on) {
-  try {
-    await sc.like(track, on);
-    flushScLikes();
-    return on;
-  } catch (e) {
-    if (!e.captcha) {
-      queueScLike(track, on);
-      return { on, pending: true, reason: e.message };
-    }
-    const solved = await solveScCaptcha(win, e.captcha);
-    if (solved) {
-      try {
-        await sc.like(track, on);
-        flushScLikes();
-        return on;
-      } catch {
-        // упадём в очередь ниже
-      }
-    }
-    queueScLike(track, on);
-    return { on, pending: true, reason: solved ? 'SoundCloud всё ещё не пускает' : 'проверку не прошли' };
+  const token = sc.token;
+  scLikes.enqueue(track, on);
+  let result = await scLikes.flush();
+  if (result.error?.captcha && token === sc.token) {
+    const solved = await solveScCaptcha(win, result.error.captcha);
+    if (solved && token === sc.token) result = await scLikes.flush();
   }
+  const pending = scLikes.list().some(x => x.srcId === String(track.srcId));
+  return pending ? { on, pending: true, reason: result.error?.captcha ? 'SoundCloud ждёт проверки' : 'SoundCloud пока не принял изменение — повторю позже' } : on;
 }
 
 function registerIpc() {
   handle('win:minimize', () => win.minimize());
+  handle('deeplink:take', () => {
+    const l = pendingLink;
+    pendingLink = null;
+    return l;
+  });
   handle('win:maximize', () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   handle('win:close', () => win.close());
   handle('status:get', (force) => (force ? pollStatus() : svcStatus));
@@ -433,6 +498,17 @@ function registerIpc() {
     return file;
   });
   handle('settings:get', () => settings.get());
+  // оформление на macOS: 'glass' — Liquid Glass, 'nyao' — как на Windows; окно перезагружается в новой теме
+  handle('theme:set', (v) => {
+    if (process.platform !== 'darwin') return { ok: false };
+    settings.set({ macTheme: v === 'glass' ? 'glass' : 'nyao' });
+    const theme = currentTheme();
+    if (win && !win.isDestroyed()) {
+      if (typeof win.setWindowButtonPosition === 'function') win.setWindowButtonPosition(trafficLights(theme));
+      setTimeout(() => win && !win.isDestroyed() && win.loadFile(path.join(RENDERER, 'index.html'), { query: { theme } }), 60);
+    }
+    return { ok: true, theme };
+  });
   handle('settings:set', (patch) => {
     const next = settings.set(patch);
     if ('discordRpc' in patch) configureRpc();
@@ -443,7 +519,7 @@ function registerIpc() {
   });
   handle('rpc:update', (info) => rpc.update(info));
   handle('rpc:status', () => rpc.status);
-  handle('sc:pending', () => readPending());
+  handle('sc:pending', () => scLikes.list());
   handle('yt:openLog', () => {
     const file = path.join(app.getPath('userData'), 'yt-debug.log');
     if (!fs.existsSync(file)) fs.writeFileSync(file, 'Сбоев YouTube пока не было.\n');
@@ -489,6 +565,7 @@ function registerIpc() {
   });
   handle('radio:start', (track) => radio.start(track));
   handle('radio:more', (ids) => radio.more(ids));
+  handle('radio:feedback', (type, track, played) => radio.feedback(type, track, played));
   handle('lastfm:status', () => lastfm.status());
   handle('lastfm:connect', () => lastfm.connect());
   handle('lastfm:cancel', () => lastfm.cancel());
@@ -525,14 +602,18 @@ function registerIpc() {
     return cloud.request('GET', `/stats?${qs}`);
   });
   // трек из другого сервиса → тот, что можно включить здесь (для «Слушать вместе»)
-  const providers = () => ({ ya, yt, sc, vk });
-  const usable = (s) => up(s) && (s === 'yt' || s === 'sc' || (s === 'ya' && ya.loggedIn) || (s === 'vk' && vk.loggedIn));
+  const providers = () => ({ ya, yt, sc, vk, sp });
+  const usable = (s) => up(s) && (s === 'yt' || s === 'sc' || (s === 'ya' && ya.loggedIn) || (s === 'vk' && vk.loggedIn) || (s === 'sp' && spOn()));
   handle('match:playable', async (track) => {
     if (!track) return null;
-    if (usable(track.source)) return track;
+    if (usable(track.source)) {
+      if (track.source !== 'sp') return track;
+      const account = await spSafe(sp.getAccount(), null);
+      if (account?.premium === true) return track;
+    }
     const order = ['ya', 'vk', 'yt', 'sc'].filter(usable);
     for (const s of order) {
-      const m = await findMatch(track, (q) => providers()[s].search(q));
+      const m = await findMatch(track, (q) => providers()[s].search(q), { minScore: 0.85 });
       if (m) return m.track;
     }
     return null;
@@ -564,6 +645,64 @@ function registerIpc() {
   handle('cloud:top', (opts) => cloud.top(opts || {}));
   handle('cloud:sync', () => syncCloud());
   handle('sc:flush', () => flushScLikes());
+
+  // ---------- Spotify ----------
+  const spStatus = async () => {
+    const wv = await Promise.race([widevineReady(), new Promise((r) => setTimeout(() => r({ ok: false, reason: 'ещё загружается' }), 300))]);
+    return {
+      clientId: sp.clientId,
+      hasClientId: sp.hasClientId,
+      loggedIn: sp.loggedIn,
+      regionBlocked: sp.regionBlocked,
+      redirect: SP_REDIRECT,
+      widevine: wv,
+      engine: spEngine.status,
+      account: sp.loggedIn ? await spSafe(sp.getAccount(), { name: sp.regionBlocked ? 'Spotify (нужен VPN)' : 'Spotify', error: true }) : null
+    };
+  };
+  handle('spotify:status', () => spStatus());
+  handle('spotify:setClientId', (id) => {
+    sp.setClientId(id);
+    return spStatus();
+  });
+  handle('spotify:login', async () => {
+    await sp.login();
+    showWindow();
+    return spStatus();
+  });
+  handle('spotify:logout', () => {
+    spEngine.release();
+    sp.logout();
+    return spStatus();
+  });
+  handle('spotify:prewarm', async () => {
+    if (!spOn()) return false;
+    await spEngine.awaitReady(60_000);
+    return true;
+  });
+  handle('spotify:play', (uris, positionMs) => spEngine.playUris(uris, positionMs));
+  handle('spotify:pause', () => spEngine.pause());
+  handle('spotify:resume', () => spEngine.resume());
+  handle('spotify:seek', (ms) => spEngine.seek(ms));
+  handle('spotify:next', () => spEngine.nextTrack());
+  handle('spotify:volume', (v) => (spEngine.started ? spEngine.setVolume(v) : null));
+  handle('spotify:modes', () => spEngine.ensureModes());
+  handle('spotify:snapshot', () => ({ status: spEngine.status, snapshot: spEngine.snapshot }));
+  handle('spotify:debug', async () => {
+    const wv = await Promise.race([widevineReady(), new Promise((r) => setTimeout(() => r({ ok: false, reason: 'ещё загружается' }), 300))]);
+    return [
+      `Client ID: ${sp.hasClientId ? 'задан' : 'нет'}`,
+      `Вход: ${sp.loggedIn ? 'да' : 'нет'}`,
+      `Widevine: ${wv.ok ? 'готов' : wv.reason}`,
+      `Плеер: ${spEngine.status.state}${spEngine.status.message ? ' — ' + spEngine.status.message : ''}`,
+      '',
+      '— Плеер —',
+      spEngine.debugText() || 'Плеер ещё не запускался.',
+      '',
+      '— Web API —',
+      sp.debugText() || 'Ошибок Web API пока не было.'
+    ].join('\n');
+  });
 
   handle('auth:status', async () => {
     await vk.refresh();
@@ -658,28 +797,30 @@ function registerIpc() {
   });
 
   handle('library:playlists', async () => {
-    const [yaLists, ytLists, scLists, vkLists] = await Promise.all([
+    const [yaLists, ytLists, scLists, vkLists, spLists] = await Promise.all([
       ya.loggedIn ? safe(ya.playlists(), []) : [],
       yt.loggedIn ? safe(yt.playlists(), []) : [],
       sc.loggedIn ? safe(sc.playlists(), []) : [],
-      vk.loggedIn ? safe(vk.playlists(), []) : []
+      vk.loggedIn ? safe(vk.playlists(), []) : [],
+      spOn() ? spSafe(sp.playlists(), []) : []
     ]);
-    return [...readMixes().map(mixSummary), ...yaLists, ...ytLists, ...scLists, ...vkLists];
+    return [...readMixes().map(mixSummary), ...yaLists, ...ytLists, ...scLists, ...vkLists, ...spLists];
   });
 
   handle('library:liked', async () => {
-    const [a, b, c, d] = await Promise.all([
+    const [a, b, c, d, e] = await Promise.all([
       ya.loggedIn ? safe(ya.likedTracks(), []) : [],
       yt.loggedIn ? safe(yt.likedTracks(), []) : [],
       sc.loggedIn ? safe(sc.likedTracks(), []) : [],
-      vk.loggedIn ? safe(vk.likedTracks(), []) : []
+      vk.loggedIn ? safe(vk.likedTracks(), []) : [],
+      spOn() ? spSafe(sp.likedTracks(), []) : []
     ]);
     // Чередуем, чтобы общий список не был «сначала весь Яндекс, потом весь YT»
     const out = [];
-    for (let i = 0; i < Math.max(a.length, b.length, c.length, d.length); i++) {
-      for (const l of [a, b, c, d]) if (l[i]) out.push(l[i]);
+    for (let i = 0; i < Math.max(a.length, b.length, c.length, d.length, e.length); i++) {
+      for (const l of [a, b, c, d, e]) if (l[i]) out.push(l[i]);
     }
-    return { tracks: out, ya: a.length, yt: b.length, sc: c.length, vk: d.length };
+    return { tracks: out, ya: a.length, yt: b.length, sc: c.length, vk: d.length, sp: e.length };
   });
 
   handle('library:tracks', async (playlistId) => {
@@ -688,6 +829,7 @@ function registerIpc() {
     if (playlistId.startsWith('yt:')) return yt.playlistTracks(playlistId);
     if (playlistId.startsWith('sc:')) return sc.playlistTracks(playlistId);
     if (playlistId.startsWith('vk:')) return vk.playlistTracks(playlistId);
+    if (playlistId.startsWith('sp:')) return sp.playlistTracks(playlistId);
     throw new Error('Неизвестный плейлист');
   });
 
@@ -745,15 +887,16 @@ function registerIpc() {
     // Поиск YouTube Music работает и без входа — аккаунт нужен только для лайков и библиотеки
     // SoundCloud тоже ищет без входа
     const yaOn = ya.loggedIn && up('ya');
-    const [a, b, c, d, arYa, arYt, alYa, alYt] = await Promise.all([
+    const [a, b, c, d, e, arYa, arYt, alYa, alYt] = await Promise.all([
       yaOn ? safe(ya.search(q), []) : [], up('yt') ? safe(yt.search(q), []) : [], up('sc') ? safe(sc.search(q), []) : [], vk.loggedIn && up('vk') ? safe(vk.search(q), []) : [],
+      spOn() ? spSafe(sp.search(q), []) : [],
       // исполнители и альбомы: Яндекс и YouTube Music
       yaOn ? safe(ya.searchArtist(q), []) : [], up('yt') ? safe(yt.searchArtist(q), []) : [],
       yaOn ? safe(ya.searchAlbum(q), []) : [], up('yt') ? safe(yt.searchAlbum(q), []) : []
     ]);
     const albums = [];
     for (let i = 0; i < Math.max(alYa.length, alYt.length) && albums.length < 12; i++) for (const l of [alYa, alYt]) if (l[i] && albums.length < 12) albums.push(l[i]);
-    return { ya: a, yt: b, sc: c, vk: d, artists: mergeArtists([arYa, arYt], q), albums };
+    return { ya: a, yt: b, sc: c, vk: d, sp: e, artists: mergeArtists([arYa, arYt], q), albums };
   });
 
   handle('wave:start', () => wave.start());
@@ -784,15 +927,29 @@ function registerIpc() {
     }
   }));
   handle('like', async (track, on) => {
+    wave.invalidateLikes();
     if (track.source === 'ya') await ya.like(track, on);
     else if (track.source === 'yt') await yt.like(track, on);
     else if (track.source === 'sc') return likeSoundCloud(track, on);
     else if (track.source === 'vk') await vk.like(track, on);
+    else if (track.source === 'sp') await sp.like(track, on);
     return on;
   });
 }
 
+/**
+ * Оформление: на всех ПК — тема Nyao (как на Windows); на macOS можно включить Liquid Glass в настройках.
+ * NYAO_THEME=mac|win переопределяет выбор (удобно, чтобы посмотреть чужую тему).
+ */
+function currentTheme() {
+  if (process.env.NYAO_THEME === 'mac' || process.env.NYAO_THEME === 'win') return process.env.NYAO_THEME;
+  return process.platform === 'darwin' && (settings.get() || {}).macTheme === 'glass' ? 'mac' : 'win';
+}
+/** «Светофоры» macOS: в Liquid Glass — в боковой панели, в теме Nyao — по центру полосы заголовка (44 px) */
+const trafficLights = (theme) => (theme === 'mac' ? { x: 26, y: 26 } : { x: 16, y: 15 });
+
 function createWindow() {
+  const theme = currentTheme();
   win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -800,7 +957,7 @@ function createWindow() {
     minHeight: 640,
     // На macOS оставляем родные «светофоры», на Windows — свои кнопки окна
     ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 26, y: 26 } }
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: trafficLights(theme) }
       : { frame: false }),
     backgroundColor: '#000000',
     title: 'Nyao Music',
@@ -830,14 +987,18 @@ function createWindow() {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  // Дизайн выбирается по системе: macOS — Liquid Glass, остальные — тёмная Windows-тема.
-  // NYAO_THEME=mac|win переопределяет выбор (удобно, чтобы посмотреть чужую тему).
-  const theme = process.env.NYAO_THEME || (process.platform === 'darwin' ? 'mac' : 'win');
   win.loadFile(path.join(RENDERER, 'index.html'), { query: { theme } });
   if (process.argv.includes('--dev')) win.webContents.openDevTools({ mode: 'detach' });
 }
 
 app.whenReady().then(() => {
+  // ссылки nyao:// в системе ведут в Nyao Music (в собранном приложении это прописывает и установщик)
+  try {
+    if (process.defaultApp && process.argv.length >= 2) app.setAsDefaultProtocolClient('nyao', process.execPath, [path.resolve(process.argv[1])]);
+    else app.setAsDefaultProtocolClient('nyao');
+  } catch {
+    // не страшно: останется кнопка «Открыть» на странице ссылки
+  }
   // При запуске через npm start показываем нашу иконку в доке (в собранном .app она и так своя)
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
     try {
@@ -847,8 +1008,50 @@ app.whenReady().then(() => {
     }
   }
   initProviders();
+  // копии треков Spotify из других сервисов: id трека Spotify → трек (значок «SP → Я»)
+  const spSubs = new Map();
+  const spFinding = new Map();
+  spSubstitute = (id, params) => {
+    if (spSubs.has(id)) return Promise.resolve(spSubs.get(id));
+    if (spFinding.has(id)) return spFinding.get(id);
+    const track = {
+      id,
+      source: 'sp',
+      srcId: id.slice(3),
+      title: String(params.get('t') || '').slice(0, 200),
+      artist: String(params.get('a') || '').slice(0, 200),
+      duration: Number(params.get('d')) || 0
+    };
+    const job = (async () => {
+      if (!track.title) return null;
+      const ok = (s) => up(s) && (s === 'yt' || s === 'sc' || (s === 'ya' && ya.loggedIn) || (s === 'vk' && vk.loggedIn));
+      for (const s of ['ya', 'yt', 'vk', 'sc'].filter(ok)) {
+        const m = await findMatch(track, (q) => ({ ya, yt, sc, vk })[s].search(q), { minScore: 0.8 }).catch(() => null);
+        if (m) {
+          spSubs.set(id, m.track);
+          while (spSubs.size > 500) spSubs.delete(spSubs.keys().next().value);
+          send('stream:substitute', { id, track: m.track });
+          return m.track;
+        }
+      }
+      return null;
+    })().finally(() => spFinding.delete(id));
+    spFinding.set(id, job);
+    return job;
+  };
   protocol.handle('nyao', async (request) => {
-    const res = await streams.handle(request);
+    const u = new URL(request.url);
+    // трек Spotify: в <audio> — тишина той же длины, звук даёт устройство Spotify (см. renderer/spotify-sync.js)
+    let req = request;
+    const sid = u.host === 'stream' ? decodeURIComponent(u.pathname.slice(1)) : '';
+    if (sid.startsWith('sp:')) {
+      // Spotify сам играть не может (нет Premium, регион, не вошли) — играем копию из другого сервиса
+      if (u.searchParams.get('x') !== '1' && spOn()) return silenceResponse(Number(u.searchParams.get('d')) || 0, request.headers.get('range'));
+      const sub = await spSubstitute(sid, u.searchParams).catch(() => null);
+      if (!sub) return new Response('Не нашёл этот трек в других сервисах — без Premium Spotify сам не играет', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+      req = new Request(`nyao://stream/${encodeURIComponent(sub.id)}`, { headers: request.headers });
+    }
+    const res = await streams.handle(req);
     // эквалайзер (Web Audio) читает звук только с разрешением CORS
     try {
       res.headers.set('access-control-allow-origin', '*');

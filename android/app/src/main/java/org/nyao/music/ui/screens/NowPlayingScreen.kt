@@ -48,6 +48,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -191,8 +195,14 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    SourceTag(t.source)
-                    Text("из ${org.nyao.music.data.sourceName(t.source, genitive = true)}", style = MaterialTheme.typography.bodySmall, color = pal.onContainer)
+                    val subs by org.nyao.music.data.Repo.substitutes.collectAsState()
+                    val sub = subs[t.id]
+                    org.nyao.music.ui.components.TrackSourceTag(t)
+                    Text(
+                        if (sub != null) "из ${org.nyao.music.data.sourceName(t.source, genitive = true)} → ${org.nyao.music.data.sourceName(sub.source)}"
+                        else "из ${org.nyao.music.data.sourceName(t.source, genitive = true)}",
+                        style = MaterialTheme.typography.bodySmall, color = pal.onContainer,
+                    )
                 }
             }
         }
@@ -366,7 +376,7 @@ private fun QueueRow(
             Text(q.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = pal.sub.copy(alpha = if (past) 0.7f else 1f))
         }
         org.nyao.music.ui.components.DownloadedMark(q)
-        SourceTag(q.source)
+        org.nyao.music.ui.components.TrackSourceTag(q)
         IconButton(onClick = { model.like(q, !liked) }, modifier = Modifier.size(40.dp)) {
             Icon(if (liked) NyaoIcons.Favorite else NyaoIcons.FavoriteBorder, if (liked) "Убрать из «Мне нравится»" else "Нравится", tint = if (liked) pal.accent else pal.sub, modifier = Modifier.size(20.dp))
         }
@@ -442,6 +452,17 @@ private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClos
                     onClose()
                     org.nyao.music.playback.Friends.shareRequest.value = t
                 }) { Text("Другу") }
+                androidx.compose.material3.OutlinedButton(onClick = {
+                    // ссылка на сайт: у кого есть Nyao — откроется сразу, нет нужного сервиса — найдёт копию
+                    val link = org.nyao.music.playback.Together.trackLink(t)
+                    runCatching {
+                        ctx.startActivity(android.content.Intent.createChooser(
+                            android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                                .putExtra(android.content.Intent.EXTRA_TEXT, "${t.artist} — ${t.title}\n$link"),
+                            "Поделиться треком",
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }) { Text("Ссылка") }
                 model.albumOf(t)?.let { al ->
                     androidx.compose.material3.OutlinedButton(onClick = {
                         onClose()
@@ -492,6 +513,42 @@ private fun Tool(icon: ImageVector, label: String, on: Boolean, pal: CoverPalett
 }
 
 
+/**
+ * Караоке: текущая строка с пословным временем (Nyao LyricLabs). Каждая буква — свой слой: яркость и подъём
+ * считаются от времени плеера на каждом кадре прямо при отрисовке, без перестройки экрана. Буква k слова из n букв
+ * начинает подниматься, когда пройдено k/n слова, подъём перекрывает соседние буквы — заливка идёт волной.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun KaraokeLine(words: List<org.nyao.music.data.LyricWord>, pal: CoverPalette, modifier: Modifier) {
+    val clock = remember { mutableFloatStateOf(PlayerConnection.positionMs() / 1000f) }
+    LaunchedEffect(words) {
+        while (true) {
+            withFrameNanos { }
+            clock.floatValue = PlayerConnection.positionMs() / 1000f + 0.04f // чуть раньше звука — глаз успевает за голосом
+        }
+    }
+    val style = MaterialTheme.typography.headlineSmall
+    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        words.forEach { w ->
+            val chars = remember(w.text) { w.text.codePoints().toArray().map { String(Character.toChars(it)) } }
+            Row {
+                chars.forEachIndexed { k, ch ->
+                    Text(ch, style = style, color = pal.accent, modifier = Modifier.graphicsLayer {
+                        val n = chars.size
+                        val soft = 1.8f
+                        val wp = ((clock.floatValue - w.time) / maxOf(0.05, w.end - w.time)).toFloat().coerceIn(0f, 1f)
+                        var x = ((wp * (n + soft) - k) / soft).coerceIn(0f, 1f)
+                        x = x * x * (3 - 2 * x) // плавно в начале и в конце
+                        alpha = 0.4f + 0.6f * x
+                        translationY = -x * 0.06f * style.fontSize.toPx()
+                    })
+                }
+            }
+        }
+    }
+}
+
 /** Синхронный текст (Яндекс Музыка, LRCLIB или YouTube Music): текущая строка крупнее и ярче, панель сама прокручивается, тап по строке — перемотка */
 @Composable
 private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: CoverPalette) {
@@ -519,6 +576,13 @@ private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: Cove
                 itemsIndexed(l.lines) { i, line ->
                     val active = i == currentLine
                     val past = l.synced && i < currentLine
+                    val words = line.words
+                    if (active && l.synced && words != null) {
+                        KaraokeLine(words, pal, Modifier.fillMaxWidth()
+                            .clickable(enabled = line.time != null) { line.time?.let { PlayerConnection.seekTo((it * 1000).toLong()) } }
+                            .padding(horizontal = 22.dp, vertical = 7.dp))
+                        return@itemsIndexed
+                    }
                     Text(
                         line.text.ifEmpty { "♪" },
                         style = if (active) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,

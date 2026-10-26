@@ -106,6 +106,7 @@ class SpotifyAuth(context: Context) {
         val id = clientId
         prefs.edit { clear(); putString(KEY_CLIENT, id) }
         _loggedIn.value = false
+        Spotify.blocked = null
     }
 
     private suspend fun requestToken(body: FormBody): JSONObject = withContext(Dispatchers.IO) {
@@ -145,6 +146,7 @@ class SpotifyAuth(context: Context) {
             "user-library-modify",
             "playlist-read-private",
             "playlist-read-collaborative",
+            "user-read-recently-played",
         )
 
         private const val KEY_CLIENT = "client_id"

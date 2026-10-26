@@ -51,28 +51,24 @@ class YtStreams(private val yt: YtMusicApi) {
     }
 
     private val blocked = ConcurrentHashMap<String, Long>()
+    private val http = Net.client.newBuilder().callTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build()
     private val cache = ConcurrentHashMap<String, Stream>()
     @Volatile var lastError: String? = null
         private set
 
-    fun reportBlocked(client: String) {
-        blocked[client] = System.currentTimeMillis() + BLOCK_MS
+    fun reportBlocked(client: String, videoId: String = "*") {
+        blocked["$videoId:$client"] = System.currentTimeMillis() + BLOCK_MS
         Log.w(TAG, "клиент $client получил 403 — пропускаю его 10 минут")
     }
 
-    fun invalidate(videoId: String) {
-        cache.remove(videoId)?.let { reportBlocked(it.client) }
+    fun invalidate(videoId: String, denied: Boolean = false) {
+        cache.remove(videoId)?.let { if (denied) reportBlocked(it.client, videoId) }
     }
 
-    private fun order(): List<Client> {
+    private fun order(videoId: String): List<Client> {
         val now = System.currentTimeMillis()
-        val free = CLIENTS.filter { (blocked[it.key] ?: 0) < now }
-        return free.ifEmpty {
-            // все на скамейке — сбрасываем и пробуем заново
-            blocked.clear()
-            yt.visitorData = null
-            CLIENTS
-        }
+        blocked.entries.removeAll { it.value <= now }
+        return CLIENTS.filter { (blocked["$videoId:${it.key}"] ?: 0) <= now }
     }
 
     /** Блокирующий вызов: зовётся из потока загрузки ExoPlayer. */
@@ -81,33 +77,36 @@ class YtStreams(private val yt: YtMusicApi) {
 
     fun resolve(videoId: String): Stream {
         cache[videoId]?.let { if (it.expiresAt > System.currentTimeMillis() + 60_000) return it }
-        kotlinx.coroutines.runBlocking { yt.ensureVisitor() }
         val errors = ArrayList<String>()
+        val deadline = android.os.SystemClock.elapsedRealtime() + 25_000
         for (round in 0..1) {
-            for (c in order()) {
+            // без visitorData YouTube чаще просит «подтвердить, что вы не бот»: берём его до запроса потока
+            if (yt.visitorData == null) runCatching { kotlinx.coroutines.runBlocking { yt.ensureVisitor() } }
+            for (c in order(videoId)) {
+                if (android.os.SystemClock.elapsedRealtime() >= deadline) break
                 try {
-                    val s = player(c, videoId)
-                    if (check(s)) {
+                    val s = player(c, videoId, deadline)
+                    val code = check(s, deadline)
+                    if (code == 200 || code == 206) {
                         cache[videoId] = s
                         lastError = null
                         Log.i(TAG, "$videoId → ${c.key}")
                         return s
                     }
-                    reportBlocked(c.key)
-                    errors += "${c.key}: 403"
+                    if (code == 403) reportBlocked(c.key, videoId)
+                    errors += "${c.key}: HTTP $code"
                 } catch (e: Exception) {
                     errors += "${c.key}: ${e.message}"
                 }
             }
             // второй круг — с новым visitorData
             yt.visitorData = null
-            kotlinx.coroutines.runBlocking { yt.ensureVisitor() }
         }
-        lastError = errors.joinToString("; ")
+        lastError = Diagnostics.safe(errors.joinToString("; "))
         throw ApiException("YouTube не отдал звук: $lastError")
     }
 
-    private fun player(c: Client, videoId: String): Stream {
+    private fun player(c: Client, videoId: String, deadline: Long): Stream {
         val client = JSONObject()
             .put("clientName", c.name)
             .put("clientVersion", c.version)
@@ -127,7 +126,9 @@ class YtStreams(private val yt: YtMusicApi) {
             .header("X-Youtube-Client-Version", c.version)
             .header("Origin", "https://www.youtube.com")
         yt.visitorData?.let { rb.header("X-Goog-Visitor-Id", it) }
-        val (code, text) = Net.execute(rb.build())
+        val call = http.newCall(rb.build())
+        call.timeout().timeout((deadline - android.os.SystemClock.elapsedRealtime()).coerceIn(1, 8000), java.util.concurrent.TimeUnit.MILLISECONDS)
+        val (code, text) = call.execute().use { it.code to (it.body?.string() ?: "") }
         if (code !in 200..299) throw ApiException("player $code")
         val r = JSONObject(text)
         val status = r.path("playabilityStatus")
@@ -149,12 +150,12 @@ class YtStreams(private val yt: YtMusicApi) {
     }
 
     /** Короткий запрос первых байт: googlevideo сразу отвечает 403, если ссылка «не наша» */
-    private fun check(s: Stream): Boolean {
+    private fun check(s: Stream, deadline: Long): Int {
         val req = Request.Builder().url(s.url).header("User-Agent", s.userAgent).header("Range", "bytes=0-1").get().build()
         return try {
-            Net.client.newCall(req).execute().use { it.code == 200 || it.code == 206 }
+            http.newCall(req).apply { timeout().timeout((deadline - android.os.SystemClock.elapsedRealtime()).coerceIn(1, 8000), java.util.concurrent.TimeUnit.MILLISECONDS) }.execute().use { it.code }
         } catch (_: Exception) {
-            false
+            0
         }
     }
 }

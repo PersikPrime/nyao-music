@@ -225,8 +225,9 @@ fun NyaoRoot() {
             org.nyao.music.ui.screens.ScCaptchaScreen(url) { ok ->
                 Repo.sc.captcha.value = null
                 if (ok) scope.launch {
-                    runCatching { Repo.flushScLikes() }
-                    PlaybackEvents.emit("Проверка пройдена — лайки SoundCloud отправлены")
+                    runCatching { Repo.flushScLikes() }.onSuccess {
+                        PlaybackEvents.emit(if (it.left == 0) "SoundCloud: все изменения отправлены" else "SoundCloud пока не принял изменения — они сохранены")
+                    }
                 }
             }
         }
@@ -280,6 +281,29 @@ fun NyaoRoot() {
                             }
                         }
                         .onFailure { model.message(it.message ?: "Приглашение не открылось") }
+                }
+            }
+        }
+        // профиль по нику из ссылки «Поделиться»
+        LaunchedEffect(Unit) {
+            org.nyao.music.playback.Friends.profileLinks.collect { nick ->
+                if (nick != null) {
+                    org.nyao.music.playback.Friends.profileLinks.value = null
+                    model.go(Route.UserPage(nick))
+                }
+            }
+        }
+        // трек из ссылки: свой сервис — сразу, чужой — найденная копия (со значком, откуда играет)
+        LaunchedEffect(Unit) {
+            org.nyao.music.playback.Friends.trackLinks.collect { t ->
+                if (t != null) {
+                    org.nyao.music.playback.Friends.trackLinks.value = null
+                    val mine = runCatching { org.nyao.music.data.Repo.playable(t) }.getOrNull()
+                    if (mine == null) model.message("Не нашёл «${t.title}» в подключённых сервисах")
+                    else {
+                        org.nyao.music.playback.PlayerConnection.playList(listOf(mine), 0, "По ссылке")
+                        if (mine.source != t.source) model.message("Играет из ${org.nyao.music.data.sourceName(mine.source, genitive = true)} — исходный сервис не подключён")
+                    }
                 }
             }
         }
