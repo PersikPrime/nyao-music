@@ -72,6 +72,9 @@ contextBridge.exposeInMainWorld('nyao', {
     download: (asset) => call('update:download', asset),
     onProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p))
   },
+  theme: {
+    set: (v) => call('theme:set', v)
+  },
   settings: {
     get: () => call('settings:get'),
     set: (patch) => call('settings:set', patch)

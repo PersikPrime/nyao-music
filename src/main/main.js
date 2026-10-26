@@ -498,6 +498,17 @@ function registerIpc() {
     return file;
   });
   handle('settings:get', () => settings.get());
+  // оформление на macOS: 'glass' — Liquid Glass, 'nyao' — как на Windows; окно перезагружается в новой теме
+  handle('theme:set', (v) => {
+    if (process.platform !== 'darwin') return { ok: false };
+    settings.set({ macTheme: v === 'glass' ? 'glass' : 'nyao' });
+    const theme = currentTheme();
+    if (win && !win.isDestroyed()) {
+      if (typeof win.setWindowButtonPosition === 'function') win.setWindowButtonPosition(trafficLights(theme));
+      setTimeout(() => win && !win.isDestroyed() && win.loadFile(path.join(RENDERER, 'index.html'), { query: { theme } }), 60);
+    }
+    return { ok: true, theme };
+  });
   handle('settings:set', (patch) => {
     const next = settings.set(patch);
     if ('discordRpc' in patch) configureRpc();
@@ -926,7 +937,19 @@ function registerIpc() {
   });
 }
 
+/**
+ * Оформление: на всех ПК — тема Nyao (как на Windows); на macOS можно включить Liquid Glass в настройках.
+ * NYAO_THEME=mac|win переопределяет выбор (удобно, чтобы посмотреть чужую тему).
+ */
+function currentTheme() {
+  if (process.env.NYAO_THEME === 'mac' || process.env.NYAO_THEME === 'win') return process.env.NYAO_THEME;
+  return process.platform === 'darwin' && (settings.get() || {}).macTheme === 'glass' ? 'mac' : 'win';
+}
+/** «Светофоры» macOS: в Liquid Glass — в боковой панели, в теме Nyao — по центру полосы заголовка (44 px) */
+const trafficLights = (theme) => (theme === 'mac' ? { x: 26, y: 26 } : { x: 16, y: 15 });
+
 function createWindow() {
+  const theme = currentTheme();
   win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -934,7 +957,7 @@ function createWindow() {
     minHeight: 640,
     // На macOS оставляем родные «светофоры», на Windows — свои кнопки окна
     ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 26, y: 26 } }
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: trafficLights(theme) }
       : { frame: false }),
     backgroundColor: '#000000',
     title: 'Nyao Music',
@@ -964,9 +987,6 @@ function createWindow() {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  // Дизайн выбирается по системе: macOS — Liquid Glass, остальные — тёмная Windows-тема.
-  // NYAO_THEME=mac|win переопределяет выбор (удобно, чтобы посмотреть чужую тему).
-  const theme = process.env.NYAO_THEME || (process.platform === 'darwin' ? 'mac' : 'win');
   win.loadFile(path.join(RENDERER, 'index.html'), { query: { theme } });
   if (process.argv.includes('--dev')) win.webContents.openDevTools({ mode: 'detach' });
 }

@@ -22,9 +22,12 @@ const spotifySync = new SpotifySync(player, window.nyao && window.nyao.spotify, 
 if (window.nyao && window.nyao.spotify) spotifySync.start();
 const eq = new Equalizer(player.audio);
 
-// ---------- Тема по системе: macOS — Liquid Glass, остальное — Windows ----------
-const THEME = new URLSearchParams(location.search).get('theme') || (api.platform === 'darwin' ? 'mac' : 'win');
+// ---------- Оформление: тема Nyao на всех ПК; на macOS можно включить Liquid Glass (настройки → Вид) ----------
+// IS_MAC — включено ли оформление Liquid Glass; ON_MAC — сама система (⌘ в сочетаниях, «светофоры», установщик)
+const THEME = new URLSearchParams(location.search).get('theme') || 'win';
+const ON_MAC = api.platform === 'darwin';
 document.body.classList.add(THEME);
+if (ON_MAC) document.body.classList.add('macos');
 const IS_MAC = THEME === 'mac';
 
 const state = {
@@ -1199,6 +1202,16 @@ function playHandoff(d, fallbackLabel) {
   renderBar();
 }
 
+/** macOS: оформление Nyao (как на Windows) или Liquid Glass — как выбор темы на Android */
+function themePickerHtml() {
+  const cur = IS_MAC ? 'glass' : 'nyao';
+  const opts = [['nyao', 'Nyao', 'как на Windows'], ['glass', 'Liquid Glass', 'стекло и размытие macOS']];
+  return `<div class="accent-pick">
+    <div><b>Оформление</b><span class="hint">Окно перезагрузится в новой теме, музыка продолжит играть с того же места.</span></div>
+    <div class="seg theme-seg" role="radiogroup" aria-label="Оформление">${opts.map(([v, n, h]) => `<button role="radio" aria-checked="${cur === v}" class="${cur === v ? 'on' : ''}" data-action="set-theme" data-v="${v}"><b>${n}</b><span>${h}</span></button>`).join('')}</div>
+  </div>`;
+}
+
 function accentPickerHtml() {
   const cur = (state.settings && state.settings.accent) || 'lavender';
   return `<div class="accent-pick">
@@ -1301,6 +1314,7 @@ function renderSettingsSection(sec) {
   else if (sec === 'view') body = `<section class="card">
       <div class="hint">Что главное при запуске. Через аккаунт Nyao едет на все устройства.</div>
       ${layoutChoiceHtml(layout(), 'data-action="set-layout"')}
+      ${ON_MAC ? themePickerHtml() : ''}
       ${accentPickerHtml()}
       <div class="pref-row"><span><b>«Мне нравится» по сервисам</b><span class="hint">Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud — плюс общий.</span></span>
         <button class="switch ${state.settings.splitLiked ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.splitLiked}" aria-label="«Мне нравится» по сервисам" data-action="split-liked" data-v="${state.settings.splitLiked ? 0 : 1}"><span></span></button></div>
@@ -1313,7 +1327,7 @@ function renderSettingsSection(sec) {
   else if (sec === 'discord') body = discordCardHtml();
   else if (sec === 'updates') body = updateCardHtml();
   else if (sec === 'about') body = `<section class="card">
-      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · тема ${IS_MAC ? 'macOS (Liquid Glass)' : 'Windows'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
+      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · оформление ${IS_MAC ? 'Liquid Glass' : 'Nyao'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
       <div><button class="btn" data-action="onboarding">Показать приветствие снова</button></div>
     </section>`;
   view.innerHTML = `<div class="scroll settings psec">
@@ -1339,7 +1353,7 @@ function eqCardHtml() {
 // ---------- Управление: глобальные сочетания и трей ----------
 function controlCardHtml() {
   const s = state.settings;
-  const mod = IS_MAC ? '⌘⌥' : 'Ctrl+Alt+';
+  const mod = ON_MAC ? '⌘⌥' : 'Ctrl+Alt+';
   return `<section class="card eq-card">
     <div class="pref-row"><span><b>Сочетания клавиш везде</b><span class="hint">Работают, даже когда окно свёрнуто: ${mod}Пробел — пауза, ${mod}→ / ${mod}← — следующий и предыдущий, ${mod}L — «Мне нравится». Медиаклавиши клавиатуры работают всегда.</span></span>
       <button class="switch ${s.globalKeys !== false ? 'on' : ''}" role="switch" aria-checked="${s.globalKeys !== false}" aria-label="Сочетания клавиш везде" data-action="toggle-globalkeys"><span></span></button></div>
@@ -2616,7 +2630,7 @@ async function handleAction(el, e) {
       renderSettings();
       try {
         await api.updates.download(asset);
-        toast(IS_MAC ? 'Установщик открыт: перетащи Nyao Music в «Программы»' : 'Установщик запущен — после установки приложение перезапустится');
+        toast(ON_MAC ? 'Установщик открыт: перетащи Nyao Music в «Программы»' : 'Установщик запущен — после установки приложение перезапустится');
       } catch (err) {
         state.update.error = err.message;
       }
@@ -2656,6 +2670,18 @@ async function handleAction(el, e) {
     case 'set-layout':
       await setLayout(el.dataset.v);
       break;
+    case 'set-theme': {
+      if ((el.dataset.v === 'glass') === IS_MAC || !api.theme) break;
+      // окно перезагрузится: запоминаем трек, место и то, что музыка играла
+      saveSession(true);
+      try {
+        if (player.playing) localStorage.setItem('nyao.resume', '1');
+      } catch {
+        // не запомнилось — просто не продолжим сами
+      }
+      await api.theme.set(el.dataset.v);
+      break;
+    }
     case 'set-accent':
       state.settings = await api.settings.set({ accent: el.dataset.v });
       refreshAccent();
@@ -3524,6 +3550,11 @@ function openMixBuilder() {
   try {
     const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
     if (saved) player.restore(saved);
+    // окно перезагрузили (смена оформления), а музыка играла — продолжаем
+    if (localStorage.getItem('nyao.resume') === '1') {
+      localStorage.removeItem('nyao.resume');
+      if (saved && !player.playing) player.toggle();
+    }
   } catch {
     // нет сохранённого — ничего страшного
   }

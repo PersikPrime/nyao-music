@@ -54,6 +54,13 @@ img { display: block; }
 .acc.off { opacity: .55; }
 .acc .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .winctl { display: flex; height: 44px; }
+/* тема Nyao на macOS: родные «светофоры» слева вместо своих кнопок окна */
+body.win.macos .winctl { display: none; }
+body.win.macos .titlebar { padding-left: 84px; padding-right: 12px; }
+.theme-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.theme-seg button { height: auto; min-height: 56px; padding: 8px 12px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; text-align: left; }
+.theme-seg button b { font-size: 14px; color: var(--text); }
+.theme-seg button span { font-size: 12px; font-weight: 500; color: var(--muted); }
 .winctl button { width: 46px; height: 44px; border: 0; background: none; color: var(--muted); display: grid; place-items: center; }
 .winctl button:hover { background: var(--s3); color: var(--text); }
 .winctl button.close:hover { background: #c42b1c; color: #fff; }
