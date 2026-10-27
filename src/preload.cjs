@@ -20,6 +20,16 @@ contextBridge.exposeInMainWorld('nyao', {
     onFullscreen: (cb) => ipcRenderer.on('win:fullscreen', (_e, on) => cb(on))
   },
   coverColor: (url) => call('cover:color', url),
+  dev: {
+    info: () => call('dev:info'),
+    hotClearBad: () => call('dev:hotClearBad'),
+    open: (what) => call('dev:open', what),
+    ping: () => call('dev:ping'),
+    offline: (on) => call('dev:offline', on),
+    crash: (what) => call('dev:crash', what),
+    diag: () => call('dev:diag'),
+    lyricsProbe: (track) => call('dev:lyricsProbe', track)
+  },
   card: {
     cover: (url) => call('card:cover', url),
     copy: (dataUrl) => call('card:copy', dataUrl),

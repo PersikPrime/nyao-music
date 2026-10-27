@@ -1138,7 +1138,8 @@ async function loadCloud() {
   renderAccounts();
   if (st.loggedIn) {
     loadOthers();
-    if (state.route === 'settings') loadCloudDevices();
+    // свежий профиль с сервера: в нём, например, отметка разработчика
+    loadCloudDevices(true);
     friends.load().then(() => {
       friendsBadge = friends.unread();
       renderRail();
@@ -1146,7 +1147,7 @@ async function loadCloud() {
     });
   }
 }
-async function loadCloudDevices() {
+async function loadCloudDevices(silent = false) {
   try {
     const me = await api.cloud.me();
     state.cloud.user = me.user;
@@ -1154,7 +1155,7 @@ async function loadCloudDevices() {
   } catch (e) {
     const st = await api.cloud.status().catch(() => ({ loggedIn: false }));
     state.cloud.loggedIn = st.loggedIn;
-    if (st.loggedIn) toast(e.message, true);
+    if (st.loggedIn && !silent) toast(e.message, true);
   }
   if (state.route === 'settings') renderSettings();
 }
@@ -1262,6 +1263,7 @@ const RI = {
   sound: 'M4 9.5h3.5L12 5v14l-4.5-4.5H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11',
   keys: 'M3.5 6.5h17v11h-17zM7 10h1M11 10h2M16 10h1M7.5 14h9',
   lyrics: 'M5 7h14M5 12h14M5 17h9',
+  dev: 'M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14',
   palette: 'M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.7-.8 1.7-1.6 0-1-.9-1.5-.9-2.4 0-.9.7-1.5 1.6-1.5h2c2 0 3.6-1.6 3.6-3.6 0-4.4-3.6-7.9-8-7.9M7.5 12a1 1 0 1 0 0 .1M10 8a1 1 0 1 0 0 .1M14.5 8a1 1 0 1 0 0 .1',
   update: 'M20 12a8 8 0 1 1-2.3-5.7M20 4.5v4h-4',
   info: 'M12 21a9 9 0 1 0 0-18a9 9 0 1 0 0 18M12 11v5M12 7.8v.2',
@@ -1283,7 +1285,7 @@ function profileTabs(active) {
   return `<div class="ptabs">${t('settings', 'Профиль')}${t('friends', 'Друзья')}${t('together', 'Вместе')}</div>`;
 }
 const SECTIONS = {
-  account: 'Аккаунт Nyao', sound: 'Звук и воспроизведение', lyrics: 'Текст песни', keys: 'Управление и окно', view: 'Вид приложения',
+  account: 'Аккаунт Nyao', sound: 'Звук и воспроизведение', lyrics: 'Текст песни', dev: 'Разработчик', keys: 'Управление и окно', view: 'Вид приложения',
   lastfm: 'Last.fm', discord: 'Discord', updates: 'Обновления', about: 'О приложении', wave: 'Моя волна'
 };
 function sectionTitle(sec) {
@@ -1327,6 +1329,7 @@ function renderSettings() {
       srow({ lead: '<span class="dot" style="background:#D51007;color:#fff">fm</span>', title: 'Last.fm', value: lastfmState.connected ? lastfmState.name || 'подключено' : lastfmState.configured ? 'подключить' : 'выключен', ok: lastfmState.connected, sec: 'lastfm' }),
       srow({ lead: '<span class="dot" style="background:#5865F2;color:#fff">D</span>', title: 'Статус в Discord', value: state.settings.discordRpc ? 'включён' : 'выключен', ok: !!state.settings.discordRpc, sec: 'discord' })
     ])}
+    ${isDev() ? sgroup('Разработчик', [srow({ icon: RI.dev, title: 'Разработчик', value: 'тесты и диагностика', sec: 'dev' })]) : ''}
     ${sgroup('О приложении', [
       srow({ icon: RI.update, title: 'Обновления', value: state.update.info && state.update.info.available ? 'есть новая версия' : esc(state.version || ''), ok: !!(state.update.info && state.update.info.available), sec: 'updates' }),
       srow({ icon: RI.info, title: 'О приложении', sec: 'about' })
@@ -1340,6 +1343,7 @@ function renderSettingsSection(sec) {
   if (sec === 'account') body = nyaoCardHtml();
   else if (sec === 'sound') body = soundCardHtml() + eqCardHtml();
   else if (sec === 'lyrics') body = lyricsCardHtml();
+  else if (sec === 'dev' && isDev()) body = devCardHtml();
   else if (sec === 'keys') body = controlCardHtml();
   else if (sec === 'wave') body = waveControlsHtml();
   else if (sec === 'view') body = `<section class="card">
@@ -1367,6 +1371,7 @@ function renderSettingsSection(sec) {
   </div>`;
   $$('input[data-input="share"], input[data-input="fresh"]', view).forEach(setRangeFill);
   if (sec === 'discord') refreshRpcStatus();
+  if (sec === 'dev' && isDev() && !devState.info) loadDevInfo();
   if (sec === 'lastfm') refreshLastfm();
   if (sec === 'account' && state.cloud.loggedIn && !state.cloud.devices) loadCloudDevices();
 }
@@ -1466,6 +1471,77 @@ async function saveLyricsPrefs(patch) {
   state.lyrics = { id: null };
   if (fullscreen.open) fullscreen.reloadLyrics();
   renderSettings();
+}
+
+// ---------- Раздел «Разработчик»: виден, если сервер Nyao отметил аккаунт как разработчика (NYAO_DEV_IDS) ----------
+const isDev = () => !!(state.cloud.loggedIn && state.cloud.user && state.cloud.user.dev && api.dev);
+const devState = { info: null, probe: null, ping: null, offline: false, fps: false };
+function devCardHtml() {
+  const i = devState.info;
+  const hot = i && i.hot;
+  const t = player.current;
+  const btn = (action, label, extra = '') => `<button class="btn" data-action="${action}" ${extra}>${label}</button>`;
+  const kv = (k, v) => `<div class="dev-kv"><span>${k}</span><b>${v}</b></div>`;
+  const group = (title, body) => `<section class="card dev-card"><div class="dev-h">${title}</div>${body}</section>`;
+  return [
+    group('Сборка', i ? [
+      kv('Версия', esc(i.version.label)),
+      kv('Electron · Chromium · Node', `${esc(i.electron)} · ${esc(i.chrome)} · ${esc(i.node)}`),
+      kv('Система', esc(i.platform)),
+      kv('Память main', `${i.memory} МБ`),
+      kv('Папка данных', esc(i.userData)),
+      kv('Быстрые обновления', hot ? (hot.enabled ? `вкл · запущен ${hot.running != null ? `код ${hot.running}` : 'код установщика'} · установщик ${hot.bundled.build} · compat ${esc(hot.compat)}` : 'выключены (нет ключа или разработка)') : '—'),
+      hot && hot.state.bad.length ? kv('Плохие версии', hot.state.bad.join(', ')) : '',
+      `<div class="dev-btns">${btn('dev-open', 'Открыть папку данных', 'data-v="data"')}${hot && hot.state.bad.length ? btn('dev-hot-clear', 'Забыть плохие версии') : ''}${hot && hot.running != null ? btn('update-reset-hot', 'Вернуть код установщика') : ''}</div>`
+    ].join('') : '<div class="hint">Загружаю…</div>'),
+    group('Тексты песен', `<div class="hint">${t ? `Текущий трек: ${esc(t.artist)} — ${esc(t.title)}` : 'Включи трек, чтобы проверить источники'}</div>
+      ${Array.isArray(devState.probe) ? `<div class="dev-table">${devState.probe.map((r) => `<div class="dev-row"><b>${esc(LYRIC_PROVIDERS[r.id].name)}</b><span>${r.ms} мс</span><span class="${r.found ? 'ok' : 'bad'}">${r.found ? `${r.synced ? (r.words ? 'по словам' : 'с таймингами') : 'без таймингов'} · ${r.lines} стр.` : 'нет'}</span><span class="hint">${esc(r.error || r.source || r.diag || '')}</span></div>`).join('')}</div>` : ''}
+      <div class="dev-btns">${btn('dev-probe', devState.probe === 'busy' ? 'Проверяю…' : 'Прогнать все источники', t ? '' : 'disabled')}${btn('dev-lyrics-reload', 'Искать текст заново')}</div>`),
+    group('Воспроизведение', `<div class="hint">${t ? `Источник: ${esc(t.source)} · ${esc(String(player.audio.currentSrc || '').split('/').slice(0, 3).join('/') || '—')}` : 'Ничего не играет'}</div>
+      <div class="dev-btns">${btn('dev-break-stream', 'Сломать поток (проверить восстановление)', t ? '' : 'disabled')}${btn('dev-seek-end', 'В конец трека', t ? '' : 'disabled')}${btn('dev-queue-1000', 'Очередь на 1000 треков', t ? '' : 'disabled')}</div>`),
+    group('Сеть и сервер', `${Array.isArray(devState.ping) ? `<div class="dev-table">${devState.ping.map((r) => `<div class="dev-row"><b>${esc(r.name)}</b><span>${r.ms} мс</span><span class="${r.error || r.status >= 400 ? 'bad' : 'ok'}">${r.error ? esc(r.error) : `HTTP ${r.status}`}</span></div>`).join('')}</div>` : ''}
+      <div class="pref-row"><span><b>Без сети</b><span class="hint">Запросы окна и Chromium перестают ходить — проверить экраны «нет интернета» и восстановление</span></span>
+        <button class="switch ${devState.offline ? 'on' : ''}" role="switch" aria-checked="${devState.offline}" aria-label="Без сети" data-action="dev-offline"><span></span></button></div>
+      <div class="dev-btns">${btn('dev-ping', devState.ping === 'busy' ? 'Пингую…' : 'Пинг серверов')}</div>`),
+    group('Статус-экраны', `<div class="hint">Только у тебя, на сервере ничего не включается. Техработы ставят музыку на паузу, как настоящие; «Проверить снова» вернёт настоящий статус.</div>
+      <div class="dev-btns">${btn('dev-mt', 'Техработы')}${btn('dev-outage', 'Сбой Яндекса и YouTube')}${btn('dev-status-real', 'Настоящий статус')}</div>`),
+    group('Стабильность', `<div class="pref-row"><span><b>FPS и память поверх окна</b><span class="hint">Счётчик в правом нижнем углу</span></span>
+        <button class="switch ${devState.fps ? 'on' : ''}" role="switch" aria-checked="${devState.fps}" aria-label="FPS и память" data-action="dev-fps"><span></span></button></div>
+      <div class="dev-btns">${btn('dev-crash', 'Уронить окно', 'data-v="renderer"')}${btn('dev-crash', 'Уронить приложение', 'data-v="main"')}</div>`),
+    group('Журналы', `<div class="dev-btns">${btn('dev-open', 'YouTube', 'data-v="yt"')}${btn('dev-open', 'VK', 'data-v="vk"')}${btn('dev-open', 'Тексты', 'data-v="lyrics"')}${btn('dev-diag', 'Скопировать диагностику')}</div>
+      <div class="hint">Диагностика — версия, система, статус сервисов и настройки, без токенов.</div>`),
+    group('Флаги', '<div class="hint">Экспериментальных флагов пока нет — новые фичи сначала будут появляться здесь.</div>')
+  ].join('');
+}
+async function loadDevInfo() {
+  devState.info = await api.dev.info().catch(() => null);
+  if (state.route === 'settings' && state.params && state.params.section === 'dev') renderSettings();
+}
+/** Счётчик FPS и памяти поверх окна */
+let fpsRaf = 0;
+function toggleFps(on) {
+  devState.fps = on;
+  let el = $('#dev-fps');
+  cancelAnimationFrame(fpsRaf);
+  if (!on) return el && el.remove();
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'dev-fps';
+    document.body.appendChild(el);
+  }
+  let frames = 0;
+  let last = performance.now();
+  const loop = (now) => {
+    frames++;
+    if (now - last >= 500) {
+      const mem = performance.memory ? ` · ${Math.round(performance.memory.usedJSHeapSize / 1048576)} МБ` : '';
+      el.textContent = `${Math.round((frames * 1000) / (now - last))} FPS${mem}`;
+      frames = 0;
+      last = now;
+    }
+    fpsRaf = requestAnimationFrame(loop);
+  };
+  fpsRaf = requestAnimationFrame(loop);
 }
 
 function soundCardHtml() {
@@ -2695,6 +2771,83 @@ async function handleAction(el, e) {
       break;
     case 'update-page':
       if (state.update.info && state.update.info.url) api.openExternal(state.update.info.url);
+      break;
+    case 'dev-open':
+      try {
+        await api.dev.open(el.dataset.v);
+      } catch (err) {
+        toast(err.message, true);
+      }
+      break;
+    case 'dev-hot-clear':
+      await api.dev.hotClearBad();
+      await loadDevInfo();
+      break;
+    case 'dev-probe': {
+      const t = player.current;
+      if (!t || devState.probe === 'busy') break;
+      devState.probe = 'busy';
+      renderSettings();
+      devState.probe = await api.dev.lyricsProbe(t).catch((err) => {
+        toast(err.message, true);
+        return null;
+      });
+      renderSettings();
+      break;
+    }
+    case 'dev-lyrics-reload':
+      state.lyrics = { id: null };
+      if (fullscreen.open) fullscreen.reloadLyrics();
+      toast('Текст текущего трека будет найден заново');
+      break;
+    case 'dev-break-stream':
+      // поток «обрывается» — плеер должен сам восстановиться (переподключиться или взять копию)
+      player.audio.src = 'https://127.0.0.1:9/nyao-broken-stream';
+      toast('Поток сломан — смотрим, как плеер восстановится');
+      break;
+    case 'dev-seek-end': {
+      const d = player.audio.duration;
+      if (Number.isFinite(d) && d > 8) player.seek(d - 6);
+      break;
+    }
+    case 'dev-queue-1000': {
+      const q = (player.queue || []).filter(Boolean);
+      if (!q.length) break;
+      const big = Array.from({ length: 1000 }, (_, i) => q[i % q.length]);
+      player.playList(big, Math.max(0, player.index), 'Тест: 1000 треков');
+      toast('Очередь: 1000 треков');
+      break;
+    }
+    case 'dev-ping':
+      devState.ping = 'busy';
+      renderSettings();
+      devState.ping = await api.dev.ping().catch(() => null);
+      renderSettings();
+      break;
+    case 'dev-offline':
+      devState.offline = await api.dev.offline(!devState.offline);
+      toast(devState.offline ? 'Сеть выключена (только Chromium)' : 'Сеть снова есть');
+      renderSettings();
+      break;
+    case 'dev-mt':
+      applyStatus({ maintenance: { active: true, title: 'Скоро вернёмся', text: 'Это предпросмотр экрана техработ из раздела «Разработчик».', until: 'Примерно через 15 минут' }, outages: [] });
+      break;
+    case 'dev-outage':
+      applyStatus({ maintenance: { active: false }, outages: ['ya', 'yt'] });
+      toast('Предпросмотр: сбой Яндекса и YouTube Music');
+      break;
+    case 'dev-status-real':
+      applyStatus(await api.status.get(true).catch(() => null));
+      break;
+    case 'dev-fps':
+      toggleFps(!devState.fps);
+      renderSettings();
+      break;
+    case 'dev-crash':
+      await api.dev.crash(el.dataset.v);
+      break;
+    case 'dev-diag':
+      copyText(await api.dev.diag());
       break;
     case 'lyr-move': {
       const order = lyricsOrder();

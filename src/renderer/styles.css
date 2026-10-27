@@ -1139,3 +1139,16 @@ body.fs-on .toast { z-index: 1000; }
 .lyr-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .lyr-t b { font-size: 14px; }
 .lyr-row .icon-btn:disabled { opacity: .3; }
+/* Раздел «Разработчик» */
+.dev-card { display: grid; gap: 8px; }
+.dev-h { font-family: var(--display); font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+.dev-kv { display: flex; gap: 12px; font-size: 13px; }
+.dev-kv span { color: var(--muted); min-width: 200px; flex: none; }
+.dev-kv b { font-weight: 600; word-break: break-all; }
+.dev-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.dev-table { display: grid; gap: 4px; }
+.dev-row { display: grid; grid-template-columns: 160px 70px 170px 1fr; gap: 10px; font-size: 13px; align-items: baseline; }
+.dev-row .ok { color: #8FE3B0; }
+.dev-row .bad { color: #FF8A80; }
+.dev-row .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dev-fps { position: fixed; right: 12px; bottom: 12px; z-index: 9999; padding: 6px 10px; border-radius: 10px; background: rgba(0,0,0,.75); color: #8FE3B0; font: 600 12px/1 ui-monospace, monospace; pointer-events: none; }

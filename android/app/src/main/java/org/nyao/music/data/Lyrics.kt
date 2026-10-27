@@ -147,7 +147,25 @@ object LyricsApi {
     }
 
     /** Первый текст с таймингами в порядке list; если таймингов нет нигде — первый найденный текст */
-    private suspend fun findWith(track: Track, list: List<String>, wordsFirst: Boolean, ownAsync: () -> kotlinx.coroutines.Deferred<Lyrics?>): Lyrics? {
+    /** Разработчик: каждый источник отдельно — что вернул и за сколько (кэш не трогаем) */
+    data class Probe(val id: String, val ms: Long, val lyrics: Lyrics?)
+
+    suspend fun probe(track: Track): List<Probe> = coroutineScope {
+        PROVIDERS.map { id ->
+            async {
+                val t0 = System.currentTimeMillis()
+                val r = runCatching {
+                    coroutineScope {
+                        val own = async { if (id == "nyao") nyaoLyrics(track) else null }
+                        findWith(track, listOf(id), false, store = false) { own }
+                    }
+                }.getOrNull()
+                Probe(id, System.currentTimeMillis() - t0, r)
+            }
+        }.map { it.await() }
+    }
+
+    private suspend fun findWith(track: Track, list: List<String>, wordsFirst: Boolean, store: Boolean = true, ownAsync: () -> kotlinx.coroutines.Deferred<Lyrics?>): Lyrics? {
         var fallback: Lyrics? = null
         suspend fun ownWords(): Lyrics? = if (wordsFirst && "nyao" in list) withTimeoutOrNull(2500) { ownAsync().await() }?.takeIf { it.words } else null
         suspend fun ya(): Lyrics? {
@@ -172,12 +190,12 @@ object LyricsApi {
                 val best = (if (id != "nyao" && !res.words) ownWords() else null) ?: res
                 // coroutineScope ждёт все запросы — LyricLabs, который не понадобился, отменяем
                 if (best === res && id != "nyao") ownAsync().cancel()
-                return best.also { cache[track.id] = it }
+                return best.also { if (store) cache[track.id] = it }
             }
             if (res != null && fallback == null) fallback = res
         }
         val res = ownWords() ?: fallback
-        if (res != null) cache[track.id] = res else missing += track.id
+        if (store) { if (res != null) cache[track.id] = res else missing += track.id }
         return res
     }
 

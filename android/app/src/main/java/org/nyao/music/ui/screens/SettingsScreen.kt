@@ -131,6 +131,9 @@ fun ProfileScreen(model: AppModel) {
                 Box(Modifier.size(26.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFD51007)), contentAlignment = Alignment.Center) { Text("fm", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall) }
             }, valueOk = lf.name != null, last = true) { model.go(Route.SettingsPage("lastfm")) }
         }
+        if (user?.dev == true) SettingsGroup("Разработчик") {
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Code, "Разработчик", "тесты и диагностика", last = true) { model.go(Route.SettingsPage("dev")) }
+        }
         SettingsGroup("Другое") {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Refresh, "Обновления", BuildConfig.VERSION_NAME) { model.go(Route.SettingsPage("updates")) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Info, "О приложении") { model.go(Route.SettingsPage("about")) }
@@ -194,6 +197,7 @@ private fun sectionTitle(section: String): String = when {
     section == "theme" -> "Тема и сетка"
     section == "widgets" -> "Стиль виджетов"
     section == "lyrics" -> "Текст песни"
+    section == "dev" -> "Разработчик"
     section == "lastfm" -> "Last.fm"
     section == "updates" -> "Обновления"
     section == "about" -> "О приложении"
@@ -225,6 +229,7 @@ fun SettingsPageScreen(model: AppModel, section: String) {
                 section == "theme" -> LookSettings()
                 section == "widgets" -> WidgetStyleSettings()
                 section == "lyrics" -> LyricsSettings()
+                section == "dev" -> if (Repo.cloud.user.value?.dev == true) DevSettings()
                 section == "lastfm" -> LastFmCard(model)
                 section == "updates" -> UpdateCard(model, showTitle = false)
                 section == "about" -> AboutCard()

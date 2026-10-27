@@ -31,6 +31,7 @@ services:
       LYRICS_HOSTS: ${LYRICS_DOMAIN:-lyrics.withnyao.app}
       LYRICS_API_HOSTS: ${LYRICS_API_DOMAIN:-api.corrode5-15.withnyao.app}
       LYRICS_ADMINS: ${LYRICS_ADMINS:-}
+      DEV_IDS: ${DEV_IDS:-}
       MIRROR_DIR: /data/releases
       STATUS_FILE: /data/status/status.json
     volumes:

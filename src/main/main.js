@@ -17,7 +17,7 @@ import { SpotifyEngine, silenceResponse } from './spotify/spotify-engine.js';
 import { checkUpdate, downloadAsset, fetchHot } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
-import { findLyricsChain } from './lyrics.js';
+import { findLyricsChain, LYRICS_PROVIDERS } from './lyrics.js';
 import { Catalog } from './catalog.js';
 import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
 import { NyaoCloud, API_BASE } from './cloud.js';
@@ -588,6 +588,69 @@ function registerIpc() {
       return hot.store.install(again.buf, again.sig);
     }
   });
+  // ---------- Раздел «Разработчик» (виден аккаунтам из NYAO_DEV_IDS; здесь — только локальные проверки) ----------
+  handle('dev:info', () => {
+    const hot = globalThis.__nyaoHot;
+    return {
+      version: readVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: `${process.platform} ${process.arch} · ${os.release()}`,
+      userData: app.getPath('userData'),
+      packaged: app.isPackaged,
+      memory: Math.round(process.memoryUsage().rss / 1048576),
+      hot: hot ? { enabled: hot.store.enabled, running: hot.running, bundled: hot.bundled, compat: hot.compat, state: hot.store.state() } : null
+    };
+  });
+  handle('dev:hotClearBad', () => {
+    const hot = globalThis.__nyaoHot;
+    if (!hot) return false;
+    hot.store.save({ ...hot.store.state(), bad: [] });
+    return true;
+  });
+  handle('dev:open', (what) => {
+    const files = { data: '', yt: 'yt-debug.log', vk: 'vk-debug.log', lyrics: 'lyrics-debug.log' };
+    if (!(what in files)) return false;
+    const p = path.join(app.getPath('userData'), files[what]);
+    if (what !== 'data' && !fs.existsSync(p)) throw new Error('Журнал пока пустой');
+    shell.openPath(p);
+    return true;
+  });
+  // задержка до серверов Nyao и GitHub
+  handle('dev:ping', async () => {
+    const targets = [
+      ['API Nyao', `${cloud ? cloud.base : API_BASE}/health`],
+      ['Зеркало обновлений', 'https://api.music.withnyao.app/updates/latest'],
+      ['Nyao LyricLabs', 'https://api.corrode5-15.withnyao.app/'],
+      ['GitHub', 'https://api.github.com/zen']
+    ];
+    return Promise.all(targets.map(async ([name, url]) => {
+      const t0 = Date.now();
+      try {
+        const res = await net.fetch(url, { signal: AbortSignal.timeout(8000) });
+        return { name, ms: Date.now() - t0, status: res.status };
+      } catch (e) {
+        return { name, ms: Date.now() - t0, error: safeDiagnostic(e.message) };
+      }
+    }));
+  });
+  // «без сети»: запросы через Chromium (окно и net.fetch) перестают ходить
+  handle('dev:offline', (on) => {
+    const opts = on ? { offline: true } : { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 };
+    session.defaultSession.enableNetworkEmulation(opts);
+    return !!on;
+  });
+  handle('dev:crash', (what) => {
+    if (what === 'renderer' && win && !win.isDestroyed()) win.webContents.forcefullyCrashRenderer();
+    else if (what === 'main') setTimeout(() => process.crash(), 100);
+    return true;
+  });
+  handle('dev:diag', () => {
+    const s = { ...settings.get() };
+    delete s.eq;
+    return JSON.stringify({ version: readVersion(), electron: process.versions.electron, platform: `${process.platform} ${process.arch}`, status: svcStatus, settings: s, at: new Date().toISOString() }, null, 2);
+  });
   handle('update:relaunch', () => {
     quitting = true;
     app.relaunch();
@@ -1029,9 +1092,8 @@ function registerIpc() {
   handle('stream:prepare', (trackId) => streams.prepare(trackId));
   handle('stream:loudness', (trackId) => streams.loudness(trackId));
   handle('stream:error', (trackId) => streams.lastError(trackId));
-  handle('lyrics', (track, opts = {}) => findLyricsChain(track, {
+  const lyricsDeps = () => ({
     fetch: fetchFn,
-    exclude: Array.isArray(opts && opts.exclude) ? opts.exclude.map(String) : [],
     // порядок провайдеров из настроек («Текст песни»)
     order: settings.get().lyricsOrder,
     wordsFirst: settings.get().lyricsWordsFirst !== false,
@@ -1049,7 +1111,24 @@ function registerIpc() {
       const m = await findMatch(t, (q) => ya.search(q), { minScore: 0.75 });
       return m && m.track;
     }
+  });
+  handle('lyrics', (track, opts = {}) => findLyricsChain(track, {
+    ...lyricsDeps(),
+    exclude: Array.isArray(opts && opts.exclude) ? opts.exclude.map(String) : []
   }));
+  // Разработчик: каждый источник текста отдельно — что вернул и за сколько
+  handle('dev:lyricsProbe', async (track) => {
+    const deps = lyricsDeps();
+    return Promise.all(LYRICS_PROVIDERS.map(async (id) => {
+      const t0 = Date.now();
+      try {
+        const r = await findLyricsChain(track, { ...deps, order: [{ id, on: true }], wordsFirst: false, log: () => {} });
+        return { id, ms: Date.now() - t0, found: !!(r && r.lines && r.lines.length), synced: !!(r && r.synced), words: !!(r && r.words), lines: r && r.lines ? r.lines.length : 0, source: r && r.source, diag: r && r.diag ? r.diag.join(' · ') : '' };
+      } catch (e) {
+        return { id, ms: Date.now() - t0, found: false, error: e.message };
+      }
+    }));
+  });
   handle('like', async (track, on) => {
     wave.invalidateLikes();
     if (track.source === 'ya') await ya.like(track, on);
