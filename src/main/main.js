@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage, Tray, Menu, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage, Tray, Menu, globalShortcut, clipboard, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -524,6 +524,34 @@ function registerIpc() {
     coverColors.set(url, color);
     if (coverColors.size > 200) coverColors.delete(coverColors.keys().next().value);
     return color;
+  });
+  // карточка со строками текста: обложка для canvas (без CORS), копирование и сохранение готовой картинки
+  handle('card:cover', async (url) => {
+    if (!/^https:\/\//.test(String(url || ''))) return null;
+    const res = await net.fetch(url);
+    if (!res.ok) return null;
+    const img = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()));
+    if (img.isEmpty()) return null;
+    const { width } = img.getSize();
+    return (width > 800 ? img.resize({ width: 800, quality: 'best' }) : img).toDataURL();
+  });
+  const cardImage = (dataUrl) => {
+    if (!/^data:image\/png;base64,/.test(String(dataUrl || ''))) throw new Error('не картинка');
+    const img = nativeImage.createFromDataURL(dataUrl);
+    if (img.isEmpty()) throw new Error('пустая картинка');
+    return img;
+  };
+  handle('card:copy', (dataUrl) => {
+    clipboard.writeImage(cardImage(dataUrl));
+    return true;
+  });
+  handle('card:save', async (dataUrl, name) => {
+    const img = cardImage(dataUrl);
+    const safe = String(name || 'Nyao.png').replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 140);
+    const r = await dialog.showSaveDialog(win, { defaultPath: path.join(app.getPath('downloads'), safe.endsWith('.png') ? safe : `${safe}.png`), filters: [{ name: 'PNG', extensions: ['png'] }] });
+    if (r.canceled || !r.filePath) return null;
+    fs.writeFileSync(r.filePath, img.toPNG());
+    return r.filePath;
   });
   handle('open:external', (url) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);

@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -549,11 +550,20 @@ private fun KaraokeLine(words: List<org.nyao.music.data.LyricWord>, pal: CoverPa
     }
 }
 
-/** Синхронный текст (Яндекс Музыка, LRCLIB или YouTube Music): текущая строка крупнее и ярче, панель сама прокручивается, тап по строке — перемотка */
+/**
+ * Синхронный текст (Яндекс Музыка, LRCLIB или YouTube Music): текущая строка крупнее и ярче, панель сама прокручивается,
+ * тап по строке — перемотка. Долгое нажатие (или кнопка-кавычка) — выбор до четырёх строк для карточки «Поделиться».
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: CoverPalette) {
     var lyrics by remember(track.id) { mutableStateOf<org.nyao.music.data.Lyrics?>(null) }
     var loading by remember(track.id) { mutableStateOf(true) }
+    var picking by remember(track.id) { mutableStateOf(false) }
+    var picked by remember(track.id) { mutableStateOf(listOf<Int>()) }
+    var sharing by remember { mutableStateOf(false) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     LaunchedEffect(track.id) {
         lyrics = org.nyao.music.data.LyricsApi.find(track)
         loading = false
@@ -563,7 +573,13 @@ private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: Cove
     val sec = posMs / 1000.0
     val currentLine = if (l != null && l.synced) l.lines.indexOfLast { (it.time ?: 0.0) <= sec + 0.3 } else -1
     LaunchedEffect(currentLine) {
-        if (currentLine >= 0) state.animateScrollToItem((currentLine - 2).coerceAtLeast(0))
+        if (currentLine >= 0 && !picking) state.animateScrollToItem((currentLine - 2).coerceAtLeast(0))
+    }
+    fun pick(i: Int) {
+        val line = l?.lines?.getOrNull(i) ?: return
+        if (line.text.isBlank()) return
+        picking = true
+        picked = org.nyao.music.ui.components.LyricCard.toggle(picked, i)
     }
     Box(
         Modifier.padding(horizontal = 12.dp).fillMaxWidth().widthIn(max = 560.dp).height(380.dp).clip(RoundedCornerShape(30.dp)).background(pal.surface),
@@ -572,32 +588,75 @@ private fun LyricsPanel(track: org.nyao.music.data.Track, posMs: Long, pal: Cove
         when {
             loading -> CircularProgressIndicator(color = pal.accent)
             l == null -> Text("Текста для этого трека не нашлось", style = MaterialTheme.typography.bodyMedium, color = pal.sub)
-            else -> LazyColumn(state = state, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 24.dp)) {
+            else -> LazyColumn(state = state, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 24.dp, bottom = if (picking) 84.dp else 24.dp)) {
                 itemsIndexed(l.lines) { i, line ->
-                    val active = i == currentLine
+                    val active = i == currentLine && !picking
                     val past = l.synced && i < currentLine
+                    val sel = picking && i in picked
                     val words = line.words
+                    val click = Modifier.fillMaxWidth()
+                        .then(if (sel) Modifier.padding(horizontal = 10.dp).clip(RoundedCornerShape(16.dp)).background(pal.accent.copy(alpha = 0.18f)) else Modifier)
+                        .combinedClickable(
+                            onClick = { if (picking) pick(i) else line.time?.let { PlayerConnection.seekTo((it * 1000).toLong()) } },
+                            onLongClick = { pick(i) },
+                        )
+                        .padding(horizontal = if (sel) 12.dp else 22.dp, vertical = 7.dp)
                     if (active && l.synced && words != null) {
-                        KaraokeLine(words, pal, Modifier.fillMaxWidth()
-                            .clickable(enabled = line.time != null) { line.time?.let { PlayerConnection.seekTo((it * 1000).toLong()) } }
-                            .padding(horizontal = 22.dp, vertical = 7.dp))
+                        KaraokeLine(words, pal, click)
                         return@itemsIndexed
                     }
                     Text(
                         line.text.ifEmpty { "♪" },
                         style = if (active) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
                         color = when {
+                            sel -> pal.onContainer
+                            picking -> pal.onContainer.copy(alpha = 0.55f)
                             !l.synced -> pal.onContainer
                             active -> pal.accent
                             past -> pal.sub.copy(alpha = 0.5f)
                             else -> pal.onContainer.copy(alpha = 0.75f)
                         },
-                        modifier = Modifier.fillMaxWidth()
-                            .clickable(enabled = line.time != null) { line.time?.let { PlayerConnection.seekTo((it * 1000).toLong()) } }
-                            .padding(horizontal = 22.dp, vertical = 7.dp),
+                        modifier = click,
                     )
                 }
                 item { Text("Текст: ${l.source}", style = MaterialTheme.typography.labelSmall, color = pal.sub, modifier = Modifier.padding(horizontal = 22.dp, vertical = 16.dp)) }
+            }
+        }
+        if (l != null && l.lines.any { it.text.isNotBlank() }) {
+            if (!picking) {
+                // кавычка в углу: «сделать карточку со строками»
+                IconButton(
+                    onClick = { picking = true; picked = if (currentLine >= 0 && l.lines[currentLine].text.isNotBlank()) listOf(currentLine) else emptyList() },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                ) { Icon(NyaoIcons.FormatQuote, "Карточка со строками", tint = pal.sub) }
+            } else {
+                Row(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(10.dp).clip(RoundedCornerShape(24.dp)).background(pal.container).padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        if (picked.isEmpty()) "Выбери до ${org.nyao.music.ui.components.LyricCard.MAX_LINES} строк подряд" else "Строк: ${picked.size} из ${org.nyao.music.ui.components.LyricCard.MAX_LINES}",
+                        style = MaterialTheme.typography.labelLarge, color = pal.onContainer, modifier = Modifier.weight(1f),
+                    )
+                    androidx.compose.material3.TextButton(onClick = { picking = false; picked = emptyList() }) { Text("Отмена", color = pal.onContainer) }
+                    androidx.compose.material3.Button(
+                        onClick = {
+                            val lines = picked.sorted().mapNotNull { l.lines.getOrNull(it)?.text?.trim()?.takeIf { t -> t.isNotEmpty() } }
+                            if (lines.isEmpty() || sharing) return@Button
+                            sharing = true
+                            scope.launch {
+                                runCatching { org.nyao.music.ui.components.LyricCard.share(ctx, track, lines) }
+                                    .onFailure { org.nyao.music.playback.PlaybackEvents.emit(it.message ?: "Не получилось сделать карточку") }
+                                sharing = false
+                                picking = false
+                                picked = emptyList()
+                            }
+                        },
+                        enabled = picked.isNotEmpty() && !sharing,
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = pal.accent, contentColor = pal.onAccent),
+                    ) { Text(if (sharing) "Рисую…" else "Поделиться") }
+                }
             }
         }
     }

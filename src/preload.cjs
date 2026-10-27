@@ -20,6 +20,11 @@ contextBridge.exposeInMainWorld('nyao', {
     onFullscreen: (cb) => ipcRenderer.on('win:fullscreen', (_e, on) => cb(on))
   },
   coverColor: (url) => call('cover:color', url),
+  card: {
+    cover: (url) => call('card:cover', url),
+    copy: (dataUrl) => call('card:copy', dataUrl),
+    save: (dataUrl, name) => call('card:save', dataUrl, name)
+  },
   trackDetails: (track) => call('track:details', track),
   onControl: (cb) => ipcRenderer.on('control', (_e, cmd) => cb(cmd)),
   radio: {

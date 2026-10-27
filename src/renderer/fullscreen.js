@@ -5,6 +5,8 @@
 // Обложка в покое чуть повёрнута (левая грань ближе); открывается полуоборотом в полёте из плашки плеера,
 // из-за неё веером расходятся обложки соседних треков; при смене трека обложки проезжают как Cover Flow.
 
+import { toggleLine, drawCard, ensureFonts, FORMATS, MAX_LINES } from './lyric-card.js';
+
 /** Поворот обложки в покое, градусы */
 const TILT = 12;
 
@@ -69,6 +71,7 @@ export class FullScreen {
     el.innerHTML = `
       <div class="fs-floor" aria-hidden="true"><div class="fs-sweep"></div><div class="fs-pool"></div></div>
       <div class="fs-top">
+        <button class="fs-round fs-sharebtn" data-fs="share" aria-label="Карточка со строками" title="Карточка со строками текста"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 7H6a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h2v3l3-3V9a2 2 0 0 0-1-2zM20 7h-4a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h2v3l3-3V9a2 2 0 0 0-1-2z"/></svg></button>
         <button class="fs-round fs-qbtn" data-fs="queue" aria-label="Очередь" title="Очередь" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h10M17 15v6l4-3z"/></svg></button>
         <button class="fs-round" data-fs="exit" aria-label="Выйти из полного экрана" title="Выйти из полного экрана (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
       </div>
@@ -96,13 +99,27 @@ export class FullScreen {
         <div class="fs-right">
           <div class="fs-lyrics" aria-live="off"></div>
           <div class="fs-credit"></div>
+          <div class="fs-pick" hidden><span class="fs-pick-n"></span><button class="fs-pill" data-fs="pick-cancel">Отмена</button><button class="fs-pill primary" data-fs="pick-make" disabled>Карточка</button></div>
           <button class="fs-now" data-fs="now"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>К текущей строке</button>
         </div>
       </div>
       <aside class="fs-queue" aria-label="Очередь">
         <div class="fs-q-head"><span>Очередь</span><span class="fs-q-sub"></span><button class="fs-round" data-fs="queue" aria-label="Закрыть очередь"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
         <div class="fs-q-list"></div>
-      </aside>`;
+      </aside>
+      <div class="fs-card" hidden role="dialog" aria-label="Карточка со строками">
+        <div class="fs-card-box">
+          <canvas class="fs-card-canvas"></canvas>
+          <div class="fs-card-side">
+            <b>Карточка со строками</b>
+            <span class="fs-card-hint">Для сторис или чата: обложка, строки, трек и ссылка на него.</span>
+            <div class="fs-card-formats">${Object.entries(FORMATS).map(([k, f]) => `<button class="fs-pill" data-fs="card-format" data-v="${k}">${f.label}</button>`).join('')}</div>
+            <button class="fs-pill primary" data-fs="card-copy">Скопировать</button>
+            <button class="fs-pill" data-fs="card-save">Сохранить…</button>
+            <button class="fs-pill" data-fs="card-close">Закрыть</button>
+          </div>
+        </div>
+      </div>`;
     document.body.appendChild(el);
     this.el = el;
     const $ = (s) => el.querySelector(s);
@@ -118,13 +135,26 @@ export class FullScreen {
         player.playAt(Number(qi.dataset.qi));
         return;
       }
-      if (line) {
+      // выбор строк для карточки: касание строки выделяет её, а не перематывает
+      const pickLine = this.picking && e.target.closest('.fs-lyrics [data-i]');
+      if (pickLine) {
+        this.pickToggle(Number(pickLine.dataset.i));
+        return;
+      }
+      if (line && !this.picking) {
         player.seek(Number(line.dataset.t));
         return;
       }
       if (!b) return;
       const a = b.dataset.fs;
-      if (a === 'exit') this.close();
+      if (a === 'share') this.picking ? this.endPick() : this.startPick();
+      else if (a === 'pick-cancel') this.endPick();
+      else if (a === 'pick-make') this.openCard();
+      else if (a === 'card-format') this.renderCard(b.dataset.v);
+      else if (a === 'card-copy') this.cardCopy();
+      else if (a === 'card-save') this.cardSave();
+      else if (a === 'card-close') this.closeCard();
+      else if (a === 'exit') this.close();
       else if (a === 'queue') this.toggleQueue();
       else if (a === 'now') this.collapse();
       else if (a === 'play') player.toggle();
@@ -235,6 +265,7 @@ export class FullScreen {
 
   userScroll() {
     if (!this.lyrics || !this.showLyrics) return;
+    if (this.picking) return; // выбор строк: текст развёрнут, пока не закончили
     this.scrolling = true;
     if (!this.el.classList.contains('expand')) {
       this.el.classList.add('expand');
@@ -285,8 +316,153 @@ export class FullScreen {
     }
   }
 
+  // ---------- Карточка со строками текста ----------
+
+  startPick() {
+    const d = this.lyrics;
+    if (!(d && d.lines && d.lines.some((l) => l.text && l.text.trim()))) {
+      if (this.d.toast) this.d.toast(d === undefined ? 'Текст ещё ищется' : 'Для этого трека текста нет', true);
+      return;
+    }
+    if (!this.showLyrics) {
+      this.showLyrics = true;
+      this.renderLyrics();
+    }
+    this.toggleQueue(false);
+    this.picking = true;
+    this.picked = [];
+    this.scrolling = true;
+    clearTimeout(this.scrollTimer);
+    this.el.classList.add('picking', 'expand');
+    this.$('.fs-pick').hidden = false;
+    this.$('[data-fs="share"]').setAttribute('aria-pressed', 'true');
+    this.paintPick();
+    this.layout();
+  }
+
+  endPick() {
+    if (!this.picking) return;
+    this.picking = false;
+    this.picked = [];
+    if (!this.el) return;
+    this.el.classList.remove('picking');
+    this.$('.fs-pick').hidden = true;
+    this.$('[data-fs="share"]').setAttribute('aria-pressed', 'false');
+    this.paintPick();
+    this.collapse();
+  }
+
+  pickToggle(i) {
+    const l = this.lyrics && this.lyrics.lines[i];
+    if (!l || !String(l.text || '').trim()) return;
+    this.picked = toggleLine(this.picked || [], i);
+    this.paintPick();
+  }
+
+  paintPick() {
+    if (!this.el) return;
+    const set = new Set(this.picked || []);
+    this.$('.fs-lyrics').querySelectorAll('p[data-i]').forEach((p) => p.classList.toggle('picked', set.has(Number(p.dataset.i))));
+    const n = set.size;
+    this.$('.fs-pick-n').textContent = n ? `Строк: ${n} из ${MAX_LINES}` : `Выбери до ${MAX_LINES} строк подряд`;
+    this.$('[data-fs="pick-make"]').disabled = !n;
+  }
+
+  async openCard() {
+    const t = this.d.player.current;
+    if (!t || !(this.picked && this.picked.length)) return;
+    this.card = {
+      track: t,
+      lines: this.picked.map((i) => this.lyrics.lines[i].text.trim()),
+      format: this.card && this.card.format ? this.card.format : 'story',
+      cover: null,
+      rgb: null
+    };
+    this.$('.fs-card').hidden = false;
+    this.el.classList.add('carding');
+    await ensureFonts();
+    this.renderCard();
+    // обложку берём через main (без CORS — иначе canvas нельзя сохранить), цвет — тот же, что у фона
+    const card = this.card;
+    const [cover, rgb] = await Promise.all([
+      t.cover && this.d.api.card ? this.d.api.card.cover(t.cover).catch(() => null) : null,
+      t.cover ? Promise.resolve(this.d.api.coverColor(t.cover)).catch(() => null) : null
+    ]);
+    if (this.card !== card) return;
+    card.rgb = rgb;
+    if (cover) {
+      const img = new Image();
+      img.onload = () => {
+        if (this.card !== card) return;
+        card.cover = img;
+        this.renderCard();
+      };
+      img.src = cover;
+    }
+    this.renderCard();
+  }
+
+  renderCard(format) {
+    const c = this.card;
+    if (!c || !this.el) return;
+    if (format && FORMATS[format]) c.format = format;
+    const canvas = this.$('.fs-card-canvas');
+    drawCard(canvas, {
+      format: c.format,
+      lines: c.lines,
+      title: c.track.title,
+      artist: c.track.artist,
+      cover: c.cover,
+      rgb: c.rgb,
+      link: this.d.trackLink ? this.d.trackLink(c.track) : ''
+    });
+    canvas.classList.toggle('square', c.format === 'square');
+    this.el.querySelectorAll('[data-fs="card-format"]').forEach((b) => b.classList.toggle('on', b.dataset.v === c.format));
+  }
+
+  cardName() {
+    const t = this.card.track;
+    return `Nyao — ${String(t.artist || '').split(',')[0].trim()} — ${t.title}`.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 120) + '.png';
+  }
+
+  async cardCopy() {
+    if (!this.card) return;
+    try {
+      await this.d.api.card.copy(this.$('.fs-card-canvas').toDataURL('image/png'));
+      if (this.d.toast) this.d.toast('Картинка скопирована — вставь её в чат или сторис');
+    } catch (e) {
+      if (this.d.toast) this.d.toast(`Не скопировалось: ${e.message}`, true);
+    }
+  }
+
+  async cardSave() {
+    if (!this.card) return;
+    try {
+      const file = await this.d.api.card.save(this.$('.fs-card-canvas').toDataURL('image/png'), this.cardName());
+      if (file && this.d.toast) this.d.toast('Картинка сохранена');
+    } catch (e) {
+      if (this.d.toast) this.d.toast(`Не сохранилось: ${e.message}`, true);
+    }
+  }
+
+  closeCard() {
+    this.card = null;
+    if (!this.el) return;
+    this.$('.fs-card').hidden = true;
+    this.el.classList.remove('carding');
+    this.endPick();
+  }
+
   /** Esc: сначала закрывает очередь, потом сам полный экран */
   escape() {
+    if (this.card) {
+      this.closeCard();
+      return true;
+    }
+    if (this.picking) {
+      this.endPick();
+      return true;
+    }
     if (this.queueOpen) {
       this.toggleQueue(false);
       return true;
@@ -337,6 +513,8 @@ export class FullScreen {
 
   close() {
     if (!this.open) return;
+    if (this.card) this.closeCard();
+    else this.endPick();
     this.open = false;
     this.el.classList.remove('expand');
     this.scrolling = false;
@@ -599,6 +777,8 @@ export class FullScreen {
         }
       });
     }
+    // трек сменился — выбор строк прошлого трека теряет смысл (открытая карточка остаётся со своими строками)
+    if (this.picking && !this.card) this.endPick();
     this.lyrics = undefined;
     this.safe(() => this.renderLyrics());
     let lyricsPromise;

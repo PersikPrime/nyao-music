@@ -3130,6 +3130,8 @@ const fullscreen = new FullScreen({
   source: () => $('#pb-cover'), // обложка в плашке плеера: из неё разворачивается полный экран и в неё сворачивается
   autoHide: () => !!(state.settings && state.settings.fsAutoHide),
   like: () => player.toggleLike(),
+  toast: (m, err) => toast(m, err),
+  trackLink: (t) => trackLink(t),
   icons: {
     play: ICONS.playBig, pause: ICONS.pauseBig, heart: ICONS.heart, heartOn: ICONS.heartOn,
     prev: '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>',
