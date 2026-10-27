@@ -62,7 +62,10 @@ async function latestRelease(fetchFn, channel = null) {
       const list = await res.json();
       const own = (Array.isArray(list) ? list : []).filter((r) => !r.draft && parseTag(r.tag_name)?.channel === channel);
       own.sort((a, b) => parseTag(b.tag_name).build - parseTag(a.tag_name).build);
-      if (own[0]) return own[0];
+      // обычный релиз новее пререлиза канала — берём его
+      const stable = (Array.isArray(list) ? list : []).find((r) => !r.draft && !r.prerelease && parseTag(r.tag_name) && !parseTag(r.tag_name).channel);
+      if (own[0] && (!stable || parseTag(own[0].tag_name).build > parseTag(stable.tag_name).build)) return own[0];
+      if (stable) return stable;
     }
   }
   const res = await fetchFn(`https://api.github.com/repos/${REPO}/releases/latest`, {
