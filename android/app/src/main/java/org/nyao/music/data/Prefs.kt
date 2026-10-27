@@ -46,6 +46,9 @@ data class Settings(
     val lyricsOrder: List<Pair<String, Boolean>> = emptyList(),
     /** Разметка по словам из Nyao LyricLabs важнее порядка */
     val lyricsWordsFirst: Boolean = true,
+    /** «Друзья» и «Настройки» отдельными кнопками в панели (иначе — внутри профиля) */
+    val navFriends: Boolean = false,
+    val navPrefs: Boolean = false,
 ) {
     val isWaveLayout: Boolean get() = layout == "wave"
 }
@@ -89,6 +92,8 @@ class Prefs(context: Context) {
             id?.takeIf { it.isNotBlank() }?.let { it to (on != "0") }
         },
         lyricsWordsFirst = sp.getBoolean("lyricsWordsFirst", true),
+        navFriends = sp.getBoolean("navFriends", false),
+        navPrefs = sp.getBoolean("navPrefs", false),
     )
 
     /** Вызывается, когда меняется то, что синхронизируется через аккаунт Nyao: "wave" или "prefs" */
@@ -135,6 +140,8 @@ class Prefs(context: Context) {
         if (v == null) remove("lyricsOrder") else putString("lyricsOrder", v.joinToString(",") { "${it.first}:${if (it.second) 1 else 0}" })
     }.also { LyricsApi.clearCache(); onSyncChange?.invoke("prefs") }
     fun setLyricsWordsFirst(v: Boolean) = update { putBoolean("lyricsWordsFirst", v) }.also { LyricsApi.clearCache(); onSyncChange?.invoke("prefs") }
+    fun setNavFriends(v: Boolean) = update { putBoolean("navFriends", v) }
+    fun setNavPrefs(v: Boolean) = update { putBoolean("navPrefs", v) }
     fun setUpdateChannel(v: String) = update { putString("updateChannel", v) }
     fun setWidgetStyle(v: String) = update { putString("widgetStyle", v) }
     fun setLookNavLabels(v: Boolean) = update { putBoolean("lookNavLabels", v) }

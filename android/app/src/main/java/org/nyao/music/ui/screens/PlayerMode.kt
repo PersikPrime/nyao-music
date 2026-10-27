@@ -289,6 +289,10 @@ fun ViewSettingsCard() {
         LayoutChoice(s.layout ?: "player", { Repo.prefs.setLayout(it) })
         SwitchRow("«Мне нравится» по сервисам", "Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud", s.splitLiked) { Repo.prefs.setSplitLiked(it) }
         if (!s.isWaveLayout) SwitchRow("Вкладка «Волна» в панели", "В режиме «Плеер» волна — плитка на главной", s.waveTab) { Repo.prefs.setWaveTab(it) }
+        SwitchRow("«Друзья» отдельной кнопкой", "Друзья и комнаты — в панели, а не внутри профиля", s.navFriends) { Repo.prefs.setNavFriends(it) }
+        SwitchRow("«Настройки» отдельной кнопкой", "В профиле остаются аккаунт, статистика и устройства, остальное — на своей странице", s.navPrefs) { Repo.prefs.setNavPrefs(it) }
+        val count = 4 + (if (s.isWaveLayout || s.waveTab) 1 else 0) + (if (s.navFriends) 1 else 0) + (if (s.navPrefs) 1 else 0)
+        if (count > 6) Text("В панели $count кнопок — на узком телефоне она станет плотной. Можно убрать вкладку «Волна».", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
     }
 }
 

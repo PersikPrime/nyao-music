@@ -116,6 +116,7 @@ private fun routeOrder(r: Route): Int = when (r) {
     Route.Stats -> 8
     is Route.SettingsPage -> 9
     is Route.UserPage -> 10
+    Route.AppSettings -> 11
 }
 
 /** icon — обычная (контурная), iconOn — залитая для выбранной вкладки, как в Material 3 Expressive */
@@ -127,13 +128,36 @@ private val LIBRARY_TAB = Tab(Route.Library, "Медиатека", NyaoIcons.Lib
 private val SEARCH_TAB = Tab(Route.Search, "Поиск", NyaoIcons.Search)
 private val PROFILE_TAB = Tab(Route.Settings, "Профиль", NyaoIcons.Person, NyaoIcons.PersonFilled)
 private val TOGETHER_TAB = Tab(Route.Together, "Вместе", NyaoIcons.Groups, NyaoIcons.GroupsFilled)
+private val FRIENDS_TAB = Tab(Route.Together, "Друзья", NyaoIcons.Groups, NyaoIcons.GroupsFilled)
+private val PREFS_TAB = Tab(Route.AppSettings, "Настройки", NyaoIcons.Settings)
 
-/** Основная панель: Главная · (Волна) · Медиатека · Поиск · аватар профиля */
+/** Основная панель: Главная · (Волна) · Медиатека · Поиск · (Друзья) · (Настройки) · аватар профиля */
 private fun tabsFor(s: org.nyao.music.data.Settings): List<Tab> =
-    listOf(HOME_TAB) + (if (s.isWaveLayout || s.waveTab) listOf(WAVE_TAB) else emptyList()) + listOf(LIBRARY_TAB, SEARCH_TAB, PROFILE_TAB)
+    listOf(HOME_TAB) + (if (s.isWaveLayout || s.waveTab) listOf(WAVE_TAB) else emptyList()) + listOf(LIBRARY_TAB, SEARCH_TAB) +
+        (if (s.navFriends) listOf(FRIENDS_TAB) else emptyList()) + (if (s.navPrefs) listOf(PREFS_TAB) else emptyList()) + PROFILE_TAB
 
-/** Раздел профиля: панель превращается в «домой» отдельной кнопкой + профиль и «Вместе» */
-private fun isProfileArea(r: Route): Boolean = r == Route.Settings || r == Route.Together || r == Route.Stats || r is Route.SettingsPage || r is Route.UserPage
+/** Разделы, которые относятся к профилю, а не к настройкам (когда настройки вынесены отдельно) */
+private val PROFILE_SECTIONS = setOf("profile", "account")
+
+/** Какая вкладка панели подсвечивается для экрана */
+private fun tabRouteOf(r: Route, s: org.nyao.music.data.Settings): Route = when {
+    r is Route.PlaylistPage || r is Route.ArtistPage -> Route.Library
+    r is Route.SettingsPage -> if (s.navPrefs && r.section !in PROFILE_SECTIONS) Route.AppSettings else Route.Settings
+    r == Route.Stats || r is Route.UserPage -> Route.Settings
+    else -> r
+}
+
+/**
+ * Раздел профиля: панель превращается в «домой» отдельной кнопкой + профиль и «Вместе».
+ * Если «Друзья» вынесены в панель — панель не перестраивается; вынесенные «Настройки» — тоже обычная вкладка
+ */
+private fun isProfileArea(r: Route, s: org.nyao.music.data.Settings): Boolean {
+    if (s.navFriends) return false
+    return when (tabRouteOf(r, s)) {
+        Route.Settings, Route.Together -> true
+        else -> false
+    }
+}
 
 @Composable
 fun NyaoRoot() {
@@ -375,7 +399,8 @@ private fun Content(model: AppModel, wide: Boolean) {
             Route.Wave -> WaveScreen(model)
             Route.Search -> SearchScreen(model)
             Route.Library -> LibraryScreen(model, wide)
-            Route.Settings -> org.nyao.music.ui.screens.ProfileScreen(model)
+            Route.Settings -> org.nyao.music.ui.screens.ProfileScreen(model, if (Repo.prefs.settings.collectAsState().value.navPrefs) "profile" else "all")
+            Route.AppSettings -> org.nyao.music.ui.screens.ProfileScreen(model, "prefs")
             is Route.SettingsPage -> org.nyao.music.ui.screens.SettingsPageScreen(model, r.section)
             is Route.PlaylistPage -> PlaylistScreen(model, r.playlist)
             is Route.ArtistPage -> org.nyao.music.ui.screens.ArtistScreen(model, r)
@@ -571,7 +596,7 @@ private fun BottomBlur(shot: androidx.compose.ui.graphics.layer.GraphicsLayer, b
 @Composable
 private fun FloatingToolbar(model: AppModel) {
     val settings by Repo.prefs.settings.collectAsState()
-    val profileArea = isProfileArea(model.route)
+    val profileArea = isProfileArea(model.route, settings)
     AnimatedContent(
         profileArea,
         transitionSpec = {
@@ -583,7 +608,7 @@ private fun FloatingToolbar(model: AppModel) {
         label = "toolbar",
     ) { profile ->
         if (!profile) {
-            val selectedRoute = if (model.route is Route.PlaylistPage || model.route is Route.ArtistPage) Route.Library else model.route
+            val selectedRoute = tabRouteOf(model.route, settings)
             ToolbarCapsule {
                 tabsFor(settings).forEach { tab -> ToolbarItem(tab, selectedRoute == tab.route) { model.go(tab.route) } }
             }
@@ -717,9 +742,11 @@ private fun WideLayout(model: AppModel, width: androidx.compose.ui.unit.Dp, show
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            val railTabs = tabsFor(Repo.prefs.settings.collectAsState().value).let { it.dropLast(1) + TOGETHER_TAB + it.last() }
+            val st = Repo.prefs.settings.collectAsState().value
+            // «Вместе» на рейке есть всегда: если «Друзья» не вынесены в панель — отдельной кнопкой перед профилем
+            val railTabs = tabsFor(st).let { if (st.navFriends) it else it.dropLast(1) + TOGETHER_TAB + it.last() }
             railTabs.forEach { tab ->
-                val selected = model.route == tab.route || (tab.route == Route.Settings && (model.route == Route.Stats || model.route is Route.SettingsPage)) ||
+                val selected = tabRouteOf(model.route, st) == tab.route ||
                     (tab.route == Route.Library && (model.route is Route.PlaylistPage || model.route is Route.ArtistPage))
                 Column(Modifier.bouncy().clip(RoundedCornerShape(16.dp)).clickable { model.go(tab.route) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box(Modifier.width(56.dp).height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (selected) NyaoColors.Primary else Color.Transparent), contentAlignment = Alignment.Center) {

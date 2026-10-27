@@ -279,6 +279,9 @@ function refreshAccent() {
 function layout() {
   return (state.settings && state.settings.layout) || 'player';
 }
+const isSettingsRoute = () => state.route === 'settings' || state.route === 'prefs';
+const navFriends = () => !!(state.settings && state.settings.navFriends);
+const navPrefs = () => !!(state.settings && state.settings.navPrefs);
 function navItems() {
   // в режиме «Плеер» вкладка волны прячется (волна — плитка на главной), если не вернуть её в настройках
   return NAV.filter((n) => n[0] !== 'wave' || layout() === 'wave' || (state.settings && state.settings.waveTab));
@@ -286,7 +289,8 @@ function navItems() {
 
 // ---------- Навигация ----------
 function renderRail() {
-  const isOn = (route) => state.route === route || (route === 'settings' && PROFILE_ROUTES.includes(state.route));
+  const own = (r) => (navFriends() && ['friends', 'user'].includes(r) ? 'friends' : r);
+  const isOn = (route) => own(state.route) === route || (route === 'settings' && PROFILE_ROUTES.includes(state.route) && own(state.route) !== 'friends');
   const btn = (route, label, d) => `<button class="nav-btn ${isOn(route) ? 'active' : ''}" data-route="${route}" aria-label="${label}" title="${label}"${route === 'settings' && friendsBadge ? ` data-badge="${friendsBadge > 9 ? '9+' : friendsBadge}"` : ''}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg><span class="lbl">${label}</span></button>`;
   let extra = '';
   if (IS_MAC) {
@@ -298,7 +302,10 @@ function renderRail() {
     </div>`;
   }
   const accounts = IS_MAC ? `<div class="side-accounts">${accountButton()}</div>` : '';
-  $('#rail').innerHTML = navItems().map((n) => btn(...n)).join('') + extra + '<div class="spacer"></div>' + btn('settings', 'Профиль', 'M12 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M5 20c.9-3.6 3.6-5.5 7-5.5s6.1 1.9 7 5.5') + accounts;
+  // «Друзья» и «Настройки» можно вынести из профиля отдельными кнопками (Настройки → Вид приложения)
+  const friendsBtn = navFriends() ? btn('friends', 'Друзья', 'M9 11a3.2 3.2 0 1 0 0-6.4a3.2 3.2 0 1 0 0 6.4M3 19.5c.7-3.2 3-5 6-5s5.3 1.8 6 5M16 11a2.8 2.8 0 1 0 0-5.6M17.5 14.6c2 .5 3.2 2.2 3.5 4.9') : '';
+  const prefsBtn = navPrefs() ? btn('prefs', 'Настройки', SETTINGS_ICON) : '';
+  $('#rail').innerHTML = navItems().map((n) => btn(...n)).join('') + friendsBtn + extra + '<div class="spacer"></div>' + prefsBtn + btn('settings', 'Профиль', 'M12 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M5 20c.9-3.6 3.6-5.5 7-5.5s6.1 1.9 7 5.5') + accounts;
 }
 // Подключаемые сервисы. Новый сервис (VK Музыка, SoundCloud…) добавляется сюда — кнопка аккаунта и меню подхватят его сами
 /** Название сервиса: в родительном падеже («из Яндекс Музыки») или обычное */
@@ -1071,7 +1078,7 @@ function updateCardHtml() {
 async function checkUpdates(silent = false) {
   state.update.checking = true;
   state.update.error = null;
-  if (state.route === 'settings') renderSettings();
+  if (isSettingsRoute()) renderSettings();
   try {
     state.update.info = await api.updates.check();
     if (state.update.info.required) showOutdated(state.update.info.minBuild);
@@ -1080,7 +1087,7 @@ async function checkUpdates(silent = false) {
     state.update.error = e.message;
   }
   state.update.checking = false;
-  if (state.route === 'settings') renderSettings();
+  if (isSettingsRoute()) renderSettings();
 }
 
 // ---------- Аккаунт Nyao (свой сервер): вход через Telegram, синхронизация, продолжение ----------
@@ -1157,7 +1164,7 @@ async function loadCloudDevices(silent = false) {
     state.cloud.loggedIn = st.loggedIn;
     if (st.loggedIn && !silent) toast(e.message, true);
   }
-  if (state.route === 'settings') renderSettings();
+  if (isSettingsRoute()) renderSettings();
 }
 async function loadOthers() {
   if (!state.cloud.loggedIn) return;
@@ -1174,7 +1181,7 @@ async function loadOthers() {
 async function cloudLogin() {
   if (state.cloud.logging) return;
   state.cloud.logging = true;
-  if (state.route === 'settings') renderSettings();
+  if (isSettingsRoute()) renderSettings();
   try {
     const user = await api.cloud.login();
     state.cloud.loggedIn = true;
@@ -1188,7 +1195,7 @@ async function cloudLogin() {
   }
   state.cloud.logging = false;
   renderAccounts();
-  if (state.route === 'settings') renderSettings();
+  if (isSettingsRoute()) renderSettings();
 }
 function continueHtml() {
   const d = state.cloud.others[0];
@@ -1264,6 +1271,7 @@ const RI = {
   keys: 'M3.5 6.5h17v11h-17zM7 10h1M11 10h2M16 10h1M7.5 14h9',
   lyrics: 'M5 7h14M5 12h14M5 17h9',
   dev: 'M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14',
+  gear: 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1',
   palette: 'M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.7-.8 1.7-1.6 0-1-.9-1.5-.9-2.4 0-.9.7-1.5 1.6-1.5h2c2 0 3.6-1.6 3.6-3.6 0-4.4-3.6-7.9-8-7.9M7.5 12a1 1 0 1 0 0 .1M10 8a1 1 0 1 0 0 .1M14.5 8a1 1 0 1 0 0 .1',
   update: 'M20 12a8 8 0 1 1-2.3-5.7M20 4.5v4h-4',
   info: 'M12 21a9 9 0 1 0 0-18a9 9 0 1 0 0 18M12 11v5M12 7.8v.2',
@@ -1301,8 +1309,13 @@ function renderSettings() {
   const prof = state.social && state.social.profile;
   const connected = SERVICES.filter((x) => state.status[x.id]);
   const visLabel = prof ? (prof.invisible ? 'невидимка' : prof.visibility === 'all' ? 'видят все' : prof.visibility === 'nobody' ? 'скрыт' : 'только друзья') : '';
+  // отдельные «Настройки» — только группы настроек; профиль тогда — только шапка и «Профиль»
+  const part = state.route === 'prefs' ? 'prefs' : navPrefs() ? 'profile' : 'all';
+  const showProfile = part !== 'prefs';
+  const showPrefs = part !== 'profile';
   view.innerHTML = `<div class="scroll settings phub">
-    ${profileTabs('settings')}
+    ${part === 'prefs' ? '<h1 class="page">Настройки</h1>' : profileTabs('settings')}
+    ${showProfile ? `
     <button class="pcard" ${c.loggedIn ? 'data-action="fr-me"' : 'data-action="set-sec" data-sec="account"'}>
       ${nyaoAvatar('pcard-av')}
       <span class="pcard-info"><b>${esc(c.loggedIn ? u.name || 'Аккаунт Nyao' : 'Аккаунт Nyao')}</b>
@@ -1315,8 +1328,9 @@ function renderSettings() {
       srow({ icon: RI.devices, title: 'Устройства', action: 'open-connect' }),
       ...(c.loggedIn ? [srow({ icon: RI.edit, title: 'Мой профиль и приватность', value: visLabel, route: 'profile' })] : []),
       srow({ icon: RI.person, title: 'Аккаунт Nyao', value: c.loggedIn ? 'вход выполнен' : 'не выполнен', ok: c.loggedIn, sec: 'account' })
-    ])}
-    ${sgroup('Приложение', [
+    ])}` : ''}
+    ${part === 'profile' ? sgroup('Настройки', [srow({ icon: RI.gear, title: 'Все настройки', route: 'prefs' })]) : ''}
+    ${showPrefs ? `${sgroup('Приложение', [
       srow({ icon: RI.sound, title: 'Звук и воспроизведение', value: normalizeEq(state.settings.eq).on ? 'эквалайзер вкл.' : '', sec: 'sound' }),
       srow({ icon: RI.lyrics, title: 'Текст песни', value: LYRIC_PROVIDERS[(lyricsOrder().find((p) => p.on) || { id: 'ya' }).id].name, sec: 'lyrics' }),
       srow({ icon: RI.keys, title: 'Управление и окно', sec: 'keys' })
@@ -1333,7 +1347,7 @@ function renderSettings() {
     ${sgroup('О приложении', [
       srow({ icon: RI.update, title: 'Обновления', value: state.update.info && state.update.info.available ? 'есть новая версия' : esc(state.version || ''), ok: !!(state.update.info && state.update.info.available), sec: 'updates' }),
       srow({ icon: RI.info, title: 'О приложении', sec: 'about' })
-    ])}
+    ])}` : ''}
   </div>`;
   refreshLastfm();
 }
@@ -1355,6 +1369,10 @@ function renderSettingsSection(sec) {
         <button class="switch ${state.settings.splitLiked ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.splitLiked}" aria-label="«Мне нравится» по сервисам" data-action="split-liked" data-v="${state.settings.splitLiked ? 0 : 1}"><span></span></button></div>
       ${layout() === 'player' ? `<div class="pref-row"><span><b>Вкладка «Моя волна» в меню</b><span class="hint">В режиме «Плеер» волна живёт плиткой на главной. Можно вернуть её отдельной вкладкой.</span></span>
         <button class="switch ${state.settings.waveTab ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.waveTab}" aria-label="Вкладка «Моя волна» в меню" data-action="toggle-wavetab"><span></span></button></div>` : ''}
+      <div class="pref-row"><span><b>«Друзья» отдельной кнопкой</b><span class="hint">Друзья, профили и заявки — в боковой панели, а не внутри профиля</span></span>
+        <button class="switch ${navFriends() ? 'on' : ''}" role="switch" aria-checked="${navFriends()}" aria-label="«Друзья» отдельной кнопкой" data-action="toggle-nav" data-k="navFriends"><span></span></button></div>
+      <div class="pref-row"><span><b>«Настройки» отдельной кнопкой</b><span class="hint">В профиле остаются аккаунт, статистика и устройства, всё остальное — на своей странице</span></span>
+        <button class="switch ${navPrefs() ? 'on' : ''}" role="switch" aria-checked="${navPrefs()}" aria-label="«Настройки» отдельной кнопкой" data-action="toggle-nav" data-k="navPrefs"><span></span></button></div>
     </section>`;
   else if (sec === 'svc:sp') body = spCard();
   else if (sec.startsWith('svc:')) body = svcCard(sec.slice(4));
@@ -1456,8 +1474,8 @@ function lyricsCardHtml() {
     <div class="lyr-order">${order.map((p, i) => `<div class="lyr-row ${p.on ? '' : 'off'}">
       <span class="lyr-n">${i + 1}</span>
       <span class="lyr-t"><b>${LYRIC_PROVIDERS[p.id].name}</b><span class="hint">${LYRIC_PROVIDERS[p.id].caps}</span></span>
-      <button class="icon-btn" data-action="lyr-move" data-id="${p.id}" data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="Выше">${up}</button>
-      <button class="icon-btn" data-action="lyr-move" data-id="${p.id}" data-d="1" ${i === order.length - 1 ? 'disabled' : ''} aria-label="Ниже">${down}</button>
+      <button class="lyr-mv" data-action="lyr-move" data-id="${p.id}" data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="Выше">${up}</button>
+      <button class="lyr-mv" data-action="lyr-move" data-id="${p.id}" data-d="1" ${i === order.length - 1 ? 'disabled' : ''} aria-label="Ниже">${down}</button>
       <button class="switch ${p.on ? 'on' : ''}" role="switch" aria-checked="${p.on}" aria-label="${LYRIC_PROVIDERS[p.id].name}" data-action="lyr-toggle" data-id="${p.id}"><span></span></button>
     </div>`).join('')}</div>
     <div class="pref-row"><span><b>Караоке LyricLabs важнее порядка</b><span class="hint">Если в Nyao LyricLabs у песни размечены слова — берётся он, даже когда источник выше нашёл текст по строкам</span></span>
@@ -1515,7 +1533,7 @@ function devCardHtml() {
 }
 async function loadDevInfo() {
   devState.info = await api.dev.info().catch(() => null);
-  if (state.route === 'settings' && state.params && state.params.section === 'dev') renderSettings();
+  if (isSettingsRoute() && state.params && state.params.section === 'dev') renderSettings();
 }
 /** Счётчик FPS и памяти поверх окна */
 let fpsRaf = 0;
@@ -1592,7 +1610,7 @@ function saveEq(next, rerender = true) {
   eq.apply(next);
   clearTimeout(eqSaveTimer);
   eqSaveTimer = setTimeout(() => api.settings.set({ eq: next }).catch(() => {}), 300);
-  if (rerender && state.route === 'settings') renderSettings();
+  if (rerender && isSettingsRoute()) renderSettings();
 }
 
 // ---------- Техработы и сбои сервисов (статус с сервера Nyao) ----------
@@ -1699,7 +1717,7 @@ const friends = createFriends({
     renderRail();
   }
 });
-const RENDER = { friends: () => friends.renderFriends(), user: () => friends.renderUser(), profile: () => friends.renderProfile(), home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList };
+const RENDER = { friends: () => friends.renderFriends(), user: () => friends.renderUser(), profile: () => friends.renderProfile(), home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, prefs: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList };
 
 // ---------- Загрузка данных ----------
 /** Может ли Spotify играть сам; если нет — треки Spotify играют копиями из других сервисов */
@@ -2442,7 +2460,8 @@ async function handleAction(el, e) {
   if (a && a.startsWith('fr-') && (await friends.action(el))) return;
   switch (a) {
     case 'set-sec':
-      go('settings', el.dataset.sec ? { section: el.dataset.sec } : {});
+      // с отдельной страницы «Настройки» разделы открываются на ней же
+      go(state.route === 'prefs' && el.dataset.sec !== 'account' ? 'prefs' : 'settings', el.dataset.sec ? { section: el.dataset.sec } : {});
       break;
     case 'open-connect':
       toggleConnect();
@@ -2772,6 +2791,13 @@ async function handleAction(el, e) {
     case 'update-page':
       if (state.update.info && state.update.info.url) api.openExternal(state.update.info.url);
       break;
+    case 'toggle-nav': {
+      const k = el.dataset.k;
+      state.settings = await api.settings.set({ [k]: !state.settings[k] });
+      renderRail();
+      RENDER[state.route]();
+      break;
+    }
     case 'dev-open':
       try {
         await api.dev.open(el.dataset.v);
@@ -2893,7 +2919,7 @@ async function handleAction(el, e) {
         state.update.error = err.message;
       }
       state.update.hotBusy = false;
-      if (state.route === 'settings') renderSettings();
+      if (isSettingsRoute()) renderSettings();
       break;
     }
     case 'update-relaunch':
@@ -2921,7 +2947,7 @@ async function handleAction(el, e) {
         state.update.error = err.message;
       }
       state.update.progress = null;
-      if (state.route === 'settings') renderSettings();
+      if (isSettingsRoute()) renderSettings();
       break;
     }
     case 'onboarding':
@@ -3196,7 +3222,7 @@ async function afterAuthChange() {
   state.lib = { lists: null, filter: 'all', selected: 'liked', tracks: null, counts: null };
   likedPromise = null;
   artistCache.clear();
-  if (state.route === 'settings') renderSettings();
+  if (isSettingsRoute()) renderSettings();
   if (state.status.ya || state.status.yt) {
     loadLiked();
     loadLibrary();
@@ -3815,7 +3841,7 @@ function openMixBuilder() {
   api.version().then((v) => {
     state.version = v.label;
     state.versionInfo = v;
-    if (state.route === 'settings') renderSettings();
+    if (isSettingsRoute()) renderSettings();
   }).catch(() => {});
   if (api.onOutdated) api.onOutdated((min) => showOutdated(min));
   // трек Spotify заиграл копией из другого сервиса — показываем «SP → Я»

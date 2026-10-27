@@ -50,9 +50,12 @@ import org.nyao.music.ui.theme.NyaoColors
 
 // ======================= Профиль (вместо вкладки «Настройки») =======================
 
-/** Профиль: карточка аккаунта Nyao и все настройки списком разделов, как в Android 16 */
+/**
+ * Профиль: карточка аккаунта Nyao и все настройки списком разделов, как в Android 16.
+ * part: "all" — всё вместе; "profile" — только профиль (настройки вынесены кнопкой); "prefs" — только настройки
+ */
 @Composable
-fun ProfileScreen(model: AppModel) {
+fun ProfileScreen(model: AppModel, part: String = "all") {
     val user by Repo.cloud.user.collectAsState()
     val accounts by Repo.accounts.collectAsState()
     val s by Repo.prefs.settings.collectAsState()
@@ -62,8 +65,10 @@ fun ProfileScreen(model: AppModel) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().padding(horizontal = 16.dp).padding(top = 12.dp).padding(BottomInset),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
+        if (part == "prefs") Text("Настройки", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         // Карточка профиля: нажатие открывает свою страницу профиля (её видят друзья)
         val social by org.nyao.music.playback.Friends.profile.collectAsState()
+        if (part != "prefs") {
         androidx.compose.runtime.LaunchedEffect(user) { if (user != null) runCatching { org.nyao.music.playback.Friends.refresh() } }
         Column(
             Modifier.fillMaxWidth().bouncy(0.97f).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
@@ -107,6 +112,11 @@ fun ProfileScreen(model: AppModel) {
             if (user != null) SettingsRow(org.nyao.music.ui.components.NyaoIcons.Edit, "Мой профиль и приватность", social?.let { if (it.invisible) "невидимка" else when (it.visibility) { "all" -> "видят все"; "nobody" -> "скрыт"; else -> "только друзья" } }) { model.go(Route.SettingsPage("profile")) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Person, "Аккаунт Nyao", if (user != null) "вход выполнен" else "не выполнен", last = true) { model.go(Route.SettingsPage("account")) }
         }
+        }
+        if (part == "profile") SettingsGroup("Настройки") {
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Settings, "Все настройки", last = true) { model.go(Route.AppSettings) }
+        }
+        if (part != "profile") {
         SettingsGroup("Приложение") {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Equalizer, "Звук и воспроизведение", if (s.eqOn) "эквалайзер вкл." else null) { model.go(Route.SettingsPage("sound")) }
             // настройки волны живут на экране «Моя волна» — здесь их больше нет
@@ -144,6 +154,7 @@ fun ProfileScreen(model: AppModel) {
             "Токены Яндекса, YouTube, SoundCloud, VK и Spotify остаются только на этом телефоне.",
             style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = Modifier.padding(horizontal = 8.dp),
         )
+        }
     }
 }
 

@@ -1138,7 +1138,9 @@ body.fs-on .toast { z-index: 1000; }
 .lyr-n { width: 26px; height: 26px; border-radius: 13px; display: grid; place-items: center; background: rgba(255,255,255,.08); font-size: 12px; font-weight: 700; flex: none; }
 .lyr-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .lyr-t b { font-size: 14px; }
-.lyr-row .icon-btn:disabled { opacity: .3; }
+.lyr-mv { width: 32px; height: 32px; border-radius: 10px; border: 0; background: rgba(255,255,255,.06); color: var(--text, #fff); display: grid; place-items: center; flex: none; cursor: pointer; }
+.lyr-mv:hover { background: rgba(255,255,255,.12); }
+.lyr-mv:disabled { opacity: .25; cursor: default; }
 /* Раздел «Разработчик» */
 .dev-card { display: grid; gap: 8px; }
 .dev-h { font-family: var(--display); font-size: 15px; font-weight: 700; margin-bottom: 2px; }
