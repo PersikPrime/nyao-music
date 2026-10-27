@@ -27,7 +27,10 @@ object Updates {
     }
 
     /** Канал пререлиза из тега: v0.8.89-dev → "dev", обычный релиз → null */
-    fun channelOf(tag: String?): String? = Regex("-([a-z]+)$").find(tag?.trim() ?: return null)?.groupValues?.get(1)
+    fun channelOf(tag: String?): String? {
+        val t = tag?.trim() ?: return null
+        return Regex("-([a-z]+)$").find(t)?.groupValues?.get(1)
+    }
 
     /** Каналы обновлений — как в центре обновлений macOS: обычные релизы, бета (dev), ночные сборки */
     val CHANNELS = listOf("stable" to "Обычные релизы", "dev" to "Бета (dev)", "nightly" to "Ночные сборки")
