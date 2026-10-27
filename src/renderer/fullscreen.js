@@ -148,6 +148,7 @@ export class FullScreen {
       if (!b) return;
       const a = b.dataset.fs;
       if (a === 'share') this.picking ? this.endPick() : this.startPick();
+      else if (a === 'lyr-other') this.otherSource();
       else if (a === 'pick-cancel') this.endPick();
       else if (a === 'pick-make') this.openCard();
       else if (a === 'card-format') this.renderCard(b.dataset.v);
@@ -779,20 +780,50 @@ export class FullScreen {
     }
     // трек сменился — выбор строк прошлого трека теряет смысл (открытая карточка остаётся со своими строками)
     if (this.picking && !this.card) this.endPick();
+    this.tried = [];
+    this.loadLyrics();
+    this.safe(() => this.tick());
+  }
+
+  /** Загрузить текст текущего трека; opts.exclude — пропустить эти источники («другой источник») */
+  loadLyrics(opts = null) {
+    const t = this.d.player.current;
+    if (!t) return;
     this.lyrics = undefined;
+    const box = this.$('.fs-lyrics');
+    if (box) box.dataset.track = '';
     this.safe(() => this.renderLyrics());
     let lyricsPromise;
     try {
-      lyricsPromise = this.d.ensureLyrics();
+      lyricsPromise = this.d.ensureLyrics(opts);
     } catch (e) {
       lyricsPromise = Promise.resolve(null);
     }
     this.withTimeout(lyricsPromise, 15000).then((data) => {
       if (this.trackId !== t.id) return;
+      // «другой источник» ничего не нашёл — говорим об этом и возвращаемся к обычному поиску
+      if (opts && opts.exclude && opts.exclude.length && !(data && data.lines && data.lines.length)) {
+        if (this.d.toast) this.d.toast('Других источников с этим текстом нет');
+        this.tried = [];
+        return this.loadLyrics({ exclude: [] });
+      }
       this.lyrics = data || null;
       this.safe(() => this.renderLyrics());
     });
-    this.safe(() => this.tick());
+  }
+
+  /** Порядок источников поменяли в настройках — ищем заново */
+  reloadLyrics() {
+    this.tried = [];
+    if (this.open) this.loadLyrics({ exclude: [] });
+  }
+
+  /** «Текст: …» → попробовать следующий источник для этого трека */
+  otherSource() {
+    const d = this.lyrics;
+    if (!d || !d.provider) return;
+    this.tried = [...new Set([...(this.tried || []), d.provider])];
+    this.loadLyrics({ exclude: this.tried });
   }
 
   renderLyrics() {
@@ -809,7 +840,8 @@ export class FullScreen {
     lb.disabled = !avail;
     lb.setAttribute('aria-pressed', String(this.showLyrics && avail));
     lb.title = avail ? (this.showLyrics ? 'Скрыть текст' : 'Показать текст') : d === undefined ? 'Ищу текст…' : 'Для этого трека текста нет';
-    this.$('.fs-credit').textContent = has ? `Текст: ${d.source || 'LRCLIB'}` : '';
+    const credit = this.$('.fs-credit');
+    credit.innerHTML = has ? `Текст: ${esc(d.source || 'LRCLIB')}${d.provider ? ' · <button class="fs-credit-btn" data-fs="lyr-other">другой источник</button>' : ''}` : '';
     if (!has) {
       // скрыли кнопкой — текст остаётся под обложкой, чтобы уехать за неё анимацией
       if (!avail) box.innerHTML = '';

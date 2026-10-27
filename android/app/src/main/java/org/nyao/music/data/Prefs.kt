@@ -40,6 +40,12 @@ data class Settings(
     val navLabels: Boolean = true,
     /** Стиль виджетов на рабочем столе: auto (по теме) | expA | expB | monoA | monoB | glassA | glassB */
     val widgetStyle: String = "auto",
+    /** Канал обновлений: "" — как у установленной сборки, stable | dev | nightly */
+    val updateChannel: String = "",
+    /** Порядок провайдеров текстов: (id, включён); пусто — по умолчанию (Яндекс, LyricLabs, LRCLIB, YouTube Music) */
+    val lyricsOrder: List<Pair<String, Boolean>> = emptyList(),
+    /** Разметка по словам из Nyao LyricLabs важнее порядка */
+    val lyricsWordsFirst: Boolean = true,
 ) {
     val isWaveLayout: Boolean get() = layout == "wave"
 }
@@ -77,6 +83,12 @@ class Prefs(context: Context) {
         covers = sp.getString("lookCovers", "rounded") ?: "rounded",
         navLabels = sp.getBoolean("lookNavLabels", true),
         widgetStyle = sp.getString("widgetStyle", "auto") ?: "auto",
+        updateChannel = sp.getString("updateChannel", "") ?: "",
+        lyricsOrder = (sp.getString("lyricsOrder", "") ?: "").split(",").mapNotNull { p ->
+            val (id, on) = p.split(":").let { it.getOrNull(0) to it.getOrNull(1) }
+            id?.takeIf { it.isNotBlank() }?.let { it to (on != "0") }
+        },
+        lyricsWordsFirst = sp.getBoolean("lyricsWordsFirst", true),
     )
 
     /** Вызывается, когда меняется то, что синхронизируется через аккаунт Nyao: "wave" или "prefs" */
@@ -119,6 +131,11 @@ class Prefs(context: Context) {
     fun setLookButtons(v: String) = update { putString("lookButtons", v) }
     fun setLookGrid(v: String) = update { putString("lookGrid", v) }
     fun setLookCovers(v: String) = update { putString("lookCovers", v) }
+    fun setLyricsOrder(v: List<Pair<String, Boolean>>?) = update {
+        if (v == null) remove("lyricsOrder") else putString("lyricsOrder", v.joinToString(",") { "${it.first}:${if (it.second) 1 else 0}" })
+    }.also { LyricsApi.clearCache(); onSyncChange?.invoke("prefs") }
+    fun setLyricsWordsFirst(v: Boolean) = update { putBoolean("lyricsWordsFirst", v) }.also { LyricsApi.clearCache(); onSyncChange?.invoke("prefs") }
+    fun setUpdateChannel(v: String) = update { putString("updateChannel", v) }
     fun setWidgetStyle(v: String) = update { putString("widgetStyle", v) }
     fun setLookNavLabels(v: Boolean) = update { putBoolean("lookNavLabels", v) }
     fun setWaveTab(v: Boolean) = update { putBoolean("waveTab", v) }.also { onSyncChange?.invoke("prefs") }

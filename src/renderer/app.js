@@ -750,12 +750,13 @@ async function loadTrackFacts(t) {
 }
 
 /** Текст текущего трека. Один запрос на трек: все, кто спросил (экран, полный экран), ждут его же */
-function ensureLyrics() {
+/** opts.exclude — «другой источник»: эти провайдеры пропустить (найденное заменит текст в кэше) */
+function ensureLyrics(opts = null) {
   const t = player.current;
   if (!t) return Promise.resolve(null);
-  if (state.lyrics.id !== t.id || !state.lyrics.promise) {
+  if (opts || state.lyrics.id !== t.id || !state.lyrics.promise) {
     const id = t.id;
-    const promise = api.lyrics(t).catch(() => null).then((data) => {
+    const promise = api.lyrics(t, opts || undefined).catch(() => null).then((data) => {
       if (state.lyrics.id === id) state.lyrics.data = data;
       return data;
     });
@@ -1017,6 +1018,13 @@ function svcCard(svc) {
 }
 
 /** Центр обновлений: версия, проверка релиза на GitHub, скачивание установщика */
+// Каналы обновлений — как в центре обновлений macOS
+const UPDATE_CHANNELS = [['stable', 'Обычные'], ['dev', 'Бета'], ['nightly', 'Ночные']];
+const UPDATE_CHANNEL_HINT = {
+  stable: 'Проверенные релизы.',
+  dev: 'Бета: новое раньше всех, иногда с недочётами. Если обычный релиз новее — придёт он.',
+  nightly: 'Ночные сборки — эксперименты прямо из разработки, могут ломаться.'
+};
 function updateCardHtml() {
   const u = state.update;
   const i = u.info;
@@ -1037,6 +1045,7 @@ function updateCardHtml() {
   else if (i && i.available && i.asset) button = `<button class="btn primary" data-action="update-install" ${pct != null ? 'disabled' : ''}>${pct != null ? `Скачиваю… ${pct}%` : 'Скачать и установить'}</button>`;
   else button = `<button class="btn" data-action="update-check" ${u.checking ? 'disabled' : ''}>Проверить</button>`;
   const installed = state.versionInfo && state.versionInfo.installed;
+  const channel = (i && i.channel) || (state.settings && state.settings.updateChannel) || (state.versionInfo && state.versionInfo.channel) || 'stable';
   return `<section class="card update-card">
     <div class="svc">
       <div class="logo" style="background:var(--accent-soft);color:var(--accent)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></div>
@@ -1047,6 +1056,11 @@ function updateCardHtml() {
     ${pct != null ? `<div class="update-bar"><span style="width:${pct}%"></span></div>` : ''}
     ${i && i.available && i.notes ? `<details><summary>Что нового</summary><div class="hint" style="white-space:pre-wrap;margin-top:8px">${esc(i.notes)}</div></details>` : ''}
     ${installed ? `<div class="hint" style="margin-top:6px">Код обновлён без установщика; установщиком стоит ${esc(installed)}.</div>` : ''}
+    <div class="update-channel">
+      <span>Канал обновлений</span>
+      <div class="seg">${UPDATE_CHANNELS.map(([id, label]) => `<button class="${id === channel ? 'on' : ''}" data-action="update-channel" data-v="${id}">${label}</button>`).join('')}</div>
+      <div class="hint">${UPDATE_CHANNEL_HINT[channel]}${i && !i.available && i.latest && i.latest.build < (i.current && i.current.build) ? ' Версия в этом канале старше установленной — обновление придёт, когда канал её догонит.' : ''}</div>
+    </div>
     <div class="update-links">
       ${i && i.url ? `<button class="link-plain" data-action="update-page">Открыть релизы на GitHub</button>` : ''}
       ${hot && i.asset && !ready ? `<button class="link-plain" data-action="update-install">Скачать полный установщик</button>` : ''}
@@ -1247,6 +1261,7 @@ const RI = {
   edit: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
   sound: 'M4 9.5h3.5L12 5v14l-4.5-4.5H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11',
   keys: 'M3.5 6.5h17v11h-17zM7 10h1M11 10h2M16 10h1M7.5 14h9',
+  lyrics: 'M5 7h14M5 12h14M5 17h9',
   palette: 'M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.7-.8 1.7-1.6 0-1-.9-1.5-.9-2.4 0-.9.7-1.5 1.6-1.5h2c2 0 3.6-1.6 3.6-3.6 0-4.4-3.6-7.9-8-7.9M7.5 12a1 1 0 1 0 0 .1M10 8a1 1 0 1 0 0 .1M14.5 8a1 1 0 1 0 0 .1',
   update: 'M20 12a8 8 0 1 1-2.3-5.7M20 4.5v4h-4',
   info: 'M12 21a9 9 0 1 0 0-18a9 9 0 1 0 0 18M12 11v5M12 7.8v.2',
@@ -1268,7 +1283,7 @@ function profileTabs(active) {
   return `<div class="ptabs">${t('settings', 'Профиль')}${t('friends', 'Друзья')}${t('together', 'Вместе')}</div>`;
 }
 const SECTIONS = {
-  account: 'Аккаунт Nyao', sound: 'Звук и воспроизведение', keys: 'Управление и окно', view: 'Вид приложения',
+  account: 'Аккаунт Nyao', sound: 'Звук и воспроизведение', lyrics: 'Текст песни', keys: 'Управление и окно', view: 'Вид приложения',
   lastfm: 'Last.fm', discord: 'Discord', updates: 'Обновления', about: 'О приложении', wave: 'Моя волна'
 };
 function sectionTitle(sec) {
@@ -1301,6 +1316,7 @@ function renderSettings() {
     ])}
     ${sgroup('Приложение', [
       srow({ icon: RI.sound, title: 'Звук и воспроизведение', value: normalizeEq(state.settings.eq).on ? 'эквалайзер вкл.' : '', sec: 'sound' }),
+      srow({ icon: RI.lyrics, title: 'Текст песни', value: LYRIC_PROVIDERS[(lyricsOrder().find((p) => p.on) || { id: 'ya' }).id].name, sec: 'lyrics' }),
       srow({ icon: RI.keys, title: 'Управление и окно', sec: 'keys' })
     ])}
     ${sgroup('Оформление', [
@@ -1323,6 +1339,7 @@ function renderSettingsSection(sec) {
   let body = '';
   if (sec === 'account') body = nyaoCardHtml();
   else if (sec === 'sound') body = soundCardHtml() + eqCardHtml();
+  else if (sec === 'lyrics') body = lyricsCardHtml();
   else if (sec === 'keys') body = controlCardHtml();
   else if (sec === 'wave') body = waveControlsHtml();
   else if (sec === 'view') body = `<section class="card">
@@ -1409,6 +1426,48 @@ async function refreshLastfm() {
 }
 
 // ---------- Звук: выравнивание громкости и плавные переходы ----------
+// Провайдеры текстов: порядок поиска, как порядок загрузки дисков; первый с таймингами побеждает
+const LYRIC_PROVIDERS = {
+  ya: { name: 'Яндекс Музыка', caps: 'с таймингами · нужен вход в Яндекс' },
+  nyao: { name: 'Nyao LyricLabs', caps: 'с таймингами · по словам (караоке)' },
+  lrclib: { name: 'LRCLIB', caps: 'с таймингами · открытая база' },
+  ytm: { name: 'YouTube Music', caps: 'только текст · для треков YouTube' }
+};
+const LYRIC_DEFAULT = ['ya', 'nyao', 'lrclib', 'ytm'];
+function lyricsOrder() {
+  const saved = Array.isArray(state.settings.lyricsOrder) ? state.settings.lyricsOrder : [];
+  const out = [];
+  for (const x of saved) if (x && LYRIC_PROVIDERS[x.id] && !out.some((o) => o.id === x.id)) out.push({ id: x.id, on: x.on !== false });
+  for (const id of LYRIC_DEFAULT) if (!out.some((o) => o.id === id)) out.push({ id, on: true });
+  return out;
+}
+function lyricsCardHtml() {
+  const order = lyricsOrder();
+  const up = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>';
+  const down = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+  const wordsFirst = state.settings.lyricsWordsFirst !== false;
+  return `<section class="card">
+    <div class="hint" style="margin-bottom:10px">Текст ищется сверху вниз: берётся первый с таймингами. Если таймингов нет нигде — первый найденный текст.</div>
+    <div class="lyr-order">${order.map((p, i) => `<div class="lyr-row ${p.on ? '' : 'off'}">
+      <span class="lyr-n">${i + 1}</span>
+      <span class="lyr-t"><b>${LYRIC_PROVIDERS[p.id].name}</b><span class="hint">${LYRIC_PROVIDERS[p.id].caps}</span></span>
+      <button class="icon-btn" data-action="lyr-move" data-id="${p.id}" data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="Выше">${up}</button>
+      <button class="icon-btn" data-action="lyr-move" data-id="${p.id}" data-d="1" ${i === order.length - 1 ? 'disabled' : ''} aria-label="Ниже">${down}</button>
+      <button class="switch ${p.on ? 'on' : ''}" role="switch" aria-checked="${p.on}" aria-label="${LYRIC_PROVIDERS[p.id].name}" data-action="lyr-toggle" data-id="${p.id}"><span></span></button>
+    </div>`).join('')}</div>
+    <div class="pref-row"><span><b>Караоке LyricLabs важнее порядка</b><span class="hint">Если в Nyao LyricLabs у песни размечены слова — берётся он, даже когда источник выше нашёл текст по строкам</span></span>
+      <button class="switch ${wordsFirst ? 'on' : ''}" role="switch" aria-checked="${wordsFirst}" aria-label="Караоке LyricLabs важнее порядка" data-action="lyr-words"><span></span></button></div>
+    <button class="link-plain" data-action="lyr-reset" style="font-size:12px;color:var(--accent);margin-top:6px">Сбросить по умолчанию</button>
+  </section>`;
+}
+/** Порядок поменяли — текст текущего трека ищем заново */
+async function saveLyricsPrefs(patch) {
+  state.settings = await api.settings.set(patch);
+  state.lyrics = { id: null };
+  if (fullscreen.open) fullscreen.reloadLyrics();
+  renderSettings();
+}
+
 function soundCardHtml() {
   const s = state.settings;
   const fade = Number(s.fade) || 0;
@@ -2637,6 +2696,37 @@ async function handleAction(el, e) {
     case 'update-page':
       if (state.update.info && state.update.info.url) api.openExternal(state.update.info.url);
       break;
+    case 'lyr-move': {
+      const order = lyricsOrder();
+      const i = order.findIndex((p) => p.id === el.dataset.id);
+      const j = i + Number(el.dataset.d);
+      if (i < 0 || j < 0 || j >= order.length) break;
+      [order[i], order[j]] = [order[j], order[i]];
+      await saveLyricsPrefs({ lyricsOrder: order });
+      break;
+    }
+    case 'lyr-toggle': {
+      const order = lyricsOrder().map((p) => (p.id === el.dataset.id ? { ...p, on: !p.on } : p));
+      if (!order.some((p) => p.on)) {
+        toast('Хотя бы один источник текста должен остаться', true);
+        break;
+      }
+      await saveLyricsPrefs({ lyricsOrder: order });
+      break;
+    }
+    case 'lyr-words':
+      await saveLyricsPrefs({ lyricsWordsFirst: state.settings.lyricsWordsFirst === false });
+      break;
+    case 'lyr-reset':
+      await saveLyricsPrefs({ lyricsOrder: null, lyricsWordsFirst: true });
+      break;
+    case 'update-channel': {
+      state.settings = await api.settings.set({ updateChannel: el.dataset.v });
+      state.update.info = null;
+      state.update.hotReady = false;
+      await checkUpdates();
+      break;
+    }
     case 'update-hot': {
       const pkg = state.update.info && state.update.info.hot;
       if (!pkg || state.update.hotBusy) break;
@@ -3126,7 +3216,7 @@ const fullscreen = new FullScreen({
   player,
   api,
   isMac: IS_MAC,
-  ensureLyrics: () => ensureLyrics(),
+  ensureLyrics: (opts) => ensureLyrics(opts),
   source: () => $('#pb-cover'), // обложка в плашке плеера: из неё разворачивается полный экран и в неё сворачивается
   autoHide: () => !!(state.settings && state.settings.fsAutoHide),
   like: () => player.toggleLike(),

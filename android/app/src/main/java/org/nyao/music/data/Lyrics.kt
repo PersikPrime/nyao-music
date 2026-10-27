@@ -111,44 +111,72 @@ object LyricsApi {
 
     private fun plain(text: String, source: String) = Lyrics(false, text.lines().map { LyricLine(null, it.trim()) }, source)
 
+    /** Провайдеры текстов по умолчанию — в этом порядке их и спрашиваем (как на ПК) */
+    val PROVIDERS = listOf("ya", "nyao", "lrclib", "ytm")
+    val PROVIDER_NAMES = mapOf("ya" to "Яндекс Музыка", "nyao" to "Nyao LyricLabs", "lrclib" to "LRCLIB", "ytm" to "YouTube Music")
+    val PROVIDER_CAPS = mapOf(
+        "ya" to "с таймингами · нужен вход в Яндекс",
+        "nyao" to "с таймингами · по словам (караоке)",
+        "lrclib" to "с таймингами · открытая база",
+        "ytm" to "только текст · для треков YouTube",
+    )
+
+    /** Порядок из настроек → полный список (id, включён): незнакомое выкидываем, недостающее — в конец, включённым */
+    fun order(saved: List<Pair<String, Boolean>>): List<Pair<String, Boolean>> {
+        val out = saved.filter { it.first in PROVIDERS }.distinctBy { it.first }.toMutableList()
+        PROVIDERS.forEach { id -> if (out.none { it.first == id }) out += id to true }
+        return out
+    }
+
+    /** Порядок поменяли — уже найденные тексты ищем заново */
+    fun clearCache() {
+        cache.clear()
+        missing.clear()
+    }
+
     suspend fun find(track: Track): Lyrics? {
         cache[track.id]?.let { return it }
         if (track.id in missing) return null
+        val s = Repo.prefs.settings.value
+        val list = order(s.lyricsOrder).filter { it.second }.map { it.first }
         return coroutineScope {
-            // Nyao LyricLabs спрашиваем сразу, параллельно с Яндексом: если там слова размечены (караоке), берём его
-            val ownAsync = async { nyaoLyrics(track) }
-            findWith(track) { ownAsync }
+            // Nyao LyricLabs спрашиваем сразу, параллельно с остальными: если там слова размечены (караоке), берём его
+            val ownAsync = async { if ("nyao" in list) nyaoLyrics(track) else null }
+            findWith(track, list, s.lyricsWordsFirst) { ownAsync }
         }
     }
 
-    private suspend fun findWith(track: Track, ownAsync: () -> kotlinx.coroutines.Deferred<Lyrics?>): Lyrics? {
+    /** Первый текст с таймингами в порядке list; если таймингов нет нигде — первый найденный текст */
+    private suspend fun findWith(track: Track, list: List<String>, wordsFirst: Boolean, ownAsync: () -> kotlinx.coroutines.Deferred<Lyrics?>): Lyrics? {
         var fallback: Lyrics? = null
-        // 1) Яндекс: сам трек или такой же, найденный в Яндексе
-        if (Repo.ya.loggedIn && Repo.up(SOURCE_YA)) {
+        suspend fun ownWords(): Lyrics? = if (wordsFirst && "nyao" in list) withTimeoutOrNull(2500) { ownAsync().await() }?.takeIf { it.words } else null
+        suspend fun ya(): Lyrics? {
+            if (!Repo.ya.loggedIn || !Repo.up(SOURCE_YA)) return null
             val yaId = if (track.source == SOURCE_YA) track.srcId else runCatching { Match.find(track, 0.75) { q -> Repo.ya.search(q) }?.srcId }.getOrNull()
-            if (yaId != null) {
-                val lrc = runCatching { Repo.ya.lyrics(yaId, "LRC") }.getOrNull()
-                val name = { p: String? -> if (p != null) "Яндекс Музыка · $p" else "Яндекс Музыка" }
-                val lines = lrc?.let { parseLrc(it.first) }.orEmpty()
-                if (lines.isNotEmpty()) {
-                    val own = withTimeoutOrNull(2500) { ownAsync().await() }
-                    if (own?.words == true) return own.also { cache[track.id] = it }
-                    ownAsync().cancel()
-                    return Lyrics(true, lines, name(lrc?.second)).also { cache[track.id] = it }
-                }
-                runCatching { Repo.ya.lyrics(yaId, "TEXT") }.getOrNull()?.let { fallback = plain(it.first, name(it.second)) }
-            }
+                ?: return null
+            val name = { p: String? -> if (p != null) "Яндекс Музыка · $p" else "Яндекс Музыка" }
+            val lrc = runCatching { Repo.ya.lyrics(yaId, "LRC") }.getOrNull()
+            val lines = lrc?.let { parseLrc(it.first) }.orEmpty()
+            if (lines.isNotEmpty()) return Lyrics(true, lines, name(lrc?.second))
+            return runCatching { Repo.ya.lyrics(yaId, "TEXT") }.getOrNull()?.let { plain(it.first, name(it.second)) }
         }
-        // 2) Nyao LyricLabs, 3) LRCLIB
-        val own = ownAsync().await()
-        if (own != null && own.synced) return own.also { cache[track.id] = it }
-        if (fallback == null) fallback = own
-        val lr = lrclib(track)
-        if (lr != null && lr.synced) return lr.also { cache[track.id] = it }
-        if (fallback == null) fallback = lr
-        // 3) YouTube Music — без таймингов
-        if (fallback == null && track.source == SOURCE_YT) runCatching { Repo.yt.lyrics(track.srcId) }.getOrNull()?.let { fallback = plain(it, "YouTube Music") }
-        val res = fallback
+        suspend fun ytm(): Lyrics? = if (track.source == SOURCE_YT) runCatching { Repo.yt.lyrics(track.srcId) }.getOrNull()?.let { plain(it, "YouTube Music") } else null
+        for (id in list) {
+            val res = when (id) {
+                "ya" -> ya()
+                "nyao" -> ownAsync().await()
+                "lrclib" -> lrclib(track)
+                else -> ytm()
+            }
+            if (res != null && res.synced) {
+                val best = (if (id != "nyao" && !res.words) ownWords() else null) ?: res
+                // coroutineScope ждёт все запросы — LyricLabs, который не понадобился, отменяем
+                if (best === res && id != "nyao") ownAsync().cancel()
+                return best.also { cache[track.id] = it }
+            }
+            if (res != null && fallback == null) fallback = res
+        }
+        val res = ownWords() ?: fallback
         if (res != null) cache[track.id] = res else missing += track.id
         return res
     }

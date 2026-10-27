@@ -110,6 +110,7 @@ fun ProfileScreen(model: AppModel) {
         SettingsGroup("Приложение") {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Equalizer, "Звук и воспроизведение", if (s.eqOn) "эквалайзер вкл." else null) { model.go(Route.SettingsPage("sound")) }
             // настройки волны живут на экране «Моя волна» — здесь их больше нет
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.FormatQuote, "Текст песни", org.nyao.music.data.LyricsApi.order(s.lyricsOrder).firstOrNull { it.second }?.let { org.nyao.music.data.LyricsApi.PROVIDER_NAMES[it.first] }) { model.go(Route.SettingsPage("lyrics")) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Database, "Офлайн и кэш", last = true) { model.go(Route.SettingsPage("cache")) }
         }
         SettingsGroup("Оформление") {
@@ -192,6 +193,7 @@ private fun sectionTitle(section: String): String = when {
     section == "view" -> "Вид главной"
     section == "theme" -> "Тема и сетка"
     section == "widgets" -> "Стиль виджетов"
+    section == "lyrics" -> "Текст песни"
     section == "lastfm" -> "Last.fm"
     section == "updates" -> "Обновления"
     section == "about" -> "О приложении"
@@ -222,6 +224,7 @@ fun SettingsPageScreen(model: AppModel, section: String) {
                 section == "view" -> ViewSettingsCard()
                 section == "theme" -> LookSettings()
                 section == "widgets" -> WidgetStyleSettings()
+                section == "lyrics" -> LyricsSettings()
                 section == "lastfm" -> LastFmCard(model)
                 section == "updates" -> UpdateCard(model, showTitle = false)
                 section == "about" -> AboutCard()
@@ -617,6 +620,32 @@ private fun UpdateCard(model: AppModel, showTitle: Boolean = true) {
             style = MaterialTheme.typography.titleSmall,
         )
         Text("Сейчас установлена ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Канал обновлений — как в центре обновлений macOS
+        val channel = Repo.prefs.settings.collectAsState().value.let { org.nyao.music.data.Updates.channel() }
+        Text("Канал обновлений", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            org.nyao.music.data.Updates.CHANNELS.forEach { (id, label) ->
+                val on = id == channel
+                androidx.compose.material3.FilterChip(
+                    selected = on,
+                    onClick = {
+                        if (!on) {
+                            Repo.prefs.setUpdateChannel(id)
+                            check()
+                        }
+                    },
+                    label = { Text(label, maxLines = 1) },
+                )
+            }
+        }
+        Text(
+            when (channel) {
+                "dev" -> "Бета: новое раньше всех, иногда с недочётами. Если обычный релиз новее — придёт он."
+                "nightly" -> "Ночные сборки: эксперименты прямо из разработки, могут ломаться."
+                else -> "Проверенные релизы."
+            } + if (i != null && !i.available && i.build in 1 until BuildConfig.VERSION_CODE) " Версия в этом канале старше установленной — обновление придёт, когда канал её догонит." else "",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         if (i != null && i.available && i.notes.isNotBlank()) {
             Text(i.notes.take(400), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

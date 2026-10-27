@@ -144,7 +144,7 @@ contextBridge.exposeInMainWorld('nyao', {
   prepare: (id) => call('stream:prepare', id),
   loudness: (id) => call('stream:loudness', id),
   streamError: (id) => call('stream:error', id),
-  lyrics: (track) => call('lyrics', track),
+  lyrics: (track, opts) => call('lyrics', track, opts),
   like: (track, on) => call('like', track, on),
   sc: {
     pending: () => call('sc:pending'),

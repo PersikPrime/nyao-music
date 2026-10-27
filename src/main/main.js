@@ -188,7 +188,7 @@ function configureRpc() {
 // Что из настроек едет на другие устройства (остальное — своё у каждого компьютера)
 const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood', 'waveFresh'];
 // вид приложения и «Мне нравится» по сервисам — тоже общие для всех устройств
-const PREF_KEYS = ['layout', 'splitLiked', 'waveTab', 'accent'];
+const PREF_KEYS = ['layout', 'splitLiked', 'waveTab', 'accent', 'lyricsOrder', 'lyricsWordsFirst'];
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -560,7 +560,12 @@ function registerIpc() {
   handle('app:version', () => readVersion());
   handle('update:check', async () => {
     const hot = globalThis.__nyaoHot;
-    const info = await checkUpdate(readVersion(), globalThis.fetch.bind(globalThis), { compat: hot && hot.store.enabled ? hot.compat : null });
+    // канал обновлений из центра обновлений (как на macOS); не выбран — как у установленной сборки
+    const ver = readVersion();
+    const pick = settings.get().updateChannel;
+    const channel = ['stable', 'dev', 'nightly'].includes(pick) ? pick : ver.channel || 'stable';
+    const info = await checkUpdate({ ...ver, channel: channel === 'stable' ? null : channel }, globalThis.fetch.bind(globalThis), { compat: hot && hot.store.enabled ? hot.compat : null });
+    info.channel = channel;
     // горячее обновление уже скачано и ждёт перезапуска
     const st = hot && hot.store.enabled ? hot.store.state() : null;
     info.staged = !!(st && st.current != null && st.current !== hot.running && st.current > readVersion().build);
@@ -1024,8 +1029,12 @@ function registerIpc() {
   handle('stream:prepare', (trackId) => streams.prepare(trackId));
   handle('stream:loudness', (trackId) => streams.loudness(trackId));
   handle('stream:error', (trackId) => streams.lastError(trackId));
-  handle('lyrics', (track) => findLyricsChain(track, {
+  handle('lyrics', (track, opts = {}) => findLyricsChain(track, {
     fetch: fetchFn,
+    exclude: Array.isArray(opts && opts.exclude) ? opts.exclude.map(String) : [],
+    // порядок провайдеров из настроек («Текст песни»)
+    order: settings.get().lyricsOrder,
+    wordsFirst: settings.get().lyricsWordsFirst !== false,
     log: (m) => {
       console.log(m);
       try {

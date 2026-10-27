@@ -1127,3 +1127,15 @@ body.fs-on .toast { z-index: 1000; }
 .fs-card-formats { display: flex; gap: 6px; margin-bottom: 8px; }
 .fs-card-formats .fs-pill { padding: 0 12px; font-size: 13px; }
 .fs-card-side > .fs-pill { justify-content: center; padding: 0 16px; }
+.update-channel { display: grid; gap: 6px; margin-top: 12px; }
+.update-channel > span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.update-channel .seg button { height: 36px; }
+.fs-credit-btn { background: none; border: 0; padding: 0; font: inherit; color: rgba(255,255,255,.75); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.fs-credit-btn:hover { color: #fff; }
+.lyr-order { display: grid; gap: 4px; margin-bottom: 8px; }
+.lyr-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; background: rgba(255,255,255,.03); }
+.lyr-row.off .lyr-t { opacity: .5; }
+.lyr-n { width: 26px; height: 26px; border-radius: 13px; display: grid; place-items: center; background: rgba(255,255,255,.08); font-size: 12px; font-weight: 700; flex: none; }
+.lyr-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.lyr-t b { font-size: 14px; }
+.lyr-row .icon-btn:disabled { opacity: .3; }

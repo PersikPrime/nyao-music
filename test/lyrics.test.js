@@ -28,3 +28,20 @@ test('караоке: при тексте из Яндекса берём Nyao Ly
   const none = await findLyricsChain(track, { ya, fetch: reply(null) });
   assert.match(none.source, /^Яндекс Музыка/);
 });
+
+test('порядок провайдеров: первый с таймингами, выключенные пропускаются, exclude', async () => {
+  const { lyricsOrder } = await import('../src/main/lyrics.js');
+  assert.deepEqual(lyricsOrder([{ id: 'lrclib', on: true }, { id: 'zzz' }, { id: 'ya', on: false }]).map((p) => `${p.id}:${p.on}`), ['lrclib:true', 'ya:false', 'nyao:true', 'ytm:true']);
+  const track = { id: 'ya:1', source: 'ya', srcId: '1', title: 'Т', artist: 'А', duration: 100 };
+  const ya = { lyrics: async (id, fmt) => (fmt === 'LRC' ? { text: '[00:01.00] из Яндекса', provider: 'P' } : null) };
+  const fetch = async (url) => new Response(JSON.stringify(url.includes('lrclib') ? { syncedLyrics: '[00:01.00] из LRCLIB' } : null), { status: url.includes('lrclib') ? 200 : 404 });
+  const first = await findLyricsChain(track, { ya, fetch, order: [{ id: 'lrclib' }, { id: 'ya' }] });
+  assert.equal(first.lines[0].text, 'из LRCLIB');
+  assert.equal(first.provider, 'lrclib');
+  const yaFirst = await findLyricsChain(track, { ya, fetch });
+  assert.equal(yaFirst.provider, 'ya');
+  const other = await findLyricsChain(track, { ya, fetch, exclude: ['ya'] });
+  assert.equal(other.provider, 'lrclib');
+  const off = await findLyricsChain(track, { ya, fetch, order: [{ id: 'ya', on: false }, { id: 'lrclib', on: false }, { id: 'nyao', on: false }, { id: 'ytm', on: false }] });
+  assert.equal(off.lines.length, 0);
+});

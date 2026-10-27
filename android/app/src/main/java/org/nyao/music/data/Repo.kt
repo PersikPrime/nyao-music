@@ -177,6 +177,8 @@ object Repo {
         return when (key) {
             "wave" -> org.json.JSONObject().put("ytmShare", s.ytmShare).put("waveDiversity", s.diversity).put("waveMood", s.mood ?: org.json.JSONObject.NULL).put("waveFresh", s.waveFresh)
             "prefs" -> org.json.JSONObject().put("layout", s.layout ?: org.json.JSONObject.NULL).put("splitLiked", s.splitLiked).put("waveTab", s.waveTab)
+                .put("lyricsWordsFirst", s.lyricsWordsFirst)
+                .apply { if (s.lyricsOrder.isNotEmpty()) put("lyricsOrder", org.json.JSONArray(s.lyricsOrder.map { org.json.JSONObject().put("id", it.first).put("on", it.second) })) }
             else -> mixStore.toJson()
         }
     }
@@ -223,7 +225,12 @@ object Repo {
                     o.str("layout")?.let { putString("layout", if (it == "wave") "wave" else "player") }
                     if (o.has("splitLiked")) putBoolean("splitLiked", o.optBoolean("splitLiked"))
                     if (o.has("waveTab")) putBoolean("waveTab", o.optBoolean("waveTab"))
+                    if (o.has("lyricsWordsFirst")) putBoolean("lyricsWordsFirst", o.optBoolean("lyricsWordsFirst", true))
+                    o.optJSONArray("lyricsOrder")?.let { a ->
+                        putString("lyricsOrder", a.objects().mapNotNull { x -> x.str("id")?.let { "$it:${if (x.optBoolean("on", true)) 1 else 0}" } }.joinToString(","))
+                    }
                 }
+                LyricsApi.clearCache()
             }),
             "artists" to NyaoCloud.StateHandler(
                 { FavArtist.listToJson(_favArtists.value) },
