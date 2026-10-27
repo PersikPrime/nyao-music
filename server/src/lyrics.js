@@ -72,8 +72,17 @@ const ttmlTime = (ms) => {
  * Опубликованный текст → TTML. Строки — <p> со временем начала и конца (конец — начало следующей строки),
  * части песни — <div itunes:songPart>. Нужна синхронизация по строкам.
  */
-export function toTtml({ title, artist, duration = 0, plain = '', synced = '', structure = [] }) {
+export function toTtml({ title, artist, duration = 0, plain = '', synced = '', structure = [], words = '' }) {
   const all = parseLrc(synced);
+  // пословное время по тем же строкам, что и synced (если размечено и сходится)
+  let wl = null;
+  try {
+    wl = words ? parseWords(words) : null;
+    if (wl && wl.length !== all.length) wl = null;
+  } catch {
+    wl = null;
+  }
+  const wordsOf = (l) => (wl ? wl[all.indexOf(l)].words : null);
   const timed = all.filter((l) => l.text);
   const lines = textLines(plain);
   if (!timed.length || timed.length !== lines.length) return null;
@@ -103,10 +112,18 @@ export function toTtml({ title, artist, duration = 0, plain = '', synced = '', s
   // у <div> времени нет: по стандарту время <p> внутри считалось бы от начала div, а у нас оно от начала трека
   const body = divs.map((d) => {
     const part = d.type ? ` itunes:songPart="${TTML_PART[d.type] || 'Other'}"` : '';
-    return `    <div${part}>\n${d.lines.map((k) => `      <p begin="${ttmlTime(timed[k].at)}" end="${ttmlTime(end(k))}">${xmlEsc(timed[k].text)}</p>`).join('\n')}\n    </div>`;
+    return `    <div${part}>\n${d.lines.map((k) => {
+      const w = wordsOf(timed[k]);
+      if (!w || !w.length) return `      <p begin="${ttmlTime(timed[k].at)}" end="${ttmlTime(end(k))}">${xmlEsc(timed[k].text)}</p>`;
+      // слово длится до следующего; последнее — до своей конечной метки или конца строки
+      const we = wl[all.indexOf(timed[k])].end;
+      const spans = w.map((x, j) => `<span begin="${ttmlTime(x.at)}" end="${ttmlTime(j + 1 < w.length ? w[j + 1].at : Math.max(x.at + 100, we ?? end(k)))}">${xmlEsc(x.text)}</span>`).join(' ');
+      return `      <p begin="${ttmlTime(Math.min(timed[k].at, w[0].at))}" end="${ttmlTime(Math.max(end(k), we ?? 0))}">${spans}</p>`;
+    }).join('\n')}\n    </div>`;
   }).join('\n');
+  const wordLevel = !!(wl && timed.some((l) => (wordsOf(l) || []).length));
   return `<?xml version="1.0" encoding="UTF-8"?>
-<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="Line">
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="${wordLevel ? 'Word' : 'Line'}">
   <head>
     <metadata>
       <ttm:title>${xmlEsc(title)}</ttm:title>
@@ -174,12 +191,84 @@ const fmtTime = (t) => {
   return `[${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}]`;
 };
 
+const WORD_TAG = /<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>/g;
+const fmtWord = (t) => fmtTime(t).replace('[', '<').replace(']', '>');
+const squash = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+
+/**
+ * Пословное время (Enhanced LRC) → [{ at, text, words: [{ at, text }] | null, end }] — строка за строкой.
+ * Строка без угловых меток — слова в ней ещё не размечены (words: null).
+ */
+export function parseWords(text) {
+  const out = [];
+  const src = String(text || '').replace(/\r/g, '').split('\n');
+  for (let i = 0; i < src.length; i++) {
+    const raw = src[i].trim();
+    if (!raw || LRC_META.test(raw)) continue;
+    const m = LRC_LINE.exec(raw);
+    if (!m) throw new Error(`Слова, строка ${i + 1}: нет метки времени строки [мм:сс.xx]`);
+    const at = ms(m[1], m[2], m[3]);
+    const rest = m[4];
+    WORD_TAG.lastIndex = 0;
+    if (!WORD_TAG.test(rest)) { out.push({ at, text: squash(rest), words: null, end: null }); continue; }
+    // «<t1>слово <t2>слово <t3>» — текст между метками принадлежит метке слева; метка в конце — конец последнего слова
+    const parts = rest.split(/(<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>)/);
+    if (squash(parts[0])) throw new Error(`Слова, строка ${i + 1}: у слова «${squash(parts[0])}» нет времени`);
+    const words = [];
+    let end = null;
+    for (let k = 1; k < parts.length; k += 2) {
+      const t = /<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>/.exec(parts[k]);
+      if (Number(t[2]) > 59) throw new Error(`Слова, строка ${i + 1}: секунд больше 59`);
+      const tm = ms(t[1], t[2], t[3]);
+      const word = squash(parts[k + 1]);
+      if (word) words.push({ at: tm, text: word });
+      else if (k + 2 >= parts.length) end = tm;
+      else throw new Error(`Слова, строка ${i + 1}: две метки подряд без слова`);
+    }
+    out.push({ at, text: words.map((w) => w.text).join(' '), words, end });
+  }
+  return out;
+}
+
+/**
+ * Пословное время к уже проверенной синхронизации строк → чистый Enhanced LRC или ''.
+ * Строки — те же, что в synced (по порядку), текст строки = слова через пробел, время слов внутри строки.
+ */
+export function checkWords(words, synced, duration = 0) {
+  if (!String(words || '').trim()) return '';
+  if (!String(synced || '').trim()) throw new Error('Пословное время без синхронизации строк — сначала отметь строки');
+  const lines = parseLrc(synced);
+  const wl = parseWords(words);
+  if (wl.length !== lines.length) throw new Error(`Пословное время: ${wl.length} строк, а в синхронизации ${lines.length}`);
+  let any = false;
+  const out = lines.map((l, i) => {
+    const w = wl[i];
+    if (w.at !== l.at) throw new Error(`Пословное время, строка ${i + 1}: время строки не совпадает с синхронизацией`);
+    if (w.text !== squash(l.text)) throw new Error(`Пословное время, строка ${i + 1}: «${w.text || '—'}» вместо «${squash(l.text) || '—'}»`);
+    if (!w.words || !l.text) return `${fmtTime(l.at)} ${l.text}`.trimEnd();
+    any = true;
+    // слово — не раньше начала строки (с запасом 0,5 с) и не позже начала следующей (+1 с)
+    const next = lines.slice(i + 1).find((x) => x.at > l.at);
+    const hi = next ? next.at + 1000 : (duration > 0 ? (duration + 3) * 1000 : Infinity);
+    let prev = -Infinity;
+    for (const x of w.words) {
+      if (x.at < l.at - 500 || x.at > hi) throw new Error(`Пословное время, строка ${i + 1}: слово «${x.text}» вне своей строки`);
+      if (x.at < prev) throw new Error(`Пословное время, строка ${i + 1}: слово «${x.text}» раньше предыдущего`);
+      prev = x.at;
+    }
+    if (w.end != null && (w.end < prev || w.end > hi)) throw new Error(`Пословное время, строка ${i + 1}: конец строки раньше последнего слова или слишком поздно`);
+    return `${fmtTime(l.at)} ${w.words.map((x) => `${fmtWord(x.at)}${x.text}`).join(' ')}${w.end != null ? ` ${fmtWord(w.end)}` : ''}`;
+  });
+  return any ? out.join('\n') : '';
+}
+
 /**
  * Автопроверка перед очередью специалиста. → { plain, synced, instrumental } в чистом виде,
  * или ошибка с понятной причиной (черновик сразу возвращается автору)
  */
-export function checkLyrics({ plain = '', synced = '', instrumental = false, duration = 0, structure = null }) {
-  if (instrumental) return { plain: '', synced: '', instrumental: true, structure: [] };
+export function checkLyrics({ plain = '', synced = '', instrumental = false, duration = 0, structure = null, words = '' }) {
+  if (instrumental) return { plain: '', synced: '', instrumental: true, structure: [], words: '' };
+  if (String(words || '').length > MAX_TEXT * 2) throw new Error('Пословное время слишком длинное');
   plain = String(plain || '').replace(/\r/g, '');
   synced = String(synced || '').replace(/\r/g, '');
   if (plain.length + synced.length > MAX_TEXT * 2 || plain.length > MAX_TEXT || synced.length > MAX_TEXT) throw new Error('Текст слишком длинный');
@@ -216,7 +305,7 @@ export function checkLyrics({ plain = '', synced = '', instrumental = false, dur
   out = out.split('\n').map((l) => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   if (!out) throw new Error('Пустой текст — или отметь трек как инструментал');
   if (out.split('\n').length > MAX_LINES) throw new Error('Слишком много строк');
-  return { plain: out, synced, instrumental: false, structure: checkStructure(structure, textLines(out).length) };
+  return { plain: out, synced, instrumental: false, structure: checkStructure(structure, textLines(out).length), words: checkWords(words, synced, duration) };
 }
 
 /** Трек и опубликованная версия → ответ в формате LRCLIB */
@@ -231,6 +320,8 @@ function lrclibShape(r) {
     instrumental: !!r.instrumental,
     plainLyrics: r.instrumental ? null : r.plain || null,
     syncedLyrics: r.instrumental ? null : r.synced || null,
+    // расширение Nyao: пословное время (Enhanced LRC), если слова размечены
+    wordSyncedLyrics: r.instrumental ? null : r.words || null,
     isrc: r.isrc || null,
     // расширение Nyao: части песни (куплет, припев…) по номерам строк текста
     sections: parseStructure(r.structure),
@@ -260,7 +351,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
   const catalogLimit = limiter(40);
   const YA_ID = /^\d{1,15}$/;
 
-  const PUBLISHED = `SELECT t.id, t.title, t.artist, t.album, t.duration, v.plain, v.synced, v.instrumental, v.structure, t.cover, t.isrc
+  const PUBLISHED = `SELECT t.id, t.title, t.artist, t.album, t.duration, v.plain, v.synced, v.words, v.instrumental, v.structure, t.cover, t.isrc
       FROM lyrics_tracks t JOIN lyrics_versions v ON v.id = t.published_version
      WHERE NOT t.hidden`;
 
@@ -360,7 +451,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       readLimit(ip);
       const r = await published(m[1]);
       if (!r || r.instrumental) throw notFound();
-      const xml = toTtml({ title: r.title, artist: r.artist, duration: Number(r.duration) || 0, plain: r.plain, synced: r.synced, structure: parseStructure(r.structure) });
+      const xml = toTtml({ title: r.title, artist: r.artist, duration: Number(r.duration) || 0, plain: r.plain, synced: r.synced, words: r.words, structure: parseStructure(r.structure) });
       if (!xml) throw new HttpError(404, 'У этого текста нет синхронизации по строкам — TTML не собрать');
       return { __raw: { type: 'application/ttml+xml; charset=utf-8', body: xml, filename: url.searchParams.get('download') ? `${r.artist} - ${r.title}.ttml`.replace(/[\\/:*?"<>|]/g, '_') : null } };
     }],
@@ -450,7 +541,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
     }],
     ['GET', /^\/api\/track\/(\d{1,18})$/, async ({ m }) => {
       const { rows } = await q(
-        `SELECT t.id, t.title, t.artist, t.album, t.duration, t.hidden, t.cover, t.ya_id, t.isrc, v.plain, v.synced, v.instrumental, v.structure, v.reviewed_at,
+        `SELECT t.id, t.title, t.artist, t.album, t.duration, t.hidden, t.cover, t.ya_id, t.isrc, v.plain, v.synced, v.words, v.instrumental, v.structure, v.reviewed_at,
                 a.name AS a_name, a.username AS a_username
            FROM lyrics_tracks t
            LEFT JOIN lyrics_versions v ON v.id = t.published_version
@@ -471,7 +562,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         yaId: r.ya_id || null,
         isrc: r.isrc || null,
         published: r.reviewed_at
-          ? { plain: r.plain, synced: r.synced, instrumental: !!r.instrumental, structure: parseStructure(r.structure), reviewedAt: r.reviewed_at, author: user(r, 'a_') }
+          ? { plain: r.plain, synced: r.synced, words: r.words || '', instrumental: !!r.instrumental, structure: parseStructure(r.structure), reviewedAt: r.reviewed_at, author: user(r, 'a_') }
           : null
       };
     }],
@@ -499,7 +590,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       const v = rows[0];
       if (!v) throw new HttpError(404, 'Нет такой версии');
       if (Number(v.author_id) !== s.uid && !['specialist', 'admin'].includes(await roleOf(s))) throw new HttpError(403, 'Это чужой черновик');
-      return { id: Number(v.id), status: v.status, note: v.note, plain: v.plain, synced: v.synced, instrumental: v.instrumental, structure: parseStructure(v.structure), track: { id: Number(v.track_id), title: v.title, artist: v.artist, album: v.album, duration: Number(v.duration) || 0, cover: v.cover || null } };
+      return { id: Number(v.id), status: v.status, note: v.note, plain: v.plain, synced: v.synced, words: v.words || '', instrumental: v.instrumental, structure: parseStructure(v.structure), track: { id: Number(v.track_id), title: v.title, artist: v.artist, album: v.album, duration: Number(v.duration) || 0, cover: v.cover || null } };
     }, true],
     ['POST', /^\/api\/submit$/, async ({ req, s, ip }) => {
       writeLimit(ip);
@@ -508,7 +599,7 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       let duration = 0;
       const check = (d) => {
         try {
-          return checkLyrics({ plain: b.plain, synced: b.synced, instrumental: !!b.instrumental, duration: d, structure: b.structure });
+          return checkLyrics({ plain: b.plain, synced: b.synced, instrumental: !!b.instrumental, duration: d, structure: b.structure, words: b.words });
         } catch (e) {
           throw new HttpError(422, e.message);
         }
@@ -561,16 +652,16 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
       }
       if (!clean) clean = check(duration);
       const cur = await published(trackId);
-      if (cur && cur.plain === clean.plain && cur.synced === clean.synced && !!cur.instrumental === clean.instrumental && (cur.structure || '[]') === JSON.stringify(clean.structure)) throw new HttpError(409, 'Это совпадает с опубликованной версией — менять нечего');
+      if (cur && cur.plain === clean.plain && cur.synced === clean.synced && (cur.words || '') === clean.words && !!cur.instrumental === clean.instrumental && (cur.structure || '[]') === JSON.stringify(clean.structure)) throw new HttpError(409, 'Это совпадает с опубликованной версией — менять нечего');
       // один черновик на трек от автора: новая отправка заменяет прежнюю, ещё не проверенную
       const prev = await q(`SELECT id FROM lyrics_versions WHERE track_id = $1 AND author_id = $2 AND status IN ('pending', 'returned') ORDER BY id DESC LIMIT 1`, [trackId, s.uid]);
       if (prev.rows.length) {
-        await q(`UPDATE lyrics_versions SET plain = $1, synced = $2, instrumental = $3, structure = $4, status = 'pending', note = '', created_at = now() WHERE id = $5`, [clean.plain, clean.synced, clean.instrumental, JSON.stringify(clean.structure), prev.rows[0].id]);
+        await q(`UPDATE lyrics_versions SET plain = $1, synced = $2, instrumental = $3, structure = $4, words = $5, status = 'pending', note = '', created_at = now() WHERE id = $6`, [clean.plain, clean.synced, clean.instrumental, JSON.stringify(clean.structure), clean.words, prev.rows[0].id]);
         return { ok: true, id: Number(prev.rows[0].id), trackId, status: 'pending' };
       }
       const { rows } = await q(
-        `INSERT INTO lyrics_versions (track_id, author_id, plain, synced, instrumental, structure) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [trackId, s.uid, clean.plain, clean.synced, clean.instrumental, JSON.stringify(clean.structure)]
+        `INSERT INTO lyrics_versions (track_id, author_id, plain, synced, instrumental, structure, words) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [trackId, s.uid, clean.plain, clean.synced, clean.instrumental, JSON.stringify(clean.structure), clean.words]
       );
       return { ok: true, id: Number(rows[0].id), trackId, status: 'pending' };
     }, true],
@@ -579,13 +670,13 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
     ['GET', /^\/api\/review$/, async ({ s }) => {
       await need(s, 'specialist', 'admin');
       const { rows } = await q(
-        `SELECT v.id, v.created_at, v.instrumental, v.synced <> '' AS has_sync, t.id AS track_id, t.title, t.artist, t.duration,
+        `SELECT v.id, v.created_at, v.instrumental, v.synced <> '' AS has_sync, v.words <> '' AS has_words, t.id AS track_id, t.title, t.artist, t.duration,
                 t.published_version IS NOT NULL AS is_edit, a.name AS a_name, a.username AS a_username
            FROM lyrics_versions v JOIN lyrics_tracks t ON t.id = v.track_id LEFT JOIN users a ON a.id = v.author_id
           WHERE v.status = 'pending' AND NOT t.hidden ORDER BY v.created_at LIMIT 100`
       );
       return {
-        items: rows.map((r) => ({ id: Number(r.id), createdAt: r.created_at, instrumental: r.instrumental, synced: r.has_sync, edit: r.is_edit, author: user(r, 'a_'), track: { id: Number(r.track_id), title: r.title, artist: r.artist, duration: Number(r.duration) || 0 } }))
+        items: rows.map((r) => ({ id: Number(r.id), createdAt: r.created_at, instrumental: r.instrumental, synced: r.has_sync, words: r.has_words, edit: r.is_edit, author: user(r, 'a_'), track: { id: Number(r.track_id), title: r.title, artist: r.artist, duration: Number(r.duration) || 0 } }))
       };
     }, true],
     ['GET', /^\/api\/review\/(\d{1,18})$/, async ({ m, s }) => {
@@ -603,12 +694,13 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         status: v.status,
         plain: v.plain,
         synced: v.synced,
+        words: v.words || '',
         instrumental: v.instrumental,
         structure: parseStructure(v.structure),
         own: Number(v.author_id) === s.uid,
         author: user(v, 'a_'),
         track: { id: Number(v.track_id), title: v.title, artist: v.artist, album: v.album, duration: Number(v.duration) || 0, cover: v.cover || null },
-        current: cur ? { plain: cur.plain, synced: cur.synced, instrumental: !!cur.instrumental, structure: parseStructure(cur.structure) } : null
+        current: cur ? { plain: cur.plain, synced: cur.synced, words: cur.words || '', instrumental: !!cur.instrumental, structure: parseStructure(cur.structure) } : null
       };
     }, true],
     ['POST', /^\/api\/review\/(\d{1,18})$/, async ({ m, s, req }) => {
@@ -630,15 +722,15 @@ export function lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins = [
         return { ok: true, status: action === 'return' ? 'returned' : 'rejected' };
       }
       // специалист может поправить мелочи прямо при проверке
-      let clean = { plain: v.plain, synced: v.synced, instrumental: v.instrumental, structure: parseStructure(v.structure) };
-      if (b.plain !== undefined || b.synced !== undefined || b.instrumental !== undefined || b.structure !== undefined) {
+      let clean = { plain: v.plain, synced: v.synced, instrumental: v.instrumental, structure: parseStructure(v.structure), words: v.words || '' };
+      if (b.plain !== undefined || b.synced !== undefined || b.instrumental !== undefined || b.structure !== undefined || b.words !== undefined) {
         try {
-          clean = checkLyrics({ plain: b.plain ?? v.plain, synced: b.synced ?? v.synced, instrumental: b.instrumental ?? v.instrumental, structure: b.structure ?? v.structure, duration: Number(v.duration) || 0 });
+          clean = checkLyrics({ plain: b.plain ?? v.plain, synced: b.synced ?? v.synced, instrumental: b.instrumental ?? v.instrumental, structure: b.structure ?? v.structure, words: b.words ?? v.words, duration: Number(v.duration) || 0 });
         } catch (e) {
           throw new HttpError(422, e.message);
         }
       }
-      await q(`UPDATE lyrics_versions SET status = 'published', plain = $1, synced = $2, instrumental = $3, structure = $4, note = $5, reviewer_id = $6, reviewed_at = now() WHERE id = $7`, [clean.plain, clean.synced, clean.instrumental, JSON.stringify(clean.structure), note, s.uid, v.id]);
+      await q(`UPDATE lyrics_versions SET status = 'published', plain = $1, synced = $2, instrumental = $3, structure = $4, words = $5, note = $6, reviewer_id = $7, reviewed_at = now() WHERE id = $8`, [clean.plain, clean.synced, clean.instrumental, JSON.stringify(clean.structure), clean.words, note, s.uid, v.id]);
       await q('UPDATE lyrics_tracks SET published_version = $1 WHERE id = $2', [v.id, v.track_id]);
       return { ok: true, status: 'published' };
     }, true],

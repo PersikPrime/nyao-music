@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage, Tray, Menu, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage, Tray, Menu, globalShortcut, clipboard, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -14,7 +14,7 @@ import { SoundCloudProvider } from './providers/soundcloud.js';
 import { VKProvider } from './providers/vk.js';
 import { SpotifyProvider, SP_REDIRECT } from './providers/spotify.js';
 import { SpotifyEngine, silenceResponse } from './spotify/spotify-engine.js';
-import { checkUpdate, downloadAsset } from './updates.js';
+import { checkUpdate, downloadAsset, fetchHot } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
 import { findLyricsChain } from './lyrics.js';
@@ -39,10 +39,57 @@ const RENDERER = path.join(__dirname, '..', 'renderer');
 function readVersion() {
   try {
     const v = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'version.json'), 'utf8'));
-    return { name: v.name, build: v.build, channel: v.channel || null, label: `${v.name} (${v.build})${v.channel ? ' ' + v.channel : ''}` };
+    const hot = globalThis.__nyaoHot;
+    return {
+      name: v.name,
+      build: v.build,
+      channel: v.channel || null,
+      label: `${v.name} (${v.build})${v.channel ? ' ' + v.channel : ''}`,
+      // запущено горячее обновление: какая версия стоит установщиком
+      installed: hot && hot.running != null ? `${hot.bundled.name} (${hot.bundled.build})` : null
+    };
   } catch {
     return { name: app.getVersion(), build: 0, label: app.getVersion() };
   }
+}
+
+// откуда разрешено качать обновления: GitHub (и его файловый сервер) и зеркало на сервере Nyao
+const UPDATE_URL = /^https:\/\/(github\.com|objects\.githubusercontent\.com|api\.music\.withnyao\.app|api\.nmusic\.bixtl\.cc)\//;
+
+// Горячее обновление запущено: считаем его рабочим, когда интерфейс поднялся и ~8 с прожил без сбоя.
+// Не поднялся за минуту — помечаем версию плохой и перезапускаемся на коде из установки.
+function watchHotStart(w) {
+  const hot = globalThis.__nyaoHot;
+  if (!hot || hot.running == null) return;
+  const started = Date.now();
+  const tick = async () => {
+    if (w.isDestroyed()) return;
+    let ready = false;
+    try {
+      ready = await w.webContents.executeJavaScript('window.__nyaoReady === true', true);
+    } catch {
+      // страница ещё грузится
+    }
+    if (ready) {
+      setTimeout(() => {
+        if (!w.isDestroyed() && !w.webContents.isCrashed()) {
+          hot.store.confirm();
+          console.log(`[hot] версия ${hot.running} работает`);
+        }
+      }, 8000);
+      return;
+    }
+    if (Date.now() - started > 60_000) {
+      console.error(`[hot] версия ${hot.running} не поднялась за минуту — возвращаюсь к установленной`);
+      hot.store.fail(hot.running);
+      quitting = true;
+      app.relaunch();
+      app.quit();
+      return;
+    }
+    setTimeout(tick, 2000);
+  };
+  setTimeout(tick, 2000);
 }
 
 // ---------- Ссылки nyao:// (приглашения, комнаты, профили, треки) открывают это приложение ----------
@@ -478,14 +525,73 @@ function registerIpc() {
     if (coverColors.size > 200) coverColors.delete(coverColors.keys().next().value);
     return color;
   });
+  // карточка со строками текста: обложка для canvas (без CORS), копирование и сохранение готовой картинки
+  handle('card:cover', async (url) => {
+    if (!/^https:\/\//.test(String(url || ''))) return null;
+    const res = await net.fetch(url);
+    if (!res.ok) return null;
+    const img = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()));
+    if (img.isEmpty()) return null;
+    const { width } = img.getSize();
+    return (width > 800 ? img.resize({ width: 800, quality: 'best' }) : img).toDataURL();
+  });
+  const cardImage = (dataUrl) => {
+    if (!/^data:image\/png;base64,/.test(String(dataUrl || ''))) throw new Error('не картинка');
+    const img = nativeImage.createFromDataURL(dataUrl);
+    if (img.isEmpty()) throw new Error('пустая картинка');
+    return img;
+  };
+  handle('card:copy', (dataUrl) => {
+    clipboard.writeImage(cardImage(dataUrl));
+    return true;
+  });
+  handle('card:save', async (dataUrl, name) => {
+    const img = cardImage(dataUrl);
+    const safe = String(name || 'Nyao.png').replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 140);
+    const r = await dialog.showSaveDialog(win, { defaultPath: path.join(app.getPath('downloads'), safe.endsWith('.png') ? safe : `${safe}.png`), filters: [{ name: 'PNG', extensions: ['png'] }] });
+    if (r.canceled || !r.filePath) return null;
+    fs.writeFileSync(r.filePath, img.toPNG());
+    return r.filePath;
+  });
   handle('open:external', (url) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
   });
 
   handle('app:version', () => readVersion());
-  handle('update:check', () => checkUpdate(readVersion(), globalThis.fetch.bind(globalThis)));
+  handle('update:check', async () => {
+    const hot = globalThis.__nyaoHot;
+    const info = await checkUpdate(readVersion(), globalThis.fetch.bind(globalThis), { compat: hot && hot.store.enabled ? hot.compat : null });
+    // горячее обновление уже скачано и ждёт перезапуска
+    const st = hot && hot.store.enabled ? hot.store.state() : null;
+    info.staged = !!(st && st.current != null && st.current !== hot.running && st.current > readVersion().build);
+    return info;
+  });
+  // горячее обновление: скачать маленький пакет кода, проверить подпись и поставить — применится после перезапуска
+  handle('update:hot', async (pkg) => {
+    const hot = globalThis.__nyaoHot;
+    if (!hot || !hot.store.enabled) throw new Error('В этой сборке быстрые обновления выключены');
+    if (!pkg || ![pkg.url, pkg.sigUrl].every((u) => UPDATE_URL.test(String(u || '')))) throw new Error('Нет пакета обновления');
+    const { buf, sig } = await fetchHot(pkg, globalThis.fetch.bind(globalThis));
+    return hot.store.install(buf, sig);
+  });
+  handle('update:relaunch', () => {
+    quitting = true;
+    app.relaunch();
+    app.quit();
+  });
+  // «вернуть версию из установщика»: горячее обновление больше не запускаем
+  handle('update:resetHot', () => {
+    const hot = globalThis.__nyaoHot;
+    if (!hot) return false;
+    const st = hot.store.state();
+    if (hot.running != null) hot.store.save({ ...st, current: null, pending: null, bad: [...new Set([...st.bad, hot.running])] });
+    quitting = true;
+    app.relaunch();
+    app.quit();
+    return true;
+  });
   handle('update:download', async (asset) => {
-    if (!asset || !/^https:\/\/(github\.com|api\.nmusic\.bixtl\.cc)\//.test(asset.url)) throw new Error('Нет файла для этой системы');
+    if (!asset || !UPDATE_URL.test(asset.url)) throw new Error('Нет файла для этой системы');
     const file = await downloadAsset(asset, app.getPath('downloads'), (p) => {
       if (win && !win.isDestroyed()) win.webContents.send('update:progress', p);
     }, globalThis.fetch.bind(globalThis));
@@ -498,6 +604,17 @@ function registerIpc() {
     return file;
   });
   handle('settings:get', () => settings.get());
+  // оформление на macOS: 'glass' — Liquid Glass, 'nyao' — как на Windows; окно перезагружается в новой теме
+  handle('theme:set', (v) => {
+    if (process.platform !== 'darwin') return { ok: false };
+    settings.set({ macTheme: v === 'glass' ? 'glass' : 'nyao' });
+    const theme = currentTheme();
+    if (win && !win.isDestroyed()) {
+      if (typeof win.setWindowButtonPosition === 'function') win.setWindowButtonPosition(trafficLights(theme));
+      setTimeout(() => win && !win.isDestroyed() && win.loadFile(path.join(RENDERER, 'index.html'), { query: { theme } }), 60);
+    }
+    return { ok: true, theme };
+  });
   handle('settings:set', (patch) => {
     const next = settings.set(patch);
     if ('discordRpc' in patch) configureRpc();
@@ -926,7 +1043,19 @@ function registerIpc() {
   });
 }
 
+/**
+ * Оформление: на всех ПК — тема Nyao (как на Windows); на macOS можно включить Liquid Glass в настройках.
+ * NYAO_THEME=mac|win переопределяет выбор (удобно, чтобы посмотреть чужую тему).
+ */
+function currentTheme() {
+  if (process.env.NYAO_THEME === 'mac' || process.env.NYAO_THEME === 'win') return process.env.NYAO_THEME;
+  return process.platform === 'darwin' && (settings.get() || {}).macTheme === 'glass' ? 'mac' : 'win';
+}
+/** «Светофоры» macOS: в Liquid Glass — в боковой панели, в теме Nyao — по центру полосы заголовка (44 px) */
+const trafficLights = (theme) => (theme === 'mac' ? { x: 26, y: 26 } : { x: 16, y: 15 });
+
 function createWindow() {
+  const theme = currentTheme();
   win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -934,7 +1063,7 @@ function createWindow() {
     minHeight: 640,
     // На macOS оставляем родные «светофоры», на Windows — свои кнопки окна
     ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 26, y: 26 } }
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: trafficLights(theme) }
       : { frame: false }),
     backgroundColor: '#000000',
     title: 'Nyao Music',
@@ -960,13 +1089,11 @@ function createWindow() {
   setupTray();
   applyShortcuts();
   win.webContents.once('did-finish-load', () => pollStatus());
+  watchHotStart(win);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  // Дизайн выбирается по системе: macOS — Liquid Glass, остальные — тёмная Windows-тема.
-  // NYAO_THEME=mac|win переопределяет выбор (удобно, чтобы посмотреть чужую тему).
-  const theme = process.env.NYAO_THEME || (process.platform === 'darwin' ? 'mac' : 'win');
   win.loadFile(path.join(RENDERER, 'index.html'), { query: { theme } });
   if (process.argv.includes('--dev')) win.webContents.openDevTools({ mode: 'detach' });
 }
@@ -982,7 +1109,7 @@ app.whenReady().then(() => {
   // При запуске через npm start показываем нашу иконку в доке (в собранном .app она и так своя)
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
     try {
-      app.dock.setIcon(path.join(__dirname, '..', '..', 'build', 'icon-mac.png'));
+      app.dock.setIcon(path.join(globalThis.__nyaoBundledRoot || path.join(__dirname, '..', '..'), 'build', 'icon-mac.png'));
     } catch {
       // иконка не критична
     }

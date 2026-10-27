@@ -70,6 +70,9 @@ jobs:
           LASTFM_SECRET: ${{ secrets.NYAO_LASTFM_SECRET }}
         run: |
           node -e "require('fs').writeFileSync('src/main/lastfm-keys.json', JSON.stringify({ key: process.env.LASTFM_KEY || '', secret: process.env.LASTFM_SECRET || '' }))"
+      # совместимость для быстрых обновлений: пакет кода подходит только установке с тем же Electron и библиотеками
+      - name: Совместимость быстрых обновлений
+        run: node scripts/hot-bundle.mjs --compat
       - name: "Сборка Windows: EXE → VMP → NSIS/ZIP"
         if: runner.os == 'Windows'
         env:
@@ -102,3 +105,37 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: .github/scripts/release-upload.sh ${{ matrix.files }}
+
+  # Быстрое обновление: код приложения (~1 МБ) отдельным подписанным пакетом — ставится без установщика
+  hot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Проверка
+        run: node --test test/hot.test.js
+      - name: Ключи Last.fm
+        shell: bash
+        env:
+          LASTFM_KEY: ${{ secrets.NYAO_LASTFM_KEY }}
+          LASTFM_SECRET: ${{ secrets.NYAO_LASTFM_SECRET }}
+        run: |
+          node -e "require('fs').writeFileSync('src/main/lastfm-keys.json', JSON.stringify({ key: process.env.LASTFM_KEY || '', secret: process.env.LASTFM_SECRET || '' }))"
+      - name: Пакет кода
+        env:
+          NYAO_HOT_KEY: ${{ secrets.NYAO_HOT_KEY }}
+        run: node scripts/hot-bundle.mjs
+      - name: Релиз
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/nightly'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(dist/*.nui dist/*.nui.sig)
+          if [ ${#files[@]} -eq 0 ]; then echo "Пакета нет — пропускаю"; exit 0; fi
+          .github/scripts/release-upload.sh "${files[@]}"

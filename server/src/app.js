@@ -415,8 +415,10 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     }, true],
 
     // ---------- Обновления ----------
-    ['GET', /^\/updates\/latest$/, async () => {
-      const rel = mirror && mirror.latest();
+    ['GET', /^\/updates\/latest$/, async ({ url }) => {
+      // ?channel=dev|nightly — пререлиз канала (если его нет — обычный релиз)
+      const channel = ['dev', 'nightly'].includes(url.searchParams.get('channel')) ? url.searchParams.get('channel') : null;
+      const rel = mirror && mirror.latest(channel);
       if (!rel) throw new HttpError(503, 'Сервер ещё не знает о релизах');
       return { ...rel, min_build: minBuild };
     }],

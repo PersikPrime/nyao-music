@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Что приложение может отдать другим через «Поделиться»: только готовые карточки со строками -->
+<paths>
+    <cache-path name="cards" path="cards/" />
+</paths>

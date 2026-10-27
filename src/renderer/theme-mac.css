@@ -180,7 +180,8 @@ body.mac {
 .mac .ob-card h1, .mac .ob-card h2 { font-family: -apple-system, 'SF Pro Display', var(--font); font-weight: 700; letter-spacing: -.02em; }
 
 /* Кнопка аккаунта внизу стеклянной боковой панели */
-.mac .side-accounts .acc-btn { flex: 1; max-width: none; height: 40px; padding: 0 8px 0 5px; background: rgba(255, 255, 255, .08); border-radius: 14px; }
+/* кнопка аккаунта не шире боковой панели: длинное имя сокращается «…», значки сервисов остаются целыми */
+.mac .side-accounts .acc-btn { flex: 1; min-width: 0; max-width: none; height: 40px; padding: 0 8px 0 5px; background: rgba(255, 255, 255, .08); border-radius: 14px; overflow: hidden; }
 .mac .side-accounts .acc-btn:hover { background: rgba(255, 255, 255, .14); }
 .mac .side-accounts .acc-btn .nm { flex: 1; text-align: left; font-weight: 600; color: rgba(255, 255, 255, .9); }
 .mac .side-accounts .acc-btn .stack .dot { box-shadow: 0 0 0 2px rgba(40, 36, 52, .9); }

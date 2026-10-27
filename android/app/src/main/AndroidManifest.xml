@@ -101,6 +101,17 @@
             </intent-filter>
         </service>
 
+        <!-- картинки-карточки со строками текста для «Поделиться» -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- виджет на рабочий стол -->
         <receiver
             android:name=".playback.NyaoWidget"
@@ -112,6 +123,17 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_info" />
+        </receiver>
+        <receiver
+            android:name=".playback.NyaoWaveWidget"
+            android:exported="true"
+            android:label="Моя волна">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_wave_info" />
         </receiver>
     </application>
 

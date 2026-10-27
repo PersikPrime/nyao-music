@@ -20,6 +20,11 @@ contextBridge.exposeInMainWorld('nyao', {
     onFullscreen: (cb) => ipcRenderer.on('win:fullscreen', (_e, on) => cb(on))
   },
   coverColor: (url) => call('cover:color', url),
+  card: {
+    cover: (url) => call('card:cover', url),
+    copy: (dataUrl) => call('card:copy', dataUrl),
+    save: (dataUrl, name) => call('card:save', dataUrl, name)
+  },
   trackDetails: (track) => call('track:details', track),
   onControl: (cb) => ipcRenderer.on('control', (_e, cmd) => cb(cmd)),
   radio: {
@@ -70,7 +75,13 @@ contextBridge.exposeInMainWorld('nyao', {
   updates: {
     check: () => call('update:check'),
     download: (asset) => call('update:download', asset),
+    hot: (pkg) => call('update:hot', pkg),
+    relaunch: () => call('update:relaunch'),
+    resetHot: () => call('update:resetHot'),
     onProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p))
+  },
+  theme: {
+    set: (v) => call('theme:set', v)
   },
   settings: {
     get: () => call('settings:get'),

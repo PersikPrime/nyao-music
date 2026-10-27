@@ -4,11 +4,16 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 
-/** Строка текста: time — секунды (null, если текст без синхронизации) */
-data class LyricLine(val time: Double?, val text: String)
-data class Lyrics(val synced: Boolean, val lines: List<LyricLine>, val source: String = "LRCLIB")
+/** Слово с временем (секунды): от начала до конца — для караоке */
+data class LyricWord(val time: Double, val end: Double, val text: String)
+/** Строка текста: time — секунды (null, если текст без синхронизации); words — пословное время, если размечено */
+data class LyricLine(val time: Double?, val text: String, val words: List<LyricWord>? = null)
+data class Lyrics(val synced: Boolean, val lines: List<LyricLine>, val source: String = "LRCLIB", val words: Boolean = false)
 
 /** Тексты песен — как lyrics.js на ПК: Яндекс Музыка (лицензированные) → LRCLIB → YouTube Music; с таймингами лучше */
 object LyricsApi {
@@ -27,6 +32,46 @@ object LyricsApi {
         return out.sortedBy { it.time }
     }
 
+    private val wordLine = Regex("^\\[(\\d+):(\\d+(?:\\.\\d+)?)](.*)$")
+    private val wordTag = Regex("<(\\d+):(\\d+(?:\\.\\d+)?)>")
+
+    /**
+     * Пословное время (Enhanced LRC из Nyao LyricLabs): «[00:12.30] <00:12.30>слово <00:12.85>слово <00:13.40>».
+     * Конец слова — начало следующего; у последнего — конечная метка или оценка по длине (не позже следующей строки).
+     */
+    fun parseWordLrc(lrc: String): List<LyricLine> {
+        class Raw(val time: Double, val text: String, val words: List<Pair<Double, String>>?, val end: Double?)
+        val raws = ArrayList<Raw>()
+        lrc.lines().forEach { line ->
+            val m = wordLine.find(line.trim()) ?: return@forEach
+            val time = m.groupValues[1].toInt() * 60 + m.groupValues[2].toDouble()
+            val rest = m.groupValues[3]
+            val tags = wordTag.findAll(rest).toList()
+            if (tags.isEmpty()) { raws += Raw(time, rest.trim(), null, null); return@forEach }
+            val words = ArrayList<Pair<Double, String>>()
+            var end: Double? = null
+            tags.forEachIndexed { i, t ->
+                val at = t.groupValues[1].toInt() * 60 + t.groupValues[2].toDouble()
+                val stop = if (i + 1 < tags.size) tags[i + 1].range.first else rest.length
+                val w = rest.substring(t.range.last + 1, stop).trim()
+                if (w.isNotEmpty()) words += at to w else if (i == tags.lastIndex) end = at
+            }
+            raws += if (words.isEmpty()) Raw(time, "", null, null) else Raw(time, words.joinToString(" ") { it.second }, words, end)
+        }
+        val sorted = raws.sortedBy { it.time }
+        return sorted.mapIndexed { i, r ->
+            val ws = r.words ?: return@mapIndexed LyricLine(r.time, r.text)
+            val limit = sorted.drop(i + 1).firstOrNull { it.time > r.time }?.time ?: Double.MAX_VALUE
+            LyricLine(r.time, r.text, ws.mapIndexed { j, (at, w) ->
+                val end = if (j + 1 < ws.size) maxOf(at + 0.05, ws[j + 1].first) else {
+                    val guess = at + (0.2 + w.length * 0.11).coerceIn(0.45, 2.5)
+                    maxOf(at + 0.05, minOf(r.end?.takeIf { it > at } ?: guess, limit))
+                }
+                LyricWord(at, end, w)
+            })
+        }
+    }
+
     private fun cleanTitle(t: String) = t
         .replace(Regex("\\s*[(\\[][^)\\]]*(official|video|audio|lyric|ost|mv|клип)[^)\\]]*[)\\]]", RegexOption.IGNORE_CASE), "")
         .replace(Regex("\\s+-\\s+.*(ost|soundtrack).*$", RegexOption.IGNORE_CASE), "")
@@ -39,6 +84,8 @@ object LyricsApi {
 
     private fun from(o: JSONObject?, source: String = "LRCLIB"): Lyrics? {
         if (o == null) return null
+        // расширение Nyao LyricLabs: время каждого слова — для караоке
+        o.str("wordSyncedLyrics")?.let { w -> parseWordLrc(w).takeIf { l -> l.any { it.words != null } }?.let { return Lyrics(true, it, source, words = true) } }
         o.str("syncedLyrics")?.let { s -> parseLrc(s).takeIf { it.isNotEmpty() }?.let { return Lyrics(true, it, source) } }
         o.str("plainLyrics")?.let { p -> return Lyrics(false, p.lines().map { LyricLine(null, it) }, source) }
         return null
@@ -67,6 +114,14 @@ object LyricsApi {
     suspend fun find(track: Track): Lyrics? {
         cache[track.id]?.let { return it }
         if (track.id in missing) return null
+        return coroutineScope {
+            // Nyao LyricLabs спрашиваем сразу, параллельно с Яндексом: если там слова размечены (караоке), берём его
+            val ownAsync = async { nyaoLyrics(track) }
+            findWith(track) { ownAsync }
+        }
+    }
+
+    private suspend fun findWith(track: Track, ownAsync: () -> kotlinx.coroutines.Deferred<Lyrics?>): Lyrics? {
         var fallback: Lyrics? = null
         // 1) Яндекс: сам трек или такой же, найденный в Яндексе
         if (Repo.ya.loggedIn && Repo.up(SOURCE_YA)) {
@@ -75,12 +130,17 @@ object LyricsApi {
                 val lrc = runCatching { Repo.ya.lyrics(yaId, "LRC") }.getOrNull()
                 val name = { p: String? -> if (p != null) "Яндекс Музыка · $p" else "Яндекс Музыка" }
                 val lines = lrc?.let { parseLrc(it.first) }.orEmpty()
-                if (lines.isNotEmpty()) return Lyrics(true, lines, name(lrc?.second)).also { cache[track.id] = it }
+                if (lines.isNotEmpty()) {
+                    val own = withTimeoutOrNull(2500) { ownAsync().await() }
+                    if (own?.words == true) return own.also { cache[track.id] = it }
+                    ownAsync().cancel()
+                    return Lyrics(true, lines, name(lrc?.second)).also { cache[track.id] = it }
+                }
                 runCatching { Repo.ya.lyrics(yaId, "TEXT") }.getOrNull()?.let { fallback = plain(it.first, name(it.second)) }
             }
         }
         // 2) Nyao LyricLabs, 3) LRCLIB
-        val own = nyaoLyrics(track)
+        val own = ownAsync().await()
         if (own != null && own.synced) return own.also { cache[track.id] = it }
         if (fallback == null) fallback = own
         val lr = lrclib(track)

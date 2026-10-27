@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Виджет: Glass · стекло над обоями, 4×1 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#29FFFFFF" />
+    <stroke android:width="1dp" android:color="#52FFFFFF" />
+    <corners android:radius="44dp" />
+</shape>

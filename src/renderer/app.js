@@ -22,9 +22,12 @@ const spotifySync = new SpotifySync(player, window.nyao && window.nyao.spotify, 
 if (window.nyao && window.nyao.spotify) spotifySync.start();
 const eq = new Equalizer(player.audio);
 
-// ---------- Тема по системе: macOS — Liquid Glass, остальное — Windows ----------
-const THEME = new URLSearchParams(location.search).get('theme') || (api.platform === 'darwin' ? 'mac' : 'win');
+// ---------- Оформление: тема Nyao на всех ПК; на macOS можно включить Liquid Glass (настройки → Вид) ----------
+// IS_MAC — включено ли оформление Liquid Glass; ON_MAC — сама система (⌘ в сочетаниях, «светофоры», установщик)
+const THEME = new URLSearchParams(location.search).get('theme') || 'win';
+const ON_MAC = api.platform === 'darwin';
 document.body.classList.add(THEME);
+if (ON_MAC) document.body.classList.add('macos');
 const IS_MAC = THEME === 'mac';
 
 const state = {
@@ -1017,24 +1020,38 @@ function svcCard(svc) {
 function updateCardHtml() {
   const u = state.update;
   const i = u.info;
+  const ready = u.hotReady || (i && i.staged);
+  const hot = i && i.available && i.hot && api.updates.hot ? i.hot : null;
+  const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`);
   let status = 'Нажми «Проверить», чтобы посмотреть свежий релиз на GitHub.';
   if (u.checking) status = 'Проверяю…';
   else if (u.error) status = `Не получилось: ${esc(u.error)}`;
+  else if (ready) status = 'Обновление скачано. Перезапуск займёт пару секунд — трек продолжит играть с того же места.';
+  else if (hot) status = `Доступна версия <b>${esc(i.latest.label)}</b> · быстрое обновление, ${kb(hot.size)}`;
   else if (i && i.available) status = `Доступна версия <b>${esc(i.latest.label)}</b>${i.asset ? ` · ${(i.asset.size / 1048576).toFixed(0)} МБ` : ' · файла для этой системы в релизе нет'}`;
   else if (i) status = `Установлена последняя версия${i.latest ? ` (${esc(i.latest.label)})` : ''}.`;
   const pct = u.progress != null ? Math.round(u.progress * 100) : null;
+  let button;
+  if (ready) button = `<button class="btn primary" data-action="update-relaunch">Перезапустить</button>`;
+  else if (hot) button = `<button class="btn primary" data-action="update-hot" ${u.hotBusy ? 'disabled' : ''}>${u.hotBusy ? 'Обновляю…' : 'Обновить за секунды'}</button>`;
+  else if (i && i.available && i.asset) button = `<button class="btn primary" data-action="update-install" ${pct != null ? 'disabled' : ''}>${pct != null ? `Скачиваю… ${pct}%` : 'Скачать и установить'}</button>`;
+  else button = `<button class="btn" data-action="update-check" ${u.checking ? 'disabled' : ''}>Проверить</button>`;
+  const installed = state.versionInfo && state.versionInfo.installed;
   return `<section class="card update-card">
     <div class="svc">
       <div class="logo" style="background:var(--accent-soft);color:var(--accent)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></div>
       <div class="info"><div class="name">Центр обновлений</div><div class="st">Сейчас: Nyao Music ${esc(state.version || '')}</div></div>
-      ${i && i.available && i.asset
-        ? `<button class="btn primary" data-action="update-install" ${pct != null ? 'disabled' : ''}>${pct != null ? `Скачиваю… ${pct}%` : 'Скачать и установить'}</button>`
-        : `<button class="btn" data-action="update-check" ${u.checking ? 'disabled' : ''}>Проверить</button>`}
+      ${button}
     </div>
     <div class="hint" id="update-status">${status}</div>
     ${pct != null ? `<div class="update-bar"><span style="width:${pct}%"></span></div>` : ''}
     ${i && i.available && i.notes ? `<details><summary>Что нового</summary><div class="hint" style="white-space:pre-wrap;margin-top:8px">${esc(i.notes)}</div></details>` : ''}
-    ${i && i.url ? `<button class="link-plain" data-action="update-page" style="font-size:12px;color:var(--accent);margin-top:6px">Открыть релизы на GitHub</button>` : ''}
+    ${installed ? `<div class="hint" style="margin-top:6px">Код обновлён без установщика; установщиком стоит ${esc(installed)}.</div>` : ''}
+    <div class="update-links">
+      ${i && i.url ? `<button class="link-plain" data-action="update-page">Открыть релизы на GitHub</button>` : ''}
+      ${hot && i.asset && !ready ? `<button class="link-plain" data-action="update-install">Скачать полный установщик</button>` : ''}
+      ${installed ? `<button class="link-plain" data-action="update-reset-hot">Вернуть версию из установщика</button>` : ''}
+    </div>
   </section>`;
 }
 async function checkUpdates(silent = false) {
@@ -1044,7 +1061,7 @@ async function checkUpdates(silent = false) {
   try {
     state.update.info = await api.updates.check();
     if (state.update.info.required) showOutdated(state.update.info.minBuild);
-    if (silent && state.update.info.available) toast(`Доступна Nyao Music ${state.update.info.latest.label} — обновить можно в Настройках`);
+    if (silent && state.update.info.available) toast(`Доступна Nyao Music ${state.update.info.latest.label} — ${state.update.info.hot ? 'обновить за секунды' : 'обновить'} можно в Настройках`);
   } catch (e) {
     state.update.error = e.message;
   }
@@ -1199,6 +1216,16 @@ function playHandoff(d, fallbackLabel) {
   renderBar();
 }
 
+/** macOS: оформление Nyao (как на Windows) или Liquid Glass — как выбор темы на Android */
+function themePickerHtml() {
+  const cur = IS_MAC ? 'glass' : 'nyao';
+  const opts = [['nyao', 'Nyao', 'как на Windows'], ['glass', 'Liquid Glass', 'стекло и размытие macOS']];
+  return `<div class="accent-pick">
+    <div><b>Оформление</b><span class="hint">Окно перезагрузится в новой теме, музыка продолжит играть с того же места.</span></div>
+    <div class="seg theme-seg" role="radiogroup" aria-label="Оформление">${opts.map(([v, n, h]) => `<button role="radio" aria-checked="${cur === v}" class="${cur === v ? 'on' : ''}" data-action="set-theme" data-v="${v}"><b>${n}</b><span>${h}</span></button>`).join('')}</div>
+  </div>`;
+}
+
 function accentPickerHtml() {
   const cur = (state.settings && state.settings.accent) || 'lavender';
   return `<div class="accent-pick">
@@ -1301,6 +1328,7 @@ function renderSettingsSection(sec) {
   else if (sec === 'view') body = `<section class="card">
       <div class="hint">Что главное при запуске. Через аккаунт Nyao едет на все устройства.</div>
       ${layoutChoiceHtml(layout(), 'data-action="set-layout"')}
+      ${ON_MAC ? themePickerHtml() : ''}
       ${accentPickerHtml()}
       <div class="pref-row"><span><b>«Мне нравится» по сервисам</b><span class="hint">Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud — плюс общий.</span></span>
         <button class="switch ${state.settings.splitLiked ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.splitLiked}" aria-label="«Мне нравится» по сервисам" data-action="split-liked" data-v="${state.settings.splitLiked ? 0 : 1}"><span></span></button></div>
@@ -1313,7 +1341,7 @@ function renderSettingsSection(sec) {
   else if (sec === 'discord') body = discordCardHtml();
   else if (sec === 'updates') body = updateCardHtml();
   else if (sec === 'about') body = `<section class="card">
-      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · тема ${IS_MAC ? 'macOS (Liquid Glass)' : 'Windows'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
+      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · оформление ${IS_MAC ? 'Liquid Glass' : 'Nyao'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
       <div><button class="btn" data-action="onboarding">Показать приветствие снова</button></div>
     </section>`;
   view.innerHTML = `<div class="scroll settings psec">
@@ -1339,7 +1367,7 @@ function eqCardHtml() {
 // ---------- Управление: глобальные сочетания и трей ----------
 function controlCardHtml() {
   const s = state.settings;
-  const mod = IS_MAC ? '⌘⌥' : 'Ctrl+Alt+';
+  const mod = ON_MAC ? '⌘⌥' : 'Ctrl+Alt+';
   return `<section class="card eq-card">
     <div class="pref-row"><span><b>Сочетания клавиш везде</b><span class="hint">Работают, даже когда окно свёрнуто: ${mod}Пробел — пауза, ${mod}→ / ${mod}← — следующий и предыдущий, ${mod}L — «Мне нравится». Медиаклавиши клавиатуры работают всегда.</span></span>
       <button class="switch ${s.globalKeys !== false ? 'on' : ''}" role="switch" aria-checked="${s.globalKeys !== false}" aria-label="Сочетания клавиш везде" data-action="toggle-globalkeys"><span></span></button></div>
@@ -2609,6 +2637,35 @@ async function handleAction(el, e) {
     case 'update-page':
       if (state.update.info && state.update.info.url) api.openExternal(state.update.info.url);
       break;
+    case 'update-hot': {
+      const pkg = state.update.info && state.update.info.hot;
+      if (!pkg || state.update.hotBusy) break;
+      state.update.hotBusy = true;
+      state.update.error = null;
+      renderSettings();
+      try {
+        await api.updates.hot(pkg);
+        state.update.hotReady = true;
+      } catch (err) {
+        state.update.error = err.message;
+      }
+      state.update.hotBusy = false;
+      if (state.route === 'settings') renderSettings();
+      break;
+    }
+    case 'update-relaunch':
+    case 'update-reset-hot': {
+      // приложение перезапустится: запоминаем трек, место и то, что музыка играла
+      saveSession(true);
+      try {
+        if (player.playing) localStorage.setItem('nyao.resume', '1');
+      } catch {
+        // не запомнилось — просто не продолжим сами
+      }
+      if (a === 'update-relaunch') await api.updates.relaunch();
+      else await api.updates.resetHot();
+      break;
+    }
     case 'update-install': {
       const asset = state.update.info && state.update.info.asset;
       if (!asset) break;
@@ -2616,7 +2673,7 @@ async function handleAction(el, e) {
       renderSettings();
       try {
         await api.updates.download(asset);
-        toast(IS_MAC ? 'Установщик открыт: перетащи Nyao Music в «Программы»' : 'Установщик запущен — после установки приложение перезапустится');
+        toast(ON_MAC ? 'Установщик открыт: перетащи Nyao Music в «Программы»' : 'Установщик запущен — после установки приложение перезапустится');
       } catch (err) {
         state.update.error = err.message;
       }
@@ -2656,6 +2713,18 @@ async function handleAction(el, e) {
     case 'set-layout':
       await setLayout(el.dataset.v);
       break;
+    case 'set-theme': {
+      if ((el.dataset.v === 'glass') === IS_MAC || !api.theme) break;
+      // окно перезагрузится: запоминаем трек, место и то, что музыка играла
+      saveSession(true);
+      try {
+        if (player.playing) localStorage.setItem('nyao.resume', '1');
+      } catch {
+        // не запомнилось — просто не продолжим сами
+      }
+      await api.theme.set(el.dataset.v);
+      break;
+    }
     case 'set-accent':
       state.settings = await api.settings.set({ accent: el.dataset.v });
       refreshAccent();
@@ -3061,6 +3130,8 @@ const fullscreen = new FullScreen({
   source: () => $('#pb-cover'), // обложка в плашке плеера: из неё разворачивается полный экран и в неё сворачивается
   autoHide: () => !!(state.settings && state.settings.fsAutoHide),
   like: () => player.toggleLike(),
+  toast: (m, err) => toast(m, err),
+  trackLink: (t) => trackLink(t),
   icons: {
     play: ICONS.playBig, pause: ICONS.pauseBig, heart: ICONS.heart, heartOn: ICONS.heartOn,
     prev: '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>',
@@ -3500,6 +3571,7 @@ function openMixBuilder() {
   }
   api.version().then((v) => {
     state.version = v.label;
+    state.versionInfo = v;
     if (state.route === 'settings') renderSettings();
   }).catch(() => {});
   if (api.onOutdated) api.onOutdated((min) => showOutdated(min));
@@ -3524,9 +3596,16 @@ function openMixBuilder() {
   try {
     const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
     if (saved) player.restore(saved);
+    // окно перезагрузили (смена оформления), а музыка играла — продолжаем
+    if (localStorage.getItem('nyao.resume') === '1') {
+      localStorage.removeItem('nyao.resume');
+      if (saved && !player.playing) player.toggle();
+    }
   } catch {
     // нет сохранённого — ничего страшного
   }
+  // интерфейс поднялся — по этому знаку горячее обновление считается рабочим (main.js, watchHotStart)
+  window.__nyaoReady = true;
   // обновился с версии, где вида ещё не было: один раз предлагаем выбрать
   if (state.settings.onboarded && !state.settings.layout) askLayout();
   if (!state.settings.onboarded) {

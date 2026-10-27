@@ -168,7 +168,9 @@ export const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS lyrics_tracks_isrc ON lyrics_tracks (isrc)`,
   // жалобы: скрыл ли трек сам сервер и с какого адреса (хэш) — чтобы ограничить автоскрытие
   `ALTER TABLE lyrics_reports ADD COLUMN IF NOT EXISTS auto_hidden BOOLEAN NOT NULL DEFAULT false`,
-  `ALTER TABLE lyrics_reports ADD COLUMN IF NOT EXISTS ip_hash TEXT NOT NULL DEFAULT ''`
+  `ALTER TABLE lyrics_reports ADD COLUMN IF NOT EXISTS ip_hash TEXT NOT NULL DEFAULT ''`,
+  // пословное время (Enhanced LRC: «[00:12.30] <00:12.30>слово <00:12.80>слово <00:13.40>»), строки — как в synced
+  `ALTER TABLE lyrics_versions ADD COLUMN IF NOT EXISTS words TEXT NOT NULL DEFAULT ''`
 ];
 
 export async function migrate(pool) {

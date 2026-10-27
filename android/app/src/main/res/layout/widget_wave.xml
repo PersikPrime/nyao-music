@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Виджет «Моя волна» 2×2. Цвета, формы и что видно — задаёт NyaoWidget по выбранному стилю -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/w_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitXY"
+        android:src="@drawable/w_bg_r28"
+        android:tint="#FF2A2540" />
+
+    <ImageView
+        android:id="@+id/w_decor"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginStart="-30dp"
+        android:layout_marginTop="30dp"
+        android:layout_marginEnd="-30dp"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_w_wave"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="16dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <TextView
+        android:id="@+id/w_wave_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="@font/unbounded"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:textColor="#FFFFFFFF"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:layout_weight="1"
+        android:letterSpacing="-0.02"
+        android:text="Моя\nволна" />
+            <ImageView
+        android:id="@+id/w_wave_icon"
+        android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_w_wave"
+        android:visibility="gone" />
+            <ImageView
+                android:id="@+id/w_dot"
+                android:layout_width="10dp"
+                android:layout_height="10dp"
+                android:layout_marginTop="4dp"
+                android:contentDescription="@null"
+                android:src="@drawable/w_dot"
+                android:visibility="gone" />
+        </LinearLayout>
+        <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <TextView
+        android:id="@+id/w_wave_sub"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="@font/onest"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textColor="#FFFFFFFF"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:layout_weight="1"
+        android:layout_marginEnd="8dp" />
+            <FrameLayout
+        android:id="@+id/w_play_box"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:contentDescription="Играть">
+        <ImageView
+        android:id="@+id/w_play_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:src="@drawable/w_cookie"
+        android:tint="#FFCBB8FF" />
+        <ImageView
+        android:id="@+id/w_play"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:padding="18dp"
+        android:src="@drawable/ic_w_pause"
+        android:tint="#FF21005D" />
+    </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>
