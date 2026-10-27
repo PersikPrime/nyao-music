@@ -104,15 +104,21 @@ export class ReleaseMirror {
     const tagDir = path.join(this.dir, tag);
     fs.mkdirSync(tagDir, { recursive: true });
     const target = path.join(tagDir, a.name);
-    if (fs.existsSync(target) && fs.statSync(target).size === a.size) {
+    // файл перезалили в тот же релиз (повторная сборка) — у него новый id; одного размера мало:
+    // подпись пакета всегда 89 байт, и старая подпись осталась бы рядом с новым пакетом
+    const stamp = `${target}.asset`;
+    const stampOk = () => !a.id || (fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8') === String(a.id));
+    if (fs.existsSync(target) && fs.statSync(target).size === a.size && stampOk()) {
       this.ready.add(key);
       return;
     }
+    this.ready.delete(key);
     const dl = await this.fetch(a.browser_download_url, { headers: { 'User-Agent': 'NyaoMusic-Server' }, redirect: 'follow' });
     if (!dl.ok || !dl.body) throw new Error(`скачивание ${a.name}: ${dl.status}`);
     const tmp = target + '.part';
     await pipeline(Readable.fromWeb(dl.body), fs.createWriteStream(tmp));
     fs.renameSync(tmp, target);
+    if (a.id) fs.writeFileSync(stamp, String(a.id));
     this.ready.add(key);
     this.log(`[mirror] ${key} (${Math.round(a.size / 1e6)} МБ)`);
   }
