@@ -80,6 +80,8 @@ jobs:
             echo "LYRICS_DOMAIN=$LYRICS_DOMAIN"
             echo "LYRICS_API_DOMAIN=$LYRICS_API_DOMAIN"
             echo "LYRICS_ADMINS=${{ vars.NYAO_LYRICS_ADMINS }}"
+            # разработчики: Telegram ID через запятую — секрет или переменная NYAO_DEV_IDS (Settings → Secrets and variables → Actions)
+            echo "DEV_IDS=${{ secrets.NYAO_DEV_IDS || vars.NYAO_DEV_IDS }}"
             echo "ANDROID_CERT_SHA256=$CERT"
             echo "TG_CLIENT_ID=$TG_CLIENT_ID"
             echo "TG_CLIENT_SECRET=$(q "$TG_SECRET")"

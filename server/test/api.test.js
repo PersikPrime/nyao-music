@@ -7,7 +7,7 @@ import { migrate } from '../src/db.js';
 import { TelegramOIDC } from '../src/telegram.js';
 import { createApp } from '../src/app.js';
 
-async function setup() {
+async function setup(extra = {}) {
   const mem = newDb();
   const { Pool } = mem.adapters.createPg();
   const pool = new Pool();
@@ -24,7 +24,7 @@ async function setup() {
   };
   const tg = new TelegramOIDC({ clientId: '8853157969', clientSecret: 'sec', redirectUri: 'https://api.test/auth/telegram/callback', fetch: fakeFetch, keys: createLocalJWKSet({ keys: [jwk] }) });
   const mirror = { latest: () => ({ tag_name: 'v0.4.1', assets: [] }), file: () => null };
-  const server = http.createServer(createApp({ db: pool, tg, mirror, log: () => {} }));
+  const server = http.createServer(createApp({ db: pool, tg, mirror, log: () => {}, ...extra }));
   await new Promise((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, path, { body, token } = {}) => {
@@ -160,4 +160,17 @@ test('status: по умолчанию всё работает, сбои филь
   assert.equal(on.maintenance.title, 'Скоро вернёмся');
   assert.match(on.maintenance.text, /техобслуживании/);
   assert.deepEqual(on.outages, ['sc', 'vk']);
+});
+
+test('разработчик: флаг dev только у Telegram ID из списка', async () => {
+  for (const [ids, dev] of [[['777'], true], [['123'], undefined]]) {
+    const { server, call } = await setup({ devIds: ids });
+    try {
+      const a = await login(call, 'ПК');
+      assert.equal(a.user.dev, dev);
+      assert.equal((await call('GET', '/me', { token: a.token })).json.user.dev, dev);
+    } finally {
+      server.close();
+    }
+  }
 });

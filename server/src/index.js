@@ -21,6 +21,8 @@ const ANDROID_CERTS = String(env.ANDROID_CERT_SHA256 || '').split(',').map((h) =
 const hosts = (v, d) => String(v || d).split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
 const LYRICS_HOSTS = hosts(env.LYRICS_HOSTS, 'lyrics.withnyao.app');
 const LYRICS_API_HOSTS = hosts(env.LYRICS_API_HOSTS, 'api.corrode5-15.withnyao.app');
+// Telegram ID разработчиков: раздел «Разработчик» в приложениях
+const DEV_IDS = String(env.DEV_IDS || '').split(',').map((x) => x.trim()).filter((x) => /^\d{3,20}$/.test(x));
 const LYRICS_ADMINS = String(env.LYRICS_ADMINS || '').split(',').map((x) => x.trim()).filter((x) => /^\d{3,20}$/.test(x));
 
 const pool = createPool(env.DATABASE_URL);
@@ -51,7 +53,7 @@ const status = new StatusFile(env.STATUS_FILE || '/data/status/status.json');
 const fcm = parseServiceAccount(env.FCM_SERVICE_ACCOUNT);
 const push = fcm ? new FcmPush(fcm) : null;
 console.log(push ? `[push] Firebase: ${fcm.project_id}` : '[push] FCM_SERVICE_ACCOUNT не задан — push выключены');
-const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS, yaCatalog: new YaCatalog({ log: console.log }) }));
+const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS, devIds: DEV_IDS, yaCatalog: new YaCatalog({ log: console.log }) }));
 server.listen(Number(env.PORT) || 8080, () => console.log(`[nyao] сервер слушает :${server.address().port}`));
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

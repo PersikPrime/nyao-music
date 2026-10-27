@@ -99,7 +99,7 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [], yaCatalog = null }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [], devIds = [], yaCatalog = null }) {
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
   setInterval(() => {
     const now = Date.now();
@@ -125,8 +125,10 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     return { sid: Number(r.sid), uid: Number(r.id), user: publicUser(r), device: r.device, platform: r.platform };
   }
 
+  // разработчики (Telegram ID из NYAO_DEV_IDS): у них в приложении есть раздел «Разработчик»
+  const devSet = new Set(devIds.map(String));
   function publicUser(r) {
-    return { id: String(r.id), tgId: String(r.tg_id), name: r.name, username: r.username || null, picture: r.picture || null };
+    return { id: String(r.id), tgId: String(r.tg_id), name: r.name, username: r.username || null, picture: r.picture || null, ...(devSet.has(String(r.tg_id)) ? { dev: true } : {}) };
   }
 
   async function finishLogin(state, profile) {
