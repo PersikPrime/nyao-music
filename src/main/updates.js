@@ -15,7 +15,11 @@ export function pickHotAsset(assets, compat) {
   const list = assets || [];
   const nui = list.find((a) => a.name.endsWith(`-app-${compat}.nui`));
   const sig = nui && list.find((a) => a.name === `${nui.name}.sig`);
-  return nui && sig ? { name: nui.name, url: nui.browser_download_url, size: nui.size, sigUrl: sig.browser_download_url } : null;
+  if (!nui || !sig) return null;
+  const out = { name: nui.name, url: nui.browser_download_url, size: nui.size, sigUrl: sig.browser_download_url };
+  // зеркало отдаёт и адрес на GitHub — запасной путь, если на зеркале файлы разошлись
+  if (nui.github_url && sig.github_url) Object.assign(out, { githubUrl: nui.github_url, githubSigUrl: sig.github_url });
+  return out;
 }
 
 /** Подходящий файл релиза для текущей системы */

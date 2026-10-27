@@ -571,8 +571,17 @@ function registerIpc() {
     const hot = globalThis.__nyaoHot;
     if (!hot || !hot.store.enabled) throw new Error('В этой сборке быстрые обновления выключены');
     if (!pkg || ![pkg.url, pkg.sigUrl].every((u) => UPDATE_URL.test(String(u || '')))) throw new Error('Нет пакета обновления');
-    const { buf, sig } = await fetchHot(pkg, globalThis.fetch.bind(globalThis));
-    return hot.store.install(buf, sig);
+    const f = globalThis.fetch.bind(globalThis);
+    const { buf, sig } = await fetchHot(pkg, f);
+    try {
+      return hot.store.install(buf, sig);
+    } catch (e) {
+      // на зеркале пакет и подпись могли разойтись (файл перезалили) — берём оба с GitHub
+      const gh = pkg.githubUrl && pkg.githubSigUrl && /подпись/.test(e.message) && [pkg.githubUrl, pkg.githubSigUrl].every((u) => UPDATE_URL.test(u));
+      if (!gh) throw e;
+      const again = await fetchHot({ url: pkg.githubUrl, sigUrl: pkg.githubSigUrl }, f);
+      return hot.store.install(again.buf, again.sig);
+    }
   });
   handle('update:relaunch', () => {
     quitting = true;
