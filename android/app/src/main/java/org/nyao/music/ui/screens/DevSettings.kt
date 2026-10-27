@@ -215,6 +215,19 @@ fun DevSettings() {
             )
         }
 
+        Group("Приколы") {
+            Text("Ломают вид, но приложение работает. Только до перезапуска; «Сбросить приколы» — всё как было.", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                org.nyao.music.ui.Pranks.LIST.forEach { (id, title, _) ->
+                    androidx.compose.material3.FilterChip(
+                        selected = org.nyao.music.ui.Pranks.has(id),
+                        onClick = { org.nyao.music.ui.Pranks.toggle(id) },
+                        label = { Text(title) },
+                    )
+                }
+            }
+        }
+
         Group("Флаги") {
             Text("Экспериментальных флагов пока нет — новые фичи сначала будут появляться здесь.", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
         }

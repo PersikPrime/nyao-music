@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
         handleLink(intent)
         setContent {
             org.nyao.music.ui.theme.AccentSync()
-            NyaoTheme { NyaoRoot() }
+            NyaoTheme { org.nyao.music.ui.PrankFrame { NyaoRoot() } }
         }
     }
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Прикол «Котики вместо обложек»: свой кот, нарисованный для Nyao -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <path android:fillColor="#FFFFD9A8" android:pathData="M0,0h100v100h-100z" />
+    <path android:fillColor="#FFE8925A" android:pathData="M22,40L28,14L44,32ZM78,40L72,14L56,32Z" />
+    <path android:fillColor="#FFE8925A" android:pathData="M16,58a34,28 0,1 0,68 0a34,28 0,1 0,-68 0Z" />
+    <path android:fillColor="#FF2B1B12" android:pathData="M33,54a5,5 0,1 0,10 0a5,5 0,1 0,-10 0ZM57,54a5,5 0,1 0,10 0a5,5 0,1 0,-10 0Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M37.9,52.5a1.6,1.6 0,1 0,3.2 0a1.6,1.6 0,1 0,-3.2 0ZM61.9,52.5a1.6,1.6 0,1 0,3.2 0a1.6,1.6 0,1 0,-3.2 0Z" />
+    <path android:fillColor="#FFC2185B" android:pathData="M46,63L54,63L50,67Z" />
+    <path android:strokeColor="#FF2B1B12" android:strokeWidth="2" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M50,67Q46,72 41,70M50,67Q54,72 59,70" />
+    <path android:strokeColor="#FF2B1B12" android:strokeWidth="1.6" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M20,62L34,64M20,70L34,68M80,62L66,64M80,70L66,68" />
+</vector>

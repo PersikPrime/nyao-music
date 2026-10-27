@@ -6,6 +6,7 @@ import { Onboarding } from './onboarding.js';
 import { layoutChoiceHtml } from './layouts.js';
 import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain } from './eq.js';
 import { FullScreen } from './fullscreen.js';
+import { PRANKS, createPranks, fakeWords } from './pranks.js';
 import { ACCENTS, paletteFor, applyAccent } from './accent.js';
 import { releaseAgo } from './releases.js';
 import { arrangeSearch } from './search.js';
@@ -1528,6 +1529,9 @@ function devCardHtml() {
       <div class="dev-btns">${btn('dev-crash', 'Уронить окно', 'data-v="renderer"')}${btn('dev-crash', 'Уронить приложение', 'data-v="main"')}</div>`),
     group('Журналы', `<div class="dev-btns">${btn('dev-open', 'YouTube', 'data-v="yt"')}${btn('dev-open', 'VK', 'data-v="vk"')}${btn('dev-open', 'Тексты', 'data-v="lyrics"')}${btn('dev-diag', 'Скопировать диагностику')}</div>
       <div class="hint">Диагностика — версия, система, статус сервисов и настройки, без токенов.</div>`),
+    group('Приколы', `<div class="hint">Ломают вид и поведение, но приложение остаётся рабочим. Только в этом окне: перезапуск, плашка «Сбросить приколы» или Ctrl+Shift+Backspace — и всё как было.</div>
+      <div class="dev-btns">${PRANKS.map(([id, title, hint]) => `<button class="btn ${pranks.has(id) ? 'primary' : ''}" data-action="dev-prank" data-v="${id}" title="${esc(hint)}">${pranks.has(id) ? '✓ ' : ''}${esc(title)}</button>`).join('')}</div>
+      ${pranks.active().length ? '<div class="dev-btns"><button class="btn" data-action="dev-prank-reset">Сбросить все приколы</button></div>' : ''}`),
     group('Флаги', '<div class="hint">Экспериментальных флагов пока нет — новые фичи сначала будут появляться здесь.</div>')
   ].join('');
 }
@@ -2798,6 +2802,12 @@ async function handleAction(el, e) {
       RENDER[state.route]();
       break;
     }
+    case 'dev-prank':
+      pranks.toggle(el.dataset.v);
+      break;
+    case 'dev-prank-reset':
+      pranks.resetAll();
+      break;
     case 'dev-open':
       try {
         await api.dev.open(el.dataset.v);
@@ -3395,7 +3405,8 @@ const fullscreen = new FullScreen({
   player,
   api,
   isMac: IS_MAC,
-  ensureLyrics: (opts) => ensureLyrics(opts),
+  // «Караоке на всё» из приколов разработчика: слова поровну по строке
+  ensureLyrics: (opts) => ensureLyrics(opts).then((d) => (pranks.has('karaoke') ? fakeWords(d) : d)),
   source: () => $('#pb-cover'), // обложка в плашке плеера: из неё разворачивается полный экран и в неё сворачивается
   autoHide: () => !!(state.settings && state.settings.fsAutoHide),
   like: () => player.toggleLike(),
@@ -3405,6 +3416,16 @@ const fullscreen = new FullScreen({
     play: ICONS.playBig, pause: ICONS.pauseBig, heart: ICONS.heart, heartOn: ICONS.heartOn,
     prev: '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>',
     next: '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>'
+  }
+});
+// «Приколы» раздела «Разработчик»: только в памяти окна, перезапуск возвращает всё как было
+const pranks = createPranks({
+  player,
+  onChange: () => {
+    if (isSettingsRoute() && state.params && state.params.section === 'dev') renderSettings();
+  },
+  onLyrics: (id) => {
+    if (id === 'karaoke' && fullscreen.open) fullscreen.reloadLyrics();
   }
 });
 player.addEventListener('like', renderBar);
