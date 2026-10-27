@@ -51,6 +51,15 @@ class MainActivity : ComponentActivity() {
     /** Приглашение в друзья (ссылка, QR, NFC) или приглашение в комнату из уведомления */
     private fun handleLink(intent: android.content.Intent?) {
         intent ?: return
+        // виджет «Моя волна», пока музыка не играла: открыли приложение — сразу запускаем волну
+        if (intent.action == org.nyao.music.playback.NyaoWidget.ACTION_OPEN_WAVE) {
+            intent.action = null
+            lifecycleScope.launch {
+                runCatching { PlayerConnection.startWave() }
+                    .onFailure { org.nyao.music.playback.PlaybackEvents.emit(it.message ?: "Волна не запустилась") }
+            }
+            return
+        }
         var uri = intent.data
         if (uri == null && intent.action == android.nfc.NfcAdapter.ACTION_NDEF_DISCOVERED) {
             @Suppress("DEPRECATION")

@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Виджет 4×2: обложка и название сверху, прогресс и кнопки снизу. Цвета, формы и что видно — задаёт NyaoWidget по выбранному стилю -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/w_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitXY"
+        android:src="@drawable/w_bg_r28"
+        android:tint="#FF2A2540" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="18dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <ImageView
+        android:id="@+id/w_cover"
+        android:layout_width="76dp"
+        android:layout_height="76dp"
+        android:contentDescription="@null"
+        android:scaleType="centerCrop"
+        android:layout_marginEnd="14dp" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+            <TextView
+        android:id="@+id/w_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="@font/onest"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:textColor="#FFFFFFFF"
+        android:textSize="19sp"
+        android:textStyle="bold" />
+        <TextView
+        android:id="@+id/w_title_big"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="@font/unbounded"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:textColor="#FFFFFFFF"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:letterSpacing="-0.03"
+        android:lineSpacingMultiplier="0.98"
+        android:visibility="gone" />
+        <TextView
+        android:id="@+id/w_artist"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="@font/onest"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textColor="#B3FFFFFF"
+        android:textSize="14sp"
+        android:layout_marginTop="4dp" />
+            </LinearLayout>
+            <ImageView
+        android:id="@+id/w_heart"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:contentDescription="Мне нравится"
+        android:padding="8dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_w_heart"
+        android:tint="#FFF1ECFF" />
+        </LinearLayout>
+        <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <ImageView
+        android:id="@+id/w_progress"
+        android:layout_width="150dp"
+        android:layout_height="12dp"
+        android:contentDescription="@null"
+        android:scaleType="fitXY" />
+            <FrameLayout
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:layout_weight="1" />
+            <LinearLayout
+        android:id="@+id/w_controls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <ImageView
+        android:id="@+id/w_prev"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:contentDescription="Предыдущий"
+        android:padding="9dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_w_prev"
+        android:tint="#FFF1ECFF"
+        android:layout_marginEnd="4dp" />
+        <FrameLayout
+        android:id="@+id/w_play_box"
+        android:layout_width="58dp"
+        android:layout_height="58dp"
+        android:contentDescription="Играть">
+        <ImageView
+        android:id="@+id/w_play_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:src="@drawable/w_cookie"
+        android:tint="#FFCBB8FF" />
+        <ImageView
+        android:id="@+id/w_play"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:padding="18dp"
+        android:src="@drawable/ic_w_pause"
+        android:tint="#FF21005D" />
+    </FrameLayout>
+        <ImageView
+        android:id="@+id/w_next"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:contentDescription="Следующий"
+        android:padding="9dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_w_next"
+        android:tint="#FFF1ECFF"
+        android:layout_marginStart="4dp" />
+    </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

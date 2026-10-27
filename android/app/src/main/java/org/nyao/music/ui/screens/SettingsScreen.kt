@@ -114,7 +114,8 @@ fun ProfileScreen(model: AppModel) {
         }
         SettingsGroup("Оформление") {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Palette, "Тема и сетка", org.nyao.music.ui.theme.UiLook.themes.firstOrNull { it.first == s.theme }?.second) { model.go(Route.SettingsPage("theme")) }
-            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Home, "Вид главной", if (s.isWaveLayout) "Моя волна" else "Плеер", last = true) { model.go(Route.SettingsPage("view")) }
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Home, "Вид главной", if (s.isWaveLayout) "Моя волна" else "Плеер") { model.go(Route.SettingsPage("view")) }
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Widgets, "Стиль виджетов", if (s.widgetStyle == "auto") "как тема" else org.nyao.music.playback.WidgetStyle.of(s.widgetStyle, s.theme).title, last = true) { model.go(Route.SettingsPage("widgets")) }
         }
         SettingsGroup("Сервисы") {
             val list = listOf(SOURCE_YA, SOURCE_YT, org.nyao.music.data.SOURCE_SC, org.nyao.music.data.SOURCE_VK, org.nyao.music.data.SOURCE_SP)
@@ -190,6 +191,7 @@ private fun sectionTitle(section: String): String = when {
     section == "cache" -> "Офлайн и кэш"
     section == "view" -> "Вид главной"
     section == "theme" -> "Тема и сетка"
+    section == "widgets" -> "Стиль виджетов"
     section == "lastfm" -> "Last.fm"
     section == "updates" -> "Обновления"
     section == "about" -> "О приложении"
@@ -219,6 +221,7 @@ fun SettingsPageScreen(model: AppModel, section: String) {
                 section == "cache" -> StorageCard()
                 section == "view" -> ViewSettingsCard()
                 section == "theme" -> LookSettings()
+                section == "widgets" -> WidgetStyleSettings()
                 section == "lastfm" -> LastFmCard(model)
                 section == "updates" -> UpdateCard(model, showTitle = false)
                 section == "about" -> AboutCard()

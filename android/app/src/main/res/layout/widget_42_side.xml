@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Виджет 4×2: большая обложка слева, кнопки справа. Цвета, формы и что видно — задаёт NyaoWidget по выбранному стилю -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/w_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitXY"
+        android:src="@drawable/w_bg_r28"
+        android:tint="#FF2A2540" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="14dp">
+        <ImageView
+        android:id="@+id/w_cover"
+        android:layout_width="140dp"
+        android:layout_height="140dp"
+        android:contentDescription="@null"
+        android:scaleType="centerCrop"
+        android:layout_marginEnd="14dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical">
+        <TextView
+        android:id="@+id/w_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="@font/onest"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:textColor="#FFFFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+        <TextView
+        android:id="@+id/w_title_big"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="@font/unbounded"
+        android:includeFontPadding="false"
+        android:maxLines="2"
+        android:textColor="#FFFFFFFF"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:letterSpacing="-0.03"
+        android:lineSpacingMultiplier="0.98"
+        android:visibility="gone" />
+        <TextView
+        android:id="@+id/w_artist"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="@font/onest"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textColor="#B3FFFFFF"
+        android:textSize="13sp"
+        android:layout_marginTop="4dp" />
+            <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+            <ImageView
+                android:id="@+id/w_progress"
+                android:layout_width="match_parent"
+                android:layout_height="8dp"
+                android:contentDescription="@null"
+                android:scaleType="fitXY" />
+            <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+            <LinearLayout
+        android:id="@+id/w_controls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+        <ImageView
+        android:id="@+id/w_prev"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:contentDescription="Предыдущий"
+        android:padding="8dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_w_prev"
+        android:tint="#FFF1ECFF"
+        android:layout_marginEnd="6dp" />
+        <FrameLayout
+        android:id="@+id/w_play_box"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:contentDescription="Играть">
+        <ImageView
+        android:id="@+id/w_play_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:src="@drawable/w_cookie"
+        android:tint="#FFCBB8FF" />
+        <ImageView
+        android:id="@+id/w_play"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter"
+        android:padding="16dp"
+        android:src="@drawable/ic_w_pause"
+        android:tint="#FF21005D" />
+    </FrameLayout>
+        <ImageView
+        android:id="@+id/w_next"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:contentDescription="Следующий"
+        android:padding="8dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_w_next"
+        android:tint="#FFF1ECFF"
+        android:layout_marginStart="6dp" />
+    </LinearLayout>
+            <LinearLayout
+        android:id="@+id/w_pills"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+        <ImageView
+        android:id="@+id/w_pprev"
+        android:layout_width="46dp"
+        android:layout_height="50dp"
+        android:background="@drawable/w_pill_grey"
+        android:contentDescription="Предыдущий"
+        android:paddingTop="15dp"
+        android:paddingBottom="15dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_w_prev"
+        android:tint="#FFF2F2F3" />
+        <ImageView
+        android:id="@+id/w_pplay"
+        android:layout_width="58dp"
+        android:layout_height="50dp"
+        android:background="@drawable/w_pill_white"
+        android:contentDescription="Играть"
+        android:paddingTop="15dp"
+        android:paddingBottom="15dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_w_pause"
+        android:tint="#FF0B0B0C"
+        android:layout_marginStart="6dp" />
+        <ImageView
+        android:id="@+id/w_pnext"
+        android:layout_width="46dp"
+        android:layout_height="50dp"
+        android:background="@drawable/w_pill_grey"
+        android:contentDescription="Следующий"
+        android:paddingTop="15dp"
+        android:paddingBottom="15dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_w_next"
+        android:tint="#FFF2F2F3"
+        android:layout_marginStart="6dp" />
+    </LinearLayout>
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>
