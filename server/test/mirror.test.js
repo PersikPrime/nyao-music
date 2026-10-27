@@ -52,3 +52,18 @@ test('зеркало: каналы dev/nightly — маленькие файлы
   m.release = { ...m.release, tag_name: 'v0.8.90', assets: [] };
   assert.equal(m.latest('dev').tag_name, 'v0.8.90');
 });
+
+test('зеркало: файл перезалили с тем же размером — качается заново', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-'));
+  let body = 'AAAA';
+  let id = 1;
+  const rel = () => ({ tag_name: 'v0.8.90', assets: [{ id, name: 'NyaoMusic-0.8.90-app-x.nui.sig', size: 4, browser_download_url: 'https://gh/s' }] });
+  const fetch = async (url) => (url.includes('api.github.com') ? new Response(JSON.stringify(url.includes('releases?') ? [] : rel())) : new Response(body));
+  const m = new ReleaseMirror({ repo: 'r', dir, publicUrl: 'https://api.test', fetch, log: () => {} });
+  await m.sync();
+  assert.equal(fs.readFileSync(m.file('v0.8.90', 'NyaoMusic-0.8.90-app-x.nui.sig'), 'utf8'), 'AAAA');
+  body = 'BBBB';
+  id = 2;
+  await m.sync();
+  assert.equal(fs.readFileSync(m.file('v0.8.90', 'NyaoMusic-0.8.90-app-x.nui.sig'), 'utf8'), 'BBBB');
+});
