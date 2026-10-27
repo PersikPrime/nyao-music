@@ -1122,7 +1122,10 @@ function registerIpc() {
     return Promise.all(LYRICS_PROVIDERS.map(async (id) => {
       const t0 = Date.now();
       try {
-        const r = await findLyricsChain(track, { ...deps, order: [{ id, on: true }], wordsFirst: false, log: () => {} });
+        // только этот источник: остальные явно выключены (иначе недостающие добавляются включёнными)
+        if (id === 'ytm' && track.source !== 'yt') return { id, ms: 0, found: false, skipped: 'только для треков YouTube Music' };
+        if (id === 'ya' && !deps.ya) return { id, ms: 0, found: false, skipped: 'нет входа в Яндекс' };
+        const r = await findLyricsChain(track, { ...deps, order: LYRICS_PROVIDERS.map((p) => ({ id: p, on: p === id })), wordsFirst: false, log: () => {} });
         return { id, ms: Date.now() - t0, found: !!(r && r.lines && r.lines.length), synced: !!(r && r.synced), words: !!(r && r.words), lines: r && r.lines ? r.lines.length : 0, source: r && r.source, diag: r && r.diag ? r.diag.join(' · ') : '' };
       } catch (e) {
         return { id, ms: Date.now() - t0, found: false, error: e.message };
