@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
-  "main": "src/main/main.js",
+  "main": "src/boot.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",

@@ -4,10 +4,18 @@ import path from 'node:path';
 
 export const REPO = 'PersikPrime/nyao-music';
 
-/** v0.3.19 → { name: '0.3', build: 19 } */
+/** v0.3.19 → { name: '0.3', build: 19 }; v0.8.89-dev → { name: '0.8', build: 89, channel: 'dev' } */
 export function parseTag(tag) {
-  const m = /^v?(\d+\.\d+)\.(\d+)$/.exec(String(tag || '').trim());
-  return m ? { name: m[1], build: Number(m[2]) } : null;
+  const m = /^v?(\d+\.\d+)\.(\d+)(?:-([a-z]+))?$/.exec(String(tag || '').trim());
+  return m ? { name: m[1], build: Number(m[2]), ...(m[3] ? { channel: m[3] } : {}) } : null;
+}
+
+/** Пакет горячего обновления в релизе: NyaoMusic-0.8.89-app-<compat>.nui и подпись к нему */
+export function pickHotAsset(assets, compat) {
+  const list = assets || [];
+  const nui = list.find((a) => a.name.endsWith(`-app-${compat}.nui`));
+  const sig = nui && list.find((a) => a.name === `${nui.name}.sig`);
+  return nui && sig ? { name: nui.name, url: nui.browser_download_url, size: nui.size, sigUrl: sig.browser_download_url } : null;
 }
 
 /** Подходящий файл релиза для текущей системы */
@@ -31,8 +39,10 @@ export const MIRROR = 'https://api.music.withnyao.app/updates/latest';
 const LEGACY_MIRROR = 'https://api.nmusic.bixtl.cc/updates/latest';
 
 /** Сначала зеркало на сервере Nyao (быстрее из РФ; новый адрес, потом прежний), если оно молчит — GitHub */
-async function latestRelease(fetchFn) {
-  for (const url of [MIRROR, LEGACY_MIRROR]) {
+async function latestRelease(fetchFn, channel = null) {
+  const q = channel ? `?channel=${encodeURIComponent(channel)}` : '';
+  for (const base of [MIRROR, LEGACY_MIRROR]) {
+    const url = base + q;
     try {
       const res = await fetchFn(url, { headers: { 'User-Agent': 'NyaoMusic' }, signal: AbortSignal.timeout(6000) });
       if (res.ok) {
@@ -43,6 +53,18 @@ async function latestRelease(fetchFn) {
       // сервер недоступен — не беда
     }
   }
+  if (channel) {
+    // GitHub напрямую: последний пререлиз канала из списка
+    const res = await fetchFn(`https://api.github.com/repos/${REPO}/releases?per_page=30`, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'NyaoMusic' }
+    });
+    if (res.ok) {
+      const list = await res.json();
+      const own = (Array.isArray(list) ? list : []).filter((r) => !r.draft && parseTag(r.tag_name)?.channel === channel);
+      own.sort((a, b) => parseTag(b.tag_name).build - parseTag(a.tag_name).build);
+      if (own[0]) return own[0];
+    }
+  }
   const res = await fetchFn(`https://api.github.com/repos/${REPO}/releases/latest`, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'NyaoMusic' }
   });
@@ -51,8 +73,12 @@ async function latestRelease(fetchFn) {
   return res.json();
 }
 
-export async function checkUpdate(current, fetchFn = globalThis.fetch) {
-  const rel = await latestRelease(fetchFn);
+/**
+ * current — { name, build, channel? }; channel берётся из version.json (dev/nightly смотрят свои пререлизы).
+ * compat — совместимость установленного приложения: если в релизе есть пакет с тем же compat, можно обновиться горячо.
+ */
+export async function checkUpdate(current, fetchFn = globalThis.fetch, { compat = null } = {}) {
+  const rel = await latestRelease(fetchFn, current.channel || null);
   if (!rel) return { available: false, current, note: 'Релизов пока нет' };
   const latest = parseTag(rel.tag_name);
   const asset = pickAsset(rel.assets, process.platform, process.arch, rel.tag_name);
@@ -66,8 +92,20 @@ export async function checkUpdate(current, fetchFn = globalThis.fetch) {
     minBuild,
     notes: rel.body || '',
     url: rel.html_url,
-    asset: asset ? { name: asset.name, url: asset.browser_download_url, size: asset.size } : null
+    asset: asset ? { name: asset.name, url: asset.browser_download_url, size: asset.size } : null,
+    hot: compat ? pickHotAsset(rel.assets, compat) : null
   };
+}
+
+/** Пакет горячего обновления целиком в память (он маленький, ~1 МБ) */
+export async function fetchHot(hot, fetchFn = globalThis.fetch) {
+  const get = async (url) => {
+    const res = await fetchFn(url, { headers: { 'User-Agent': 'NyaoMusic' }, redirect: 'follow' });
+    if (!res.ok) throw new Error(`Не удалось скачать: HTTP ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  };
+  const [buf, sig] = await Promise.all([get(hot.url), get(hot.sigUrl)]);
+  return { buf, sig: sig.toString('utf8') };
 }
 
 /** Качает установщик в «Загрузки», сообщая прогресс 0..1 */

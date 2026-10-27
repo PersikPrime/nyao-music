@@ -20,3 +20,32 @@ test('зеркало качает файлы релиза и подменяет 
   assert.ok(!fs.existsSync(path.join(dir, 'v0.3.1')), 'старый релиз удалён');
   assert.equal(m.file('..', 'x'), null);
 });
+
+test('зеркало: каналы dev/nightly — маленькие файлы к себе, установщики со ссылкой на GitHub', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-'));
+  const stable = { tag_name: 'v0.8.84', assets: [{ name: 'NyaoMusic-0.8.84-win.exe', size: 3, browser_download_url: 'https://gh/s.exe' }] };
+  const list = [
+    { tag_name: 'v0.8.88-dev', prerelease: true, assets: [{ name: 'NyaoMusic-0.8.88-win.exe', size: 20e6, browser_download_url: 'https://gh/old.exe' }] },
+    { tag_name: 'v0.8.89-dev', prerelease: true, assets: [
+      { name: 'NyaoMusic-0.8.89-win.exe', size: 20e6, browser_download_url: 'https://gh/d.exe' },
+      { name: 'NyaoMusic-0.8.89-app-abc.nui', size: 4, browser_download_url: 'https://gh/d.nui' }
+    ] },
+    stable
+  ];
+  const got = [];
+  const fetch = async (url) => {
+    got.push(url);
+    if (url.endsWith('/releases/latest')) return new Response(JSON.stringify(stable));
+    if (url.includes('/releases?')) return new Response(JSON.stringify(list));
+    return new Response(url.endsWith('.nui') ? 'nnnn' : 'abc');
+  };
+  const m = new ReleaseMirror({ repo: 'r', dir, publicUrl: 'https://api.test', fetch, log: () => {} });
+  await m.sync();
+  assert.equal(m.latest().tag_name, 'v0.8.84');
+  const dev = m.latest('dev');
+  assert.equal(dev.tag_name, 'v0.8.89-dev');
+  assert.equal(dev.assets.find((a) => a.name.endsWith('.nui')).browser_download_url, 'https://api.test/dl/v0.8.89-dev/NyaoMusic-0.8.89-app-abc.nui');
+  assert.equal(dev.assets.find((a) => a.name.endsWith('.exe')).browser_download_url, 'https://gh/d.exe');
+  assert.ok(!got.includes('https://gh/d.exe'), 'большой установщик канала не качается');
+  assert.equal(m.latest('nightly').tag_name, 'v0.8.84', 'нет канала — обычный релиз');
+});

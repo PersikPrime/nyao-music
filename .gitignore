@@ -11,3 +11,4 @@ server/.env
 
 # ключи Last.fm кладёт сборка из секретов GitHub
 src/main/lastfm-keys.json
+src/main/compat.json
