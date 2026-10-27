@@ -377,7 +377,7 @@ internal object WidgetViews {
                 if (cover) v.coverInto(ctx, R.id.w_cover, s.cover, 228, if (st == WidgetStyle.GLASS_A) 0.24f else 0.29f, false)
                 v.titles(st, p, s)
                 v.heart(p, s, st == WidgetStyle.EXP_A)
-                v.progressInto(st, p, s, 150, 12)
+                v.progressInto(st, p, s, (wDp - 36 - 150 - 14).coerceIn(40, 200), 12)
                 v.tint(R.id.w_prev, p.icon)
                 v.tint(R.id.w_next, p.icon)
                 v.playButton(R.id.w_play_box, R.id.w_play_bg, R.id.w_play, p, s)
@@ -405,7 +405,7 @@ internal object WidgetViews {
             R.layout.widget_42_side -> {
                 v.coverInto(ctx, R.id.w_cover, s.cover, 360, if (gray) 0.11f else 0.14f, gray)
                 v.titles(st, p, s)
-                v.progressInto(st, p, s, (wDp - 182).coerceAtLeast(80), 8)
+                v.progressInto(st, p, s, (wDp - 162).coerceAtLeast(80), 8)
                 val pills = st == WidgetStyle.MONO_B
                 v.show(R.id.w_controls, !pills)
                 v.show(R.id.w_pills, pills)
@@ -504,8 +504,8 @@ internal object WidgetViews {
                     v.setTextColor(R.id.w_line_cur, dim)
                     v.show(R.id.w_line_next, false)
                 }
-                v.progressInto(st, p, s, 150, 12)
                 val pills = st == WidgetStyle.MONO_B
+                v.progressInto(st, p, s, (wDp - 36 - (if (pills) 176 else 148) - 14).coerceIn(40, 200), 12)
                 v.show(R.id.w_controls, !pills)
                 v.show(R.id.w_pills, pills)
                 v.tint(R.id.w_prev, p.icon)

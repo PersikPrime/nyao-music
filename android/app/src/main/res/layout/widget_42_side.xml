@@ -22,8 +22,8 @@
         android:padding="14dp">
         <ImageView
         android:id="@+id/w_cover"
-        android:layout_width="140dp"
-        android:layout_height="140dp"
+        android:layout_width="120dp"
+        android:layout_height="120dp"
         android:contentDescription="@null"
         android:scaleType="centerCrop"
         android:layout_marginEnd="14dp" />
@@ -144,7 +144,7 @@
         android:visibility="gone">
         <ImageView
         android:id="@+id/w_pprev"
-        android:layout_width="46dp"
+        android:layout_width="44dp"
         android:layout_height="50dp"
         android:background="@drawable/w_pill_grey"
         android:contentDescription="Предыдущий"
@@ -155,7 +155,7 @@
         android:tint="#FFF2F2F3" />
         <ImageView
         android:id="@+id/w_pplay"
-        android:layout_width="58dp"
+        android:layout_width="56dp"
         android:layout_height="50dp"
         android:background="@drawable/w_pill_white"
         android:contentDescription="Играть"
@@ -167,7 +167,7 @@
         android:layout_marginStart="6dp" />
         <ImageView
         android:id="@+id/w_pnext"
-        android:layout_width="46dp"
+        android:layout_width="44dp"
         android:layout_height="50dp"
         android:background="@drawable/w_pill_grey"
         android:contentDescription="Следующий"

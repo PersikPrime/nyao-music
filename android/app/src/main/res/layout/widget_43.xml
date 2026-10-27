@@ -136,14 +136,12 @@
             android:orientation="horizontal">
             <ImageView
         android:id="@+id/w_progress"
-        android:layout_width="150dp"
+        android:layout_width="0dp"
         android:layout_height="12dp"
+        android:layout_marginEnd="14dp"
+        android:layout_weight="1"
         android:contentDescription="@null"
         android:scaleType="fitXY" />
-            <FrameLayout
-        android:layout_width="0dp"
-        android:layout_height="1dp"
-        android:layout_weight="1" />
             <LinearLayout
         android:id="@+id/w_controls"
         android:layout_width="wrap_content"
