@@ -38,6 +38,8 @@ data class Settings(
     val grid: String = "carousels",
     val covers: String = "rounded",
     val navLabels: Boolean = true,
+    /** Стиль виджетов на рабочем столе: auto (по теме) | expA | expB | monoA | monoB | glassA | glassB */
+    val widgetStyle: String = "auto",
 ) {
     val isWaveLayout: Boolean get() = layout == "wave"
 }
@@ -74,6 +76,7 @@ class Prefs(context: Context) {
         grid = sp.getString("lookGrid", "carousels") ?: "carousels",
         covers = sp.getString("lookCovers", "rounded") ?: "rounded",
         navLabels = sp.getBoolean("lookNavLabels", true),
+        widgetStyle = sp.getString("widgetStyle", "auto") ?: "auto",
     )
 
     /** Вызывается, когда меняется то, что синхронизируется через аккаунт Nyao: "wave" или "prefs" */
@@ -116,6 +119,7 @@ class Prefs(context: Context) {
     fun setLookButtons(v: String) = update { putString("lookButtons", v) }
     fun setLookGrid(v: String) = update { putString("lookGrid", v) }
     fun setLookCovers(v: String) = update { putString("lookCovers", v) }
+    fun setWidgetStyle(v: String) = update { putString("widgetStyle", v) }
     fun setLookNavLabels(v: Boolean) = update { putBoolean("lookNavLabels", v) }
     fun setWaveTab(v: Boolean) = update { putBoolean("waveTab", v) }.also { onSyncChange?.invoke("prefs") }
 

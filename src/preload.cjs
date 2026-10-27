@@ -70,6 +70,9 @@ contextBridge.exposeInMainWorld('nyao', {
   updates: {
     check: () => call('update:check'),
     download: (asset) => call('update:download', asset),
+    hot: (pkg) => call('update:hot', pkg),
+    relaunch: () => call('update:relaunch'),
+    resetHot: () => call('update:resetHot'),
     onProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p))
   },
   theme: {

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Nyao Music</string>
-    <string name="widget_description">Что играет и кнопки управления</string>
+    <string name="widget_description">Что играет, кнопки и строка текста песни (4×3)</string>
+    <string name="widget_wave_description">«Моя волна» одним касанием</string>
 </resources>

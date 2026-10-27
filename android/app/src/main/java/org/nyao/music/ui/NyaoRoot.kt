@@ -206,7 +206,9 @@ fun NyaoRoot() {
             OnboardingScreen(model)
         } else {
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                if (maxWidth >= 600.dp) WideLayout(model, showPane = maxWidth >= 840.dp) else PhoneLayout(model)
+                // раскрытый складной (и планшет стоя) — тоже две панели: высоты хватает, чтобы плеер справа не тесниться;
+                // телефон боком (600+ в ширину, но низкий) — без панели плеера
+                if (maxWidth >= 600.dp) WideLayout(model, width = maxWidth, showPane = maxWidth >= 840.dp || maxHeight >= 600.dp) else PhoneLayout(model)
             }
         }
 
@@ -698,12 +700,18 @@ private fun MiniPlayer(onOpen: () -> Unit, modifier: Modifier = Modifier) {
 // ---------- Планшет / раскрытый Fold: рейка слева, плеер справа ----------
 
 @Composable
-private fun WideLayout(model: AppModel, showPane: Boolean) {
+private fun WideLayout(model: AppModel, width: androidx.compose.ui.unit.Dp, showPane: Boolean) {
     val current by PlayerConnection.current.collectAsState()
+    // складной раскрыт (600–840 dp): рейка поуже, плеер справа — почти половина экрана, как в макете AndXFold
+    val compact = width < 840.dp
+    val rail = if (compact) 80.dp else 96.dp
+    val paneOn = showPane && current != null
+    val pane = if (compact) ((width - rail) * 0.47f).coerceIn(300.dp, 400.dp) else 400.dp
+    val contentWide = width - rail - (if (paneOn) pane else 0.dp) >= 480.dp
     Row(Modifier.fillMaxSize()) {
         // Рейка из макета складного: таблетка-индикатор над подписью
         Column(
-            Modifier.width(96.dp).fillMaxHeight().statusBarsPadding().padding(vertical = 24.dp),
+            Modifier.width(rail).fillMaxHeight().statusBarsPadding().padding(vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -721,16 +729,16 @@ private fun WideLayout(model: AppModel, showPane: Boolean) {
             }
         }
         Box(Modifier.weight(1f).fillMaxHeight().padding(vertical = 12.dp).clip(RoundedCornerShape(32.dp)).background(NyaoColors.S1)) {
-            Content(model, wide = true)
-            if (!showPane && current != null) {
+            Content(model, wide = contentWide)
+            if (!paneOn && current != null) {
                 MiniPlayer(onOpen = { model.nowPlayingOpen = true }, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp))
             }
-            androidx.compose.animation.AnimatedVisibility(!showPane && model.nowPlayingOpen && current != null, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
+            androidx.compose.animation.AnimatedVisibility(!paneOn && model.nowPlayingOpen && current != null, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
                 NowPlayingScreen(model, asPane = false, onClose = { model.nowPlayingOpen = false })
             }
         }
-        if (showPane && current != null) {
-            Box(Modifier.width(400.dp).fillMaxHeight().padding(12.dp).clip(RoundedCornerShape(32.dp))) {
+        if (paneOn) {
+            Box(Modifier.width(pane).fillMaxHeight().padding(if (compact) 8.dp else 12.dp).clip(RoundedCornerShape(32.dp))) {
                 NowPlayingScreen(model, asPane = true, onClose = {})
             }
         }

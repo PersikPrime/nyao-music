@@ -14,7 +14,7 @@ import { SoundCloudProvider } from './providers/soundcloud.js';
 import { VKProvider } from './providers/vk.js';
 import { SpotifyProvider, SP_REDIRECT } from './providers/spotify.js';
 import { SpotifyEngine, silenceResponse } from './spotify/spotify-engine.js';
-import { checkUpdate, downloadAsset } from './updates.js';
+import { checkUpdate, downloadAsset, fetchHot } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
 import { findLyricsChain } from './lyrics.js';
@@ -39,10 +39,57 @@ const RENDERER = path.join(__dirname, '..', 'renderer');
 function readVersion() {
   try {
     const v = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'version.json'), 'utf8'));
-    return { name: v.name, build: v.build, channel: v.channel || null, label: `${v.name} (${v.build})${v.channel ? ' ' + v.channel : ''}` };
+    const hot = globalThis.__nyaoHot;
+    return {
+      name: v.name,
+      build: v.build,
+      channel: v.channel || null,
+      label: `${v.name} (${v.build})${v.channel ? ' ' + v.channel : ''}`,
+      // запущено горячее обновление: какая версия стоит установщиком
+      installed: hot && hot.running != null ? `${hot.bundled.name} (${hot.bundled.build})` : null
+    };
   } catch {
     return { name: app.getVersion(), build: 0, label: app.getVersion() };
   }
+}
+
+// откуда разрешено качать обновления: GitHub (и его файловый сервер) и зеркало на сервере Nyao
+const UPDATE_URL = /^https:\/\/(github\.com|objects\.githubusercontent\.com|api\.music\.withnyao\.app|api\.nmusic\.bixtl\.cc)\//;
+
+// Горячее обновление запущено: считаем его рабочим, когда интерфейс поднялся и ~8 с прожил без сбоя.
+// Не поднялся за минуту — помечаем версию плохой и перезапускаемся на коде из установки.
+function watchHotStart(w) {
+  const hot = globalThis.__nyaoHot;
+  if (!hot || hot.running == null) return;
+  const started = Date.now();
+  const tick = async () => {
+    if (w.isDestroyed()) return;
+    let ready = false;
+    try {
+      ready = await w.webContents.executeJavaScript('window.__nyaoReady === true', true);
+    } catch {
+      // страница ещё грузится
+    }
+    if (ready) {
+      setTimeout(() => {
+        if (!w.isDestroyed() && !w.webContents.isCrashed()) {
+          hot.store.confirm();
+          console.log(`[hot] версия ${hot.running} работает`);
+        }
+      }, 8000);
+      return;
+    }
+    if (Date.now() - started > 60_000) {
+      console.error(`[hot] версия ${hot.running} не поднялась за минуту — возвращаюсь к установленной`);
+      hot.store.fail(hot.running);
+      quitting = true;
+      app.relaunch();
+      app.quit();
+      return;
+    }
+    setTimeout(tick, 2000);
+  };
+  setTimeout(tick, 2000);
 }
 
 // ---------- Ссылки nyao:// (приглашения, комнаты, профили, треки) открывают это приложение ----------
@@ -483,9 +530,40 @@ function registerIpc() {
   });
 
   handle('app:version', () => readVersion());
-  handle('update:check', () => checkUpdate(readVersion(), globalThis.fetch.bind(globalThis)));
+  handle('update:check', async () => {
+    const hot = globalThis.__nyaoHot;
+    const info = await checkUpdate(readVersion(), globalThis.fetch.bind(globalThis), { compat: hot && hot.store.enabled ? hot.compat : null });
+    // горячее обновление уже скачано и ждёт перезапуска
+    const st = hot && hot.store.enabled ? hot.store.state() : null;
+    info.staged = !!(st && st.current != null && st.current !== hot.running && st.current > readVersion().build);
+    return info;
+  });
+  // горячее обновление: скачать маленький пакет кода, проверить подпись и поставить — применится после перезапуска
+  handle('update:hot', async (pkg) => {
+    const hot = globalThis.__nyaoHot;
+    if (!hot || !hot.store.enabled) throw new Error('В этой сборке быстрые обновления выключены');
+    if (!pkg || ![pkg.url, pkg.sigUrl].every((u) => UPDATE_URL.test(String(u || '')))) throw new Error('Нет пакета обновления');
+    const { buf, sig } = await fetchHot(pkg, globalThis.fetch.bind(globalThis));
+    return hot.store.install(buf, sig);
+  });
+  handle('update:relaunch', () => {
+    quitting = true;
+    app.relaunch();
+    app.quit();
+  });
+  // «вернуть версию из установщика»: горячее обновление больше не запускаем
+  handle('update:resetHot', () => {
+    const hot = globalThis.__nyaoHot;
+    if (!hot) return false;
+    const st = hot.store.state();
+    if (hot.running != null) hot.store.save({ ...st, current: null, pending: null, bad: [...new Set([...st.bad, hot.running])] });
+    quitting = true;
+    app.relaunch();
+    app.quit();
+    return true;
+  });
   handle('update:download', async (asset) => {
-    if (!asset || !/^https:\/\/(github\.com|api\.nmusic\.bixtl\.cc)\//.test(asset.url)) throw new Error('Нет файла для этой системы');
+    if (!asset || !UPDATE_URL.test(asset.url)) throw new Error('Нет файла для этой системы');
     const file = await downloadAsset(asset, app.getPath('downloads'), (p) => {
       if (win && !win.isDestroyed()) win.webContents.send('update:progress', p);
     }, globalThis.fetch.bind(globalThis));
@@ -983,6 +1061,7 @@ function createWindow() {
   setupTray();
   applyShortcuts();
   win.webContents.once('did-finish-load', () => pollStatus());
+  watchHotStart(win);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -1002,7 +1081,7 @@ app.whenReady().then(() => {
   // При запуске через npm start показываем нашу иконку в доке (в собранном .app она и так своя)
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
     try {
-      app.dock.setIcon(path.join(__dirname, '..', '..', 'build', 'icon-mac.png'));
+      app.dock.setIcon(path.join(globalThis.__nyaoBundledRoot || path.join(__dirname, '..', '..'), 'build', 'icon-mac.png'));
     } catch {
       // иконка не критична
     }

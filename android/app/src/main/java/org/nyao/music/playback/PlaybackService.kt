@@ -156,7 +156,18 @@ class PlaybackService : MediaSessionService() {
         scope.launch {
             while (isActive) {
                 if (player.isPlaying) lastPos = player.currentPosition
+                widgetTick()
                 delay(1000)
+            }
+        }
+        // лайк поменялся в приложении или сменились стиль виджетов и акцент — перерисовать виджеты
+        scope.launch { Repo.liked.collect { updateWidget() } }
+        scope.launch {
+            var prev: Pair<String, String>? = null
+            Repo.prefs.settings.collect { st ->
+                val key = st.widgetStyle to st.accent + st.theme
+                if (prev != null && prev != key) updateWidget()
+                prev = key
             }
         }
     }
@@ -224,28 +235,133 @@ class PlaybackService : MediaSessionService() {
     // ---------- Виджет ----------
     private var widgetCoverUrl: String? = null
     private var widgetCover: android.graphics.Bitmap? = null
+    // текст песни для виджета 4×3: ищется, только если такой виджет стоит на рабочем столе
+    private var widgetLyricsFor: String? = null
+    private var widgetLyrics: org.nyao.music.data.Lyrics? = null
+    private var widgetLine = -2
+    private var widgetPushedAt = 0L
 
-    private fun updateWidget() {
+    private fun currentTrack() = player.currentMediaItem?.mediaId?.let { Repo.track(it) }
+
+    private fun widgetState(): WidgetState {
         val item = player.currentMediaItem
         val t = item?.mediaId?.let { Repo.track(it) }
-        val title = t?.title ?: item?.mediaMetadata?.title?.toString() ?: "Nyao Music"
-        val artist = t?.artist ?: item?.mediaMetadata?.artist?.toString() ?: ""
+        val dur = player.duration
+        return WidgetState(
+            title = t?.title ?: item?.mediaMetadata?.title?.toString() ?: "Nyao Music",
+            artist = t?.artist ?: item?.mediaMetadata?.artist?.toString() ?: "",
+            playing = player.isPlaying,
+            cover = widgetCover.takeIf { t?.cover == widgetCoverUrl },
+            live = true,
+            liked = t != null && t.id in Repo.liked.value,
+            progress = if (dur > 0) (player.currentPosition.toFloat() / dur).coerceIn(0f, 1f) else null,
+            lines = lyricLines(),
+        )
+    }
+
+    /** Индекс строки текста, которая звучит сейчас (-1 — ещё до первой) */
+    private fun lineIndex(): Int {
+        val l = widgetLyrics ?: return -2
+        if (!l.synced) return -2
+        val pos = player.currentPosition / 1000.0
+        return l.lines.indexOfLast { it.time != null && it.time <= pos + 0.15 }
+    }
+
+    private fun lyricLines(): Triple<String?, String, String?>? {
+        val l = widgetLyrics ?: return null
+        val lines = l.lines.filter { it.text.isNotBlank() || it.time != null }
+        if (lines.isEmpty()) return null
+        if (!l.synced) {
+            // текст без времени — первые строки, просто чтобы виджет не пустовал
+            val plain = lines.map { it.text }.filter { it.isNotBlank() }
+            return Triple(null, plain.getOrElse(0) { "" }, plain.getOrNull(1))
+        }
+        val i = lineIndex()
+        val all = l.lines
+        fun text(k: Int) = all.getOrNull(k)?.text?.takeIf { it.isNotBlank() }
+        if (i < 0) return Triple(null, text(all.indexOfFirst { it.text.isNotBlank() }) ?: "♪", null)
+        return Triple(text(i - 1), text(i) ?: "♪", text(i + 1))
+    }
+
+    private fun updateWidget() {
+        if (!NyaoWidget.hasAny(this)) return
+        val t = currentTrack()
         val cover = t?.cover
-        NyaoWidget.push(this, NyaoWidget.Companion.State(title, artist, player.isPlaying, widgetCover.takeIf { cover == widgetCoverUrl }, live = true))
+        widgetPushedAt = System.currentTimeMillis()
+        widgetLine = lineIndex()
+        NyaoWidget.push(this, widgetState())
         if (cover != null && cover != widgetCoverUrl) {
             widgetCoverUrl = cover
             scope.launch {
                 val bmp = withContext(Dispatchers.IO) {
                     runCatching {
-                        val req = coil3.request.ImageRequest.Builder(this@PlaybackService).data(cover).size(256).allowHardware(false).build()
+                        val req = coil3.request.ImageRequest.Builder(this@PlaybackService).data(cover).size(360).allowHardware(false).build()
                         (coil3.SingletonImageLoader.get(this@PlaybackService).execute(req) as? coil3.request.SuccessResult)?.image?.toBitmap()
                     }.getOrNull()
                 }
                 if (widgetCoverUrl == cover) {
                     widgetCover = bmp
-                    NyaoWidget.push(this@PlaybackService, NyaoWidget.Companion.State(title, artist, player.isPlaying, bmp, live = true))
+                    NyaoWidget.push(this@PlaybackService, widgetState())
                 }
             }
+        }
+        if (t != null && t.id != widgetLyricsFor && NyaoWidget.wantsLyrics(this)) {
+            widgetLyricsFor = t.id
+            widgetLyrics = null
+            scope.launch {
+                val found = withContext(Dispatchers.IO) { runCatching { org.nyao.music.data.LyricsApi.find(t) }.getOrNull() }
+                if (widgetLyricsFor == t.id) {
+                    widgetLyrics = found
+                    widgetLine = lineIndex()
+                    NyaoWidget.push(this@PlaybackService, widgetState(), onlyLyrics = true)
+                }
+            }
+        }
+    }
+
+    /** Пока играет: новая строка текста — сразу в виджет 4×3, прогресс — раз в 15 секунд */
+    private fun widgetTick() {
+        if (!player.isPlaying || !NyaoWidget.hasAny(this)) return
+        val now = System.currentTimeMillis()
+        val line = lineIndex()
+        when {
+            now - widgetPushedAt > 15_000 -> updateWidget()
+            line != widgetLine -> {
+                widgetLine = line
+                NyaoWidget.push(this, widgetState(), onlyLyrics = true)
+            }
+        }
+    }
+
+    /** «Моя волна» из виджета: волна уже играет — пауза/продолжить, иначе запуск */
+    private fun widgetWave() {
+        if (Repo.mode.value == Repo.Mode.WAVE && player.currentMediaItem != null) {
+            if (player.isPlaying) player.pause() else player.play()
+            return
+        }
+        scope.launch {
+            val tracks = runCatching { withContext(Dispatchers.IO) { Repo.waveStart() } }.getOrElse {
+                PlaybackEvents.emit(it.message ?: "Волна не запустилась")
+                return@launch
+            }
+            if (tracks.isEmpty()) return@launch
+            Repo.mode.value = Repo.Mode.WAVE
+            Repo.queueLabel.value = "Моя волна"
+            player.shuffleModeEnabled = false
+            if (player.repeatMode == Player.REPEAT_MODE_ALL) player.repeatMode = Player.REPEAT_MODE_OFF
+            player.setMediaItems(tracks.map { Repo.mediaItem(it) }, 0, 0L)
+            player.prepare()
+            player.play()
+        }
+    }
+
+    private fun widgetLike() {
+        val t = currentTrack() ?: return
+        val on = t.id !in Repo.liked.value
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { Repo.like(t, on) } }
+                .onSuccess { updateWidget() }
+                .onFailure { PlaybackEvents.emit(it.message ?: "Не получилось") }
         }
     }
 
@@ -257,6 +373,9 @@ class PlaybackService : MediaSessionService() {
             }
             NyaoWidget.ACTION_NEXT -> if (player.hasNextMediaItem()) player.seekToNextMediaItem()
             NyaoWidget.ACTION_PREV -> player.seekToPrevious()
+            NyaoWidget.ACTION_LIKE -> widgetLike()
+            NyaoWidget.ACTION_WAVE -> widgetWave()
+            NyaoWidget.ACTION_REFRESH -> updateWidget()
         }
         return super.onStartCommand(intent, flags, startId)
     }
@@ -394,7 +513,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         Live.release("service")
-        NyaoWidget.push(this, NyaoWidget.Companion.State())
+        NyaoWidget.push(this, WidgetState())
         spotify?.release()
         spotify = null
         scope.cancel()

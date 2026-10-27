@@ -1020,24 +1020,38 @@ function svcCard(svc) {
 function updateCardHtml() {
   const u = state.update;
   const i = u.info;
+  const ready = u.hotReady || (i && i.staged);
+  const hot = i && i.available && i.hot && api.updates.hot ? i.hot : null;
+  const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`);
   let status = 'Нажми «Проверить», чтобы посмотреть свежий релиз на GitHub.';
   if (u.checking) status = 'Проверяю…';
   else if (u.error) status = `Не получилось: ${esc(u.error)}`;
+  else if (ready) status = 'Обновление скачано. Перезапуск займёт пару секунд — трек продолжит играть с того же места.';
+  else if (hot) status = `Доступна версия <b>${esc(i.latest.label)}</b> · быстрое обновление, ${kb(hot.size)}`;
   else if (i && i.available) status = `Доступна версия <b>${esc(i.latest.label)}</b>${i.asset ? ` · ${(i.asset.size / 1048576).toFixed(0)} МБ` : ' · файла для этой системы в релизе нет'}`;
   else if (i) status = `Установлена последняя версия${i.latest ? ` (${esc(i.latest.label)})` : ''}.`;
   const pct = u.progress != null ? Math.round(u.progress * 100) : null;
+  let button;
+  if (ready) button = `<button class="btn primary" data-action="update-relaunch">Перезапустить</button>`;
+  else if (hot) button = `<button class="btn primary" data-action="update-hot" ${u.hotBusy ? 'disabled' : ''}>${u.hotBusy ? 'Обновляю…' : 'Обновить за секунды'}</button>`;
+  else if (i && i.available && i.asset) button = `<button class="btn primary" data-action="update-install" ${pct != null ? 'disabled' : ''}>${pct != null ? `Скачиваю… ${pct}%` : 'Скачать и установить'}</button>`;
+  else button = `<button class="btn" data-action="update-check" ${u.checking ? 'disabled' : ''}>Проверить</button>`;
+  const installed = state.versionInfo && state.versionInfo.installed;
   return `<section class="card update-card">
     <div class="svc">
       <div class="logo" style="background:var(--accent-soft);color:var(--accent)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></div>
       <div class="info"><div class="name">Центр обновлений</div><div class="st">Сейчас: Nyao Music ${esc(state.version || '')}</div></div>
-      ${i && i.available && i.asset
-        ? `<button class="btn primary" data-action="update-install" ${pct != null ? 'disabled' : ''}>${pct != null ? `Скачиваю… ${pct}%` : 'Скачать и установить'}</button>`
-        : `<button class="btn" data-action="update-check" ${u.checking ? 'disabled' : ''}>Проверить</button>`}
+      ${button}
     </div>
     <div class="hint" id="update-status">${status}</div>
     ${pct != null ? `<div class="update-bar"><span style="width:${pct}%"></span></div>` : ''}
     ${i && i.available && i.notes ? `<details><summary>Что нового</summary><div class="hint" style="white-space:pre-wrap;margin-top:8px">${esc(i.notes)}</div></details>` : ''}
-    ${i && i.url ? `<button class="link-plain" data-action="update-page" style="font-size:12px;color:var(--accent);margin-top:6px">Открыть релизы на GitHub</button>` : ''}
+    ${installed ? `<div class="hint" style="margin-top:6px">Код обновлён без установщика; установщиком стоит ${esc(installed)}.</div>` : ''}
+    <div class="update-links">
+      ${i && i.url ? `<button class="link-plain" data-action="update-page">Открыть релизы на GitHub</button>` : ''}
+      ${hot && i.asset && !ready ? `<button class="link-plain" data-action="update-install">Скачать полный установщик</button>` : ''}
+      ${installed ? `<button class="link-plain" data-action="update-reset-hot">Вернуть версию из установщика</button>` : ''}
+    </div>
   </section>`;
 }
 async function checkUpdates(silent = false) {
@@ -1047,7 +1061,7 @@ async function checkUpdates(silent = false) {
   try {
     state.update.info = await api.updates.check();
     if (state.update.info.required) showOutdated(state.update.info.minBuild);
-    if (silent && state.update.info.available) toast(`Доступна Nyao Music ${state.update.info.latest.label} — обновить можно в Настройках`);
+    if (silent && state.update.info.available) toast(`Доступна Nyao Music ${state.update.info.latest.label} — ${state.update.info.hot ? 'обновить за секунды' : 'обновить'} можно в Настройках`);
   } catch (e) {
     state.update.error = e.message;
   }
@@ -2623,6 +2637,35 @@ async function handleAction(el, e) {
     case 'update-page':
       if (state.update.info && state.update.info.url) api.openExternal(state.update.info.url);
       break;
+    case 'update-hot': {
+      const pkg = state.update.info && state.update.info.hot;
+      if (!pkg || state.update.hotBusy) break;
+      state.update.hotBusy = true;
+      state.update.error = null;
+      renderSettings();
+      try {
+        await api.updates.hot(pkg);
+        state.update.hotReady = true;
+      } catch (err) {
+        state.update.error = err.message;
+      }
+      state.update.hotBusy = false;
+      if (state.route === 'settings') renderSettings();
+      break;
+    }
+    case 'update-relaunch':
+    case 'update-reset-hot': {
+      // приложение перезапустится: запоминаем трек, место и то, что музыка играла
+      saveSession(true);
+      try {
+        if (player.playing) localStorage.setItem('nyao.resume', '1');
+      } catch {
+        // не запомнилось — просто не продолжим сами
+      }
+      if (a === 'update-relaunch') await api.updates.relaunch();
+      else await api.updates.resetHot();
+      break;
+    }
     case 'update-install': {
       const asset = state.update.info && state.update.info.asset;
       if (!asset) break;
@@ -3526,6 +3569,7 @@ function openMixBuilder() {
   }
   api.version().then((v) => {
     state.version = v.label;
+    state.versionInfo = v;
     if (state.route === 'settings') renderSettings();
   }).catch(() => {});
   if (api.onOutdated) api.onOutdated((min) => showOutdated(min));
@@ -3558,6 +3602,8 @@ function openMixBuilder() {
   } catch {
     // нет сохранённого — ничего страшного
   }
+  // интерфейс поднялся — по этому знаку горячее обновление считается рабочим (main.js, watchHotStart)
+  window.__nyaoReady = true;
   // обновился с версии, где вида ещё не было: один раз предлагаем выбрать
   if (state.settings.onboarded && !state.settings.layout) askLayout();
   if (!state.settings.onboarded) {

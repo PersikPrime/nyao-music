@@ -902,6 +902,9 @@ body.fs-on .toast { z-index: 1000; }
 /* 0.7 (43): отчёт YouTube в карточке сервиса */
 .svc-diag { margin: 10px 0 2px; font-size: 12px; }
 .svc-diag .link-plain { color: var(--accent); font-size: 12px; }
+.update-links { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 6px; }
+.update-links .link-plain { font-size: 12px; color: var(--accent); }
+.update-links:empty { display: none; }
 
 /* ---------- 0.7 (43): выезжающая панель справа ---------- */
 .body { position: relative; overflow: clip; } /* выезжающая панель за краем не должна прокручивать окно вбок */

@@ -1,13 +1,13 @@
 {
   "name": "nyao-music",
   "productName": "Nyao Music",
-  "version": "0.8.88",
+  "version": "0.8.89",
   "description": "Единый плеер для Яндекс Музыки и YouTube Music с общей «Моей волной»",
   "author": "Takko",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
-  "main": "src/main/main.js",
+  "main": "src/boot.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",

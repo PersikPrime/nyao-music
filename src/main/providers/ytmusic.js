@@ -4,8 +4,9 @@ import { recencyPick } from '../freshness.js';
 // а прямую ссылку на аудио берём отдельной анонимной сессией, перебирая клиентов:
 // часть клиентов YouTube требует PO-токен и отдаёт 403, поэтому каждую ссылку проверяем.
 import vm from 'node:vm';
-import { Innertube, Platform, UniversalCache, Constants } from 'youtubei.js';
 import * as raw from './ytraw.js';
+// из точки входа (boot.js): горячее обновление кода лежит вне установки и само youtubei.js не найдёт
+const { Innertube, Platform, UniversalCache, Constants } = globalThis.__nyaoDeps?.youtubei || (await import('youtubei.js'));
 
 // youtubei.js с версии 15+ не исполняет JS плеера сам — даём ему изолированный вычислитель.
 Platform.shim.eval = (data) => {
