@@ -38,7 +38,10 @@ export class ReleaseMirror {
 
   /** Тот же формат, что у GitHub releases/latest, но ссылки на скачанные файлы — на наш сервер */
   latest(channel = null) {
-    const r = (channel && this.channels[channel]) || this.release;
+    // канал получает свой пререлиз, но если обычный релиз уже новее — его (dev 89 → релиз 90)
+    const build = (rel) => Number(/\.(\d+)(?:-[a-z]+)?$/.exec((rel && rel.tag_name) || '')?.[1] || 0);
+    const ch = channel && this.channels[channel];
+    const r = ch && (!this.release || build(ch) > build(this.release)) ? ch : this.release;
     if (!r) return null;
     return {
       tag_name: r.tag_name,

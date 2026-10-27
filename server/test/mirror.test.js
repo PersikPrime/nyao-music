@@ -48,4 +48,7 @@ test('зеркало: каналы dev/nightly — маленькие файлы
   assert.equal(dev.assets.find((a) => a.name.endsWith('.exe')).browser_download_url, 'https://gh/d.exe');
   assert.ok(!got.includes('https://gh/d.exe'), 'большой установщик канала не качается');
   assert.equal(m.latest('nightly').tag_name, 'v0.8.84', 'нет канала — обычный релиз');
+  // обычный релиз догнал канал — каналу отдаётся он
+  m.release = { ...m.release, tag_name: 'v0.8.90', assets: [] };
+  assert.equal(m.latest('dev').tag_name, 'v0.8.90');
 });
