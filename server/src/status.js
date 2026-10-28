@@ -1,8 +1,9 @@
 // Статус сервиса: техработы и сбои отдельных музыкальных сервисов.
-// Файл status.json пишет workflow «Техработы» (Actions → Run workflow) — без перезапуска сервера.
+// Файл status.json пишет Nyao Automator через /admin/status (раньше — workflow «Техработы»); перезапуск сервера не нужен.
 import fs from 'node:fs';
+import path from 'node:path';
 
-const SERVICES = new Set(['ya', 'yt', 'sc', 'vk']);
+export const SERVICES = new Set(['ya', 'yt', 'sc', 'vk', 'sp']);
 
 export function normalizeStatus(raw) {
   const m = (raw && raw.maintenance) || {};
@@ -38,5 +39,19 @@ export class StatusFile {
     this.cache = normalizeStatus(raw);
     this.readAt = Date.now();
     return this.cache;
+  }
+
+  /** Записать новый статус (из Automator). Возвращает нормализованный статус */
+  set(raw) {
+    const next = normalizeStatus({ ...raw, at: new Date().toISOString() });
+    if (this.file) {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      const tmp = `${this.file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(next));
+      fs.renameSync(tmp, this.file);
+    }
+    this.cache = next;
+    this.readAt = Date.now();
+    return next;
   }
 }

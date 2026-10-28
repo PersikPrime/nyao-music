@@ -7,6 +7,12 @@ import { createApp } from './app.js';
 import { YaCatalog } from './catalog-ya.js';
 import { StatusFile } from './status.js';
 import { FcmPush, parseServiceAccount } from './push.js';
+import { LogBuffer } from './logbuf.js';
+import { GitHub } from './github.js';
+import { parseAdminIds } from './admin.js';
+
+// последние строки лога — для Nyao Automator (GET /admin/logs)
+const logs = new LogBuffer(5000).hook(console);
 
 const env = process.env;
 // PUBLIC_URL — адрес, на который Telegram возвращает после входа и откуда раздаются файлы обновлений
@@ -23,6 +29,8 @@ const LYRICS_HOSTS = hosts(env.LYRICS_HOSTS, 'lyrics.withnyao.app');
 const LYRICS_API_HOSTS = hosts(env.LYRICS_API_HOSTS, 'api.corrode5-15.withnyao.app');
 // Telegram ID разработчиков: раздел «Разработчик» в приложениях
 const DEV_IDS = String(env.DEV_IDS || '').split(',').map((x) => x.trim()).filter((x) => /^\d{3,20}$/.test(x));
+// Nyao Automator: роли «tgId:роль» через запятую (ADMIN_IDS); без них владельцы — DEV_IDS
+const ADMIN_IDS = parseAdminIds(env.ADMIN_IDS, String(env.DEV_IDS || '').split(',').map((x) => x.trim()));
 const LYRICS_ADMINS = String(env.LYRICS_ADMINS || '').split(',').map((x) => x.trim()).filter((x) => /^\d{3,20}$/.test(x));
 
 const pool = createPool(env.DATABASE_URL);
@@ -53,7 +61,14 @@ const status = new StatusFile(env.STATUS_FILE || '/data/status/status.json');
 const fcm = parseServiceAccount(env.FCM_SERVICE_ACCOUNT);
 const push = fcm ? new FcmPush(fcm) : null;
 console.log(push ? `[push] Firebase: ${fcm.project_id}` : '[push] FCM_SERVICE_ACCOUNT не задан — push выключены');
-const server = http.createServer(createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS, devIds: DEV_IDS, yaCatalog: new YaCatalog({ log: console.log }) }));
+// GitHub от имени сервера: сборки, заметки к релизам, операции и релизы Automator. Токен — только здесь
+const github = new GitHub({ token: env.GH_ADMIN_TOKEN || '', repo: env.GITHUB_REPO || 'PersikPrime/nyao-music', automatorRepo: env.AUTOMATOR_REPO || 'PersikPrime/automator', log: console.log });
+console.log(github.configured ? '[admin] GitHub настроен' : '[admin] GH_ADMIN_TOKEN не задан — сборки и заметки из Automator недоступны');
+console.log(`[admin] админов Automator: ${ADMIN_IDS.size}`);
+const app = createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS, devIds: DEV_IDS, yaCatalog: new YaCatalog({ log: console.log }), adminIds: ADMIN_IDS, github, logs, dataDir: env.DATA_DIR || '/data' });
+await app.admin.init();
+setInterval(() => app.admin.tick(), 30_000).unref();
+const server = http.createServer(app);
 server.listen(Number(env.PORT) || 8080, () => console.log(`[nyao] сервер слушает :${server.address().port}`));
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

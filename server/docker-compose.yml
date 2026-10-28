@@ -34,6 +34,11 @@ services:
       DEV_IDS: ${DEV_IDS:-}
       MIRROR_DIR: /data/releases
       STATUS_FILE: /data/status/status.json
+      # Nyao Automator: роли админов и токен GitHub (только на сервере)
+      ADMIN_IDS: ${ADMIN_IDS:-}
+      GH_ADMIN_TOKEN: ${GH_ADMIN_TOKEN:-}
+      AUTOMATOR_REPO: ${AUTOMATOR_REPO:-PersikPrime/automator}
+      DATA_DIR: /data
     volumes:
       - releases:/data/releases
       - status:/data/status

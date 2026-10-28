@@ -170,7 +170,105 @@ export const SCHEMA = [
   `ALTER TABLE lyrics_reports ADD COLUMN IF NOT EXISTS auto_hidden BOOLEAN NOT NULL DEFAULT false`,
   `ALTER TABLE lyrics_reports ADD COLUMN IF NOT EXISTS ip_hash TEXT NOT NULL DEFAULT ''`,
   // пословное время (Enhanced LRC: «[00:12.30] <00:12.30>слово <00:12.80>слово <00:13.40>»), строки — как в synced
-  `ALTER TABLE lyrics_versions ADD COLUMN IF NOT EXISTS words TEXT NOT NULL DEFAULT ''`
+  `ALTER TABLE lyrics_versions ADD COLUMN IF NOT EXISTS words TEXT NOT NULL DEFAULT ''`,
+  // ---------- Nyao Automator: администрирование ----------
+  // номер сборки клиента на сессии — для отбора «версия ниже N» и распределения версий
+  `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS build INTEGER`,
+  // журнал действий админов: кто, что, над кем, с какими параметрами (без секретов). Из клиента не меняется
+  `CREATE TABLE IF NOT EXISTS admin_audit (
+    id BIGSERIAL PRIMARY KEY,
+    at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    admin_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    admin_tg TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL,
+    target_type TEXT NOT NULL DEFAULT '',
+    target_id TEXT NOT NULL DEFAULT '',
+    params JSONB,
+    result TEXT NOT NULL DEFAULT 'ok',
+    ip TEXT NOT NULL DEFAULT ''
+  )`,
+  `CREATE INDEX IF NOT EXISTS admin_audit_time ON admin_audit (at)`,
+  `CREATE INDEX IF NOT EXISTS admin_audit_target ON admin_audit (target_type, target_id)`,
+  // блокировки: заблокированный не входит, его сессии завершаются
+  `CREATE TABLE IF NOT EXISTS user_bans (
+    user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL DEFAULT '',
+    by_user BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // настройки сервера, которые меняются из Automator (минимальная сборка, префикс ISRC…)
+  `CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // история статуса (техработы, сбои) и расписание включения
+  `CREATE TABLE IF NOT EXISTS status_history (
+    id BIGSERIAL PRIMARY KEY,
+    at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    by_user BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    data JSONB NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS status_schedule (
+    id BIGSERIAL PRIMARY KEY,
+    start_at TIMESTAMPTZ NOT NULL,
+    end_at TIMESTAMPTZ,
+    maintenance JSONB NOT NULL,
+    state TEXT NOT NULL DEFAULT 'planned',
+    by_user BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // рассылки push: кому отправляли и что вышло
+  `CREATE TABLE IF NOT EXISTS push_broadcasts (
+    id BIGSERIAL PRIMARY KEY,
+    at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    by_user BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    audience JSONB NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    link TEXT NOT NULL DEFAULT '',
+    total INTEGER NOT NULL DEFAULT 0,
+    delivered INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0
+  )`,
+  // LyricLabs: кому поручена проверка версии
+  `ALTER TABLE lyrics_versions ADD COLUMN IF NOT EXISTS assignee_id BIGINT`,
+  // ---------- Лейбл WithNyao Blue: ISRC и релизы ----------
+  `CREATE TABLE IF NOT EXISTS label_releases (
+    id BIGSERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    artists TEXT NOT NULL DEFAULT '',
+    upc TEXT NOT NULL DEFAULT '',
+    genre TEXT NOT NULL DEFAULT '',
+    release_date TEXT NOT NULL DEFAULT '',
+    p_line TEXT NOT NULL DEFAULT '',
+    c_line TEXT NOT NULL DEFAULT '',
+    cover TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'preparing',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS label_tracks (
+    id BIGSERIAL PRIMARY KEY,
+    release_id BIGINT NOT NULL REFERENCES label_releases(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 1,
+    title TEXT NOT NULL,
+    artists TEXT NOT NULL DEFAULT '',
+    isrc TEXT,
+    duration INTEGER NOT NULL DEFAULT 0
+  )`,
+  // код уникален на уровне базы: два админа одновременно не получат один ISRC
+  `CREATE TABLE IF NOT EXISTS label_isrc (
+    code TEXT PRIMARY KEY,
+    year INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    track_title TEXT NOT NULL DEFAULT '',
+    track_id BIGINT,
+    by_user BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`
 ];
 
 export async function migrate(pool) {

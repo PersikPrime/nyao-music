@@ -1,0 +1,73 @@
+# Операции с сервером из Nyao Automator (через GitHub API workflow_dispatch — Docker наружу не торчит):
+# restart — перезапустить контейнер API; logs — снять логи контейнеров в артефакт, Automator его скачает и покажет.
+name: Операции с сервером
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Что сделать'
+        type: choice
+        options: ['restart', 'logs']
+        default: 'logs'
+      tail:
+        description: 'Сколько последних строк логов снять'
+        required: false
+        default: '500'
+
+concurrency:
+  group: server-ops
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH-ключ
+        env:
+          KEY: ${{ secrets.NYAO_SSH_KEY }}
+          HOST: ${{ secrets.NYAO_SSH_HOST }}
+        run: |
+          test -n "$KEY" || { echo "::error::Нет секрета NYAO_SSH_KEY"; exit 1; }
+          test -n "$HOST" || { echo "::error::Нет секрета NYAO_SSH_HOST"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" | tr -d '\r' > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -T 15 -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Перезапуск API
+        if: inputs.action == 'restart'
+        env:
+          HOST: ${{ secrets.NYAO_SSH_HOST }}
+          USER_: ${{ secrets.NYAO_SSH_USER }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
+          $SSH "cd /opt/nyao/server && docker compose restart api && docker compose ps"
+          for i in $(seq 1 30); do
+            if curl -fsS "https://api.music.withnyao.app/health" > /dev/null; then echo "::notice::API снова отвечает"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::API не поднялся за 2,5 минуты после перезапуска"
+          exit 1
+
+      - name: Логи контейнеров
+        if: inputs.action == 'logs'
+        env:
+          HOST: ${{ secrets.NYAO_SSH_HOST }}
+          USER_: ${{ secrets.NYAO_SSH_USER }}
+          TAIL: ${{ inputs.tail }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
+          N=$(printf '%s' "$TAIL" | tr -dc '0-9'); N=${N:-500}
+          mkdir -p logs
+          for svc in api caddy db; do
+            $SSH "cd /opt/nyao/server && docker compose logs --no-color --timestamps --tail=$N $svc" > "logs/$svc.log" 2>&1 || true
+          done
+          $SSH "cd /opt/nyao/server && docker compose ps && df -h /var/lib/docker 2>/dev/null; docker system df 2>/dev/null" > logs/docker.txt 2>&1 || true
+          wc -l logs/*
+      - uses: actions/upload-artifact@v4
+        if: inputs.action == 'logs'
+        with:
+          name: server-logs
+          path: logs/
+          retention-days: 3

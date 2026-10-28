@@ -1,7 +1,8 @@
 # Деплой сервера Nyao Music на Selectel: тесты → копируем server/ по SSH → docker compose up.
 # Секреты (Settings → Secrets → Actions): NYAO_SSH_HOST, NYAO_SSH_USER, NYAO_SSH_KEY,
 # NYAO_TG_CLIENT_SECRET, NYAO_DB_PASSWORD, NYAO_TG_RELAY (адрес ретранслятора на Cloudflare),
-# NYAO_FCM_SERVICE_ACCOUNT (JSON ключа сервисного аккаунта Firebase — для push). Токены музыкальных сервисов на сервер не попадают.
+# NYAO_FCM_SERVICE_ACCOUNT (JSON ключа сервисного аккаунта Firebase — для push), NYAO_ADMIN_IDS и NYAO_GH_ADMIN_TOKEN (Nyao Automator).
+# Токены музыкальных сервисов на сервер не попадают.
 name: Server deploy
 
 on:
@@ -60,6 +61,7 @@ jobs:
           FCM: ${{ secrets.NYAO_FCM_SERVICE_ACCOUNT }}
           KS_B64: ${{ secrets.NYAO_KEYSTORE_B64 }}
           KS_PASS: ${{ secrets.NYAO_KEYSTORE_PASSWORD }}
+          GH_ADMIN_TOKEN: ${{ secrets.NYAO_GH_ADMIN_TOKEN }}
         run: |
           # отпечаток ключа подписи APK (публичный) — для Android App Links на сайте
           CERT=""
@@ -72,6 +74,7 @@ jobs:
           test -n "$DB_PASSWORD" || { echo "::error::Нет секрета NYAO_DB_PASSWORD"; exit 1; }
           test -n "$TG_SECRET" || echo "::warning::Нет секрета NYAO_TG_CLIENT_SECRET — вход через Telegram будет выключен"
           test -n "$FCM" || echo "::warning::Нет секрета NYAO_FCM_SERVICE_ACCOUNT — push-уведомления будут выключены"
+          test -n "$GH_ADMIN_TOKEN" || echo "::warning::Нет секрета NYAO_GH_ADMIN_TOKEN — в Nyao Automator не будет сборок, заметок к релизам и операций с сервером"
           q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
           {
             echo "DOMAIN=$DOMAIN"
@@ -90,7 +93,15 @@ jobs:
             # ключ Firebase многострочный — кладём одной строкой base64
             echo "FCM_SERVICE_ACCOUNT=$(printf '%s' "$FCM" | base64 -w0)"
             # минимальная сборка: Settings → Secrets and variables → Actions → Variables → NYAO_MIN_BUILD
+            # (запасной вариант — Automator может поменять её на лету, тогда значение хранится в базе)
             echo "MIN_BUILD=${{ vars.NYAO_MIN_BUILD || '24' }}"
+            # Nyao Automator: роли «telegramId:роль» через запятую (owner, admin, support, lyrics, label, viewer);
+            # без секрета владельцами считаются все из NYAO_DEV_IDS
+            echo "ADMIN_IDS=${{ secrets.NYAO_ADMIN_IDS }}"
+            # токен GitHub только для сервера: сборки (actions:write), заметки к релизам (contents:write) в nyao-music,
+            # релизы приватного Automator (contents:read). Клиент Automator его никогда не получает
+            echo "GH_ADMIN_TOKEN=$(q "$GH_ADMIN_TOKEN")"
+            echo "AUTOMATOR_REPO=${{ vars.NYAO_AUTOMATOR_REPO || 'PersikPrime/automator' }}"
           } > server/.env
 
       - name: Копирование и запуск
@@ -109,6 +120,8 @@ jobs:
           if grep -q NO_DOCKER ssh.out; then echo "::error::На сервере нет docker (или пользователь не в группе docker)"; exit 1; fi
           tar -C server --exclude=node_modules --exclude=test -czf - . | $SSH "tar -xzf - -C $REMOTE_DIR && chmod 600 $REMOTE_DIR/.env"
           $SSH "cd $REMOTE_DIR && docker compose up -d --build --remove-orphans && docker image prune -f > /dev/null && docker compose ps"
+          # том /data/status создан Docker'ом от root, а сервер работает как node: Automator пишет статус сам — отдаём ему папку
+          $SSH "cd $REMOTE_DIR && docker compose exec -T -u root api sh -c 'mkdir -p /data/status && chown -R node /data/status'" || echo "::warning::Не удалось отдать /data/status пользователю node — техработы из Automator не включатся"
 
       - name: Проверка
         run: |

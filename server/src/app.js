@@ -9,6 +9,7 @@ import { summarize, periodRange } from './stats.js';
 import { socialRoutes } from './social.js';
 import { lyricsRoutes, lrclibError } from './lyrics.js';
 import { lyricsPage } from './lyrics-web.js';
+import { adminRoutes } from './admin.js';
 
 const LOGIN_TTL = 10 * 60_000;
 const MAX_BODY = 512 * 1024;
@@ -36,7 +37,8 @@ export class HttpError extends Error {
 
 function send(res, status, body, headers = {}) {
   const isHtml = typeof body === 'string';
-  const data = isHtml ? body : JSON.stringify(body);
+  // Buffer — готовый файл (например, zip-архив), отдаём как есть
+  const data = isHtml || Buffer.isBuffer(body) ? body : JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': isHtml ? 'text/html; charset=utf-8' : 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -99,7 +101,9 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [], devIds = [], yaCatalog = null }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [], devIds = [], yaCatalog = null, adminIds = new Map(), github = null, logs = null, dataDir = '/data' }) {
+  // минимальная сборка: из переменной окружения, но Automator может поменять её на лету (хранится в app_settings)
+  const cfg = { minBuild, minBuildEnv: minBuild };
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
   setInterval(() => {
     const now = Date.now();
@@ -115,13 +119,21 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     const m = /^Bearer\s+([A-Za-z0-9_-]{20,})$/.exec(h);
     if (!m) throw new HttpError(401, 'Нужен вход в аккаунт Nyao');
     const { rows } = await q(
-      `SELECT s.id AS sid, s.device, s.platform, u.id, u.tg_id, u.name, u.username, u.picture
-         FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1`,
+      `SELECT s.id AS sid, s.device, s.platform, s.build, u.id, u.tg_id, u.name, u.username, u.picture, b.reason AS ban_reason
+         FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN user_bans b ON b.user_id = u.id WHERE s.token_hash = $1`,
       [sha256(m[1])]
     );
     if (!rows.length) throw new HttpError(401, 'Сессия закончилась, войди заново');
     const r = rows[0];
-    q('UPDATE sessions SET last_seen = now() WHERE id = $1', [r.sid]).catch(() => {});
+    // заблокированный (из Automator) не работает с сервером, его сессии удаляются
+    if (r.ban_reason != null) {
+      q('DELETE FROM sessions WHERE user_id = $1', [r.id]).catch(() => {});
+      throw new HttpError(403, 'Аккаунт заблокирован');
+    }
+    // номер сборки запоминаем на сессии — для Automator (кто на какой версии)
+    const build = Number(req.headers['x-nyao-build']) || null;
+    if (build && build !== Number(r.build)) q('UPDATE sessions SET last_seen = now(), build = $2 WHERE id = $1', [r.sid, build]).catch(() => {});
+    else q('UPDATE sessions SET last_seen = now() WHERE id = $1', [r.sid]).catch(() => {});
     return { sid: Number(r.sid), uid: Number(r.id), user: publicUser(r), device: r.device, platform: r.platform };
   }
 
@@ -140,6 +152,13 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       [profile.tgId, profile.name, profile.username, profile.picture]
     );
     const user = rows[0];
+    const ban = await q('SELECT reason FROM user_bans WHERE user_id = $1', [user.id]);
+    if (ban.rows.length) {
+      Object.assign(login, { status: 'error', error: 'Аккаунт заблокирован' });
+      const e = new Error('Аккаунт заблокирован');
+      e.banned = true;
+      throw e;
+    }
     const token = newToken();
     await q('INSERT INTO sessions (user_id, token_hash, device, platform) VALUES ($1, $2, $3, $4)', [user.id, sha256(token), login.device, login.platform]);
     Object.assign(login, { status: 'done', token, user: publicUser(user) });
@@ -148,8 +167,9 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
   const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl, webUrl, sharePage: (o) => sharePage({ ...o, mirror }) });
   const share = shareRoutes({ q, mirror, androidCerts, webHosts });
   const lyrics = lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins: lyricsAdmins, catalog: yaCatalog });
+  const admin = adminRoutes({ q, HttpError, readJson, clip, adminIds, status, cfg, mirror, github, push, logs, log, dataDir, devIds });
   const routes = [
-    ['GET', /^\/health$/, async () => ({ ok: true, minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
+    ['GET', /^\/health$/, async () => ({ ok: true, minBuild: cfg.minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
     // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)
     ['GET', /^\/status$/, async () => (status ? status.get() : normalizeStatus(null))],
 
@@ -178,6 +198,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         await finishLogin(state, profile);
         return page(`Привет, ${profile.name}!`, 'Готово — возвращайся в Nyao Music, вкладку можно закрыть.');
       } catch (e) {
+        if (e.banned) return page('Аккаунт заблокирован', 'Вход в Nyao для этого аккаунта закрыт.', false);
         log(`[auth] ${e.message}`);
         if (/abort|timeout|fetch failed|ECONN|ETIMEDOUT/i.test(String(e.message) + String(e.cause && e.cause.code))) {
           Object.assign(login, { status: 'error', error: 'Сервер не достучался до Telegram' });
@@ -422,14 +443,15 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       const channel = ['dev', 'nightly'].includes(url.searchParams.get('channel')) ? url.searchParams.get('channel') : null;
       const rel = mirror && mirror.latest(channel);
       if (!rel) throw new HttpError(503, 'Сервер ещё не знает о релизах');
-      return { ...rel, min_build: minBuild };
+      return { ...rel, min_build: cfg.minBuild };
     }],
     ...lyrics,
     ...social,
-    ...share
+    ...share,
+    ...admin.routes
   ];
 
-  return async function handler(req, res) {
+  async function handler(req, res) {
     const url = new URL(req.url, 'http://localhost');
     // за Cloudflare настоящий адрес — в CF-Connecting-IP (иначе все запросы были бы «с одного IP» Cloudflare)
     const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -454,14 +476,17 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
           apiLimit(ip);
           // слишком старая сборка: синхронизацию не даём, просим обновиться
           // (сайт текстов /api/… — не приложение, сборки у него нет)
-          if (minBuild && !url.pathname.startsWith('/api/') && clientBuild(req) < minBuild) {
+          // (Automator — не приложение Music, у него своя нумерация; /admin/* не проверяем)
+          if (cfg.minBuild && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/admin/') && clientBuild(req) < cfg.minBuild) {
             const e = new HttpError(426, 'Эта версия Nyao Music устарела — обнови приложение в настройках');
-            e.extra = { minBuild };
+            e.extra = { minBuild: cfg.minBuild };
             throw e;
           }
           s = await auth(req);
         }
         const out = await fn({ req, res, url, m, s, ip });
+        // маршрут сам записал ответ в res (поток файла)
+        if (out && out.__sent) return;
         // файл не-JSON (например, TTML с текстом песни): { __raw: { type, body, filename? } }
         if (out && out.__raw) {
           const r = out.__raw;
@@ -476,7 +501,10 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       if (!(e instanceof HttpError)) log(`[api] ${req.method} ${url.pathname}: ${e.stack || e.message}`);
       return send(res, e.status || 500, { error: e instanceof HttpError ? e.message : 'Ошибка сервера', ...(e.extra || {}) });
     }
-  };
+  }
+  // index.js запускает расписание техработ и читает настройки из базы
+  handler.admin = admin;
+  return handler;
 }
 
 /** Имя файла для скачивания: ASCII-запасное filename и точное filename* (RFC 5987) */
