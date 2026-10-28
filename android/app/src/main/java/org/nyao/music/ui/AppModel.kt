@@ -23,6 +23,8 @@ sealed interface Route {
     data object Library : Route
     /** Профиль: аккаунт и все настройки (раньше — вкладка «Настройки») */
     data object Settings : Route
+    /** Отдельная страница «Настройки» — когда она вынесена из профиля кнопкой в панели */
+    data object AppSettings : Route
     /** Раздел настроек, открытый из профиля: "sound", "svc:ya", "lastfm"… */
     data class SettingsPage(val section: String) : Route
     data class PlaylistPage(val playlist: Playlist) : Route

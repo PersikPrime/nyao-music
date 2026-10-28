@@ -11,7 +11,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-data class CloudUser(val name: String, val username: String?, val picture: String?)
+/** dev — аккаунт разработчика (Telegram ID в NYAO_DEV_IDS на сервере): в настройках есть раздел «Разработчик» */
+data class CloudUser(val name: String, val username: String?, val picture: String?, val dev: Boolean = false)
 data class CloudDevice(val id: String, val device: String, val platform: String, val current: Boolean, val lastSeen: String)
 /** Что играет на другом устройстве — для «Продолжить» */
 data class RemoteNow(val deviceId: String, val device: String, val platform: String, val track: Track, val positionSec: Double, val playing: Boolean, val updatedAt: Long, val queue: HandoffQueue? = null)
@@ -48,7 +49,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
     private var lastNowKey = ""
     private var lastNowAt = 0L
 
-    private fun parseUser(o: JSONObject) = CloudUser(o.optString("name", "Telegram"), o.str("username"), o.str("picture"))
+    private fun parseUser(o: JSONObject) = CloudUser(o.optString("name", "Telegram"), o.str("username"), o.str("picture"), o.optBoolean("dev", false))
 
     /** Адрес сервера: новый домен, а если он не отвечает (сеть, DNS) — прежний */
     @Volatile private var base = BASE

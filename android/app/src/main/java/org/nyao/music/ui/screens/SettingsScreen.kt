@@ -50,9 +50,12 @@ import org.nyao.music.ui.theme.NyaoColors
 
 // ======================= Профиль (вместо вкладки «Настройки») =======================
 
-/** Профиль: карточка аккаунта Nyao и все настройки списком разделов, как в Android 16 */
+/**
+ * Профиль: карточка аккаунта Nyao и все настройки списком разделов, как в Android 16.
+ * part: "all" — всё вместе; "profile" — только профиль (настройки вынесены кнопкой); "prefs" — только настройки
+ */
 @Composable
-fun ProfileScreen(model: AppModel) {
+fun ProfileScreen(model: AppModel, part: String = "all") {
     val user by Repo.cloud.user.collectAsState()
     val accounts by Repo.accounts.collectAsState()
     val s by Repo.prefs.settings.collectAsState()
@@ -62,8 +65,10 @@ fun ProfileScreen(model: AppModel) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().padding(horizontal = 16.dp).padding(top = 12.dp).padding(BottomInset),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
+        if (part == "prefs") Text("Настройки", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         // Карточка профиля: нажатие открывает свою страницу профиля (её видят друзья)
         val social by org.nyao.music.playback.Friends.profile.collectAsState()
+        if (part != "prefs") {
         androidx.compose.runtime.LaunchedEffect(user) { if (user != null) runCatching { org.nyao.music.playback.Friends.refresh() } }
         Column(
             Modifier.fillMaxWidth().bouncy(0.97f).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
@@ -107,9 +112,15 @@ fun ProfileScreen(model: AppModel) {
             if (user != null) SettingsRow(org.nyao.music.ui.components.NyaoIcons.Edit, "Мой профиль и приватность", social?.let { if (it.invisible) "невидимка" else when (it.visibility) { "all" -> "видят все"; "nobody" -> "скрыт"; else -> "только друзья" } }) { model.go(Route.SettingsPage("profile")) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Person, "Аккаунт Nyao", if (user != null) "вход выполнен" else "не выполнен", last = true) { model.go(Route.SettingsPage("account")) }
         }
+        }
+        if (part == "profile") SettingsGroup("Настройки") {
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Settings, "Все настройки", last = true) { model.go(Route.AppSettings) }
+        }
+        if (part != "profile") {
         SettingsGroup("Приложение") {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Equalizer, "Звук и воспроизведение", if (s.eqOn) "эквалайзер вкл." else null) { model.go(Route.SettingsPage("sound")) }
             // настройки волны живут на экране «Моя волна» — здесь их больше нет
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.FormatQuote, "Текст песни", org.nyao.music.data.LyricsApi.order(s.lyricsOrder).firstOrNull { it.second }?.let { org.nyao.music.data.LyricsApi.PROVIDER_NAMES[it.first] }) { model.go(Route.SettingsPage("lyrics")) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Database, "Офлайн и кэш", last = true) { model.go(Route.SettingsPage("cache")) }
         }
         SettingsGroup("Оформление") {
@@ -130,6 +141,9 @@ fun ProfileScreen(model: AppModel) {
                 Box(Modifier.size(26.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFD51007)), contentAlignment = Alignment.Center) { Text("fm", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall) }
             }, valueOk = lf.name != null, last = true) { model.go(Route.SettingsPage("lastfm")) }
         }
+        if (user?.dev == true) SettingsGroup("Разработчик") {
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.Code, "Разработчик", "тесты и диагностика", last = true) { model.go(Route.SettingsPage("dev")) }
+        }
         SettingsGroup("Другое") {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Refresh, "Обновления", BuildConfig.VERSION_NAME) { model.go(Route.SettingsPage("updates")) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Info, "О приложении") { model.go(Route.SettingsPage("about")) }
@@ -140,6 +154,7 @@ fun ProfileScreen(model: AppModel) {
             "Токены Яндекса, YouTube, SoundCloud, VK и Spotify остаются только на этом телефоне.",
             style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, modifier = Modifier.padding(horizontal = 8.dp),
         )
+        }
     }
 }
 
@@ -192,6 +207,8 @@ private fun sectionTitle(section: String): String = when {
     section == "view" -> "Вид главной"
     section == "theme" -> "Тема и сетка"
     section == "widgets" -> "Стиль виджетов"
+    section == "lyrics" -> "Текст песни"
+    section == "dev" -> "Разработчик"
     section == "lastfm" -> "Last.fm"
     section == "updates" -> "Обновления"
     section == "about" -> "О приложении"
@@ -222,6 +239,8 @@ fun SettingsPageScreen(model: AppModel, section: String) {
                 section == "view" -> ViewSettingsCard()
                 section == "theme" -> LookSettings()
                 section == "widgets" -> WidgetStyleSettings()
+                section == "lyrics" -> LyricsSettings()
+                section == "dev" -> if (Repo.cloud.user.value?.dev == true) DevSettings()
                 section == "lastfm" -> LastFmCard(model)
                 section == "updates" -> UpdateCard(model, showTitle = false)
                 section == "about" -> AboutCard()
@@ -617,8 +636,34 @@ private fun UpdateCard(model: AppModel, showTitle: Boolean = true) {
             style = MaterialTheme.typography.titleSmall,
         )
         Text("Сейчас установлена ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Канал обновлений — как в центре обновлений macOS
+        val channel = Repo.prefs.settings.collectAsState().value.let { org.nyao.music.data.Updates.channel() }
+        Text("Канал обновлений", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            org.nyao.music.data.Updates.CHANNELS.forEach { (id, label) ->
+                val on = id == channel
+                androidx.compose.material3.FilterChip(
+                    selected = on,
+                    onClick = {
+                        if (!on) {
+                            Repo.prefs.setUpdateChannel(id)
+                            check()
+                        }
+                    },
+                    label = { Text(label, maxLines = 1) },
+                )
+            }
+        }
+        Text(
+            when (channel) {
+                "dev" -> "Бета: новое раньше всех, иногда с недочётами. Если обычный релиз новее — придёт он."
+                "nightly" -> "Ночные сборки: эксперименты прямо из разработки, могут ломаться."
+                else -> "Проверенные релизы."
+            } + if (i != null && !i.available && i.build in 1 until BuildConfig.VERSION_CODE) " Версия в этом канале старше установленной — обновление придёт, когда канал её догонит." else "",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         if (i != null && i.available && i.notes.isNotBlank()) {
-            Text(i.notes.take(400), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(i.notes.replace(Regex("</?(sub|small)>"), "").take(400), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (i != null && i.available && i.apkUrl != null) {

@@ -439,6 +439,11 @@ object PlayerConnection {
         if (c.currentPosition > 3000 || !c.hasPreviousMediaItem()) c.seekTo(0) else c.seekToPreviousMediaItem()
     }
 
+    /** Скорость и высота звука (приколы «Бурундук» и «Дарт Вейдер»); 1, 1 — как обычно */
+    fun setSpeed(speed: Float, pitch: Float) = withController {
+        it.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
+    }
+
     fun seekTo(ms: Long) = withController {
         it.seekTo(ms)
         Together.push()

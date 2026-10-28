@@ -24,6 +24,7 @@ android {
         versionCode = nyaoBuild
         versionName = "$nyaoName ($nyaoBuild)" + (nyaoChannel?.let { " $it" } ?: "")
         // ключи Last.fm — из секретов GitHub (без них Last.fm в настройках выключен)
+        buildConfigField("String", "CHANNEL", "\"" + (nyaoChannel ?: "stable") + "\"")
         buildConfigField("String", "LASTFM_KEY", "\"" + (System.getenv("NYAO_LASTFM_KEY") ?: "") + "\"")
         buildConfigField("String", "LASTFM_SECRET", "\"" + (System.getenv("NYAO_LASTFM_SECRET") ?: "") + "\"")
     }

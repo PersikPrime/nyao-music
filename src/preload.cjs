@@ -20,6 +20,16 @@ contextBridge.exposeInMainWorld('nyao', {
     onFullscreen: (cb) => ipcRenderer.on('win:fullscreen', (_e, on) => cb(on))
   },
   coverColor: (url) => call('cover:color', url),
+  dev: {
+    info: () => call('dev:info'),
+    hotClearBad: () => call('dev:hotClearBad'),
+    open: (what) => call('dev:open', what),
+    ping: () => call('dev:ping'),
+    offline: (on) => call('dev:offline', on),
+    crash: (what) => call('dev:crash', what),
+    diag: () => call('dev:diag'),
+    lyricsProbe: (track) => call('dev:lyricsProbe', track)
+  },
   card: {
     cover: (url) => call('card:cover', url),
     copy: (dataUrl) => call('card:copy', dataUrl),
@@ -144,7 +154,7 @@ contextBridge.exposeInMainWorld('nyao', {
   prepare: (id) => call('stream:prepare', id),
   loudness: (id) => call('stream:loudness', id),
   streamError: (id) => call('stream:error', id),
-  lyrics: (track) => call('lyrics', track),
+  lyrics: (track, opts) => call('lyrics', track, opts),
   like: (track, on) => call('like', track, on),
   sc: {
     pending: () => call('sc:pending'),

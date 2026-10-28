@@ -192,7 +192,9 @@ fun NyaoTheme(content: @Composable () -> Unit) {
     val p = Accent.palette
     val look = Look.current
     val colors = remember(p, look.theme) { scheme(p, BasePalette.of(look.theme), look.mono, look.glass) }
-    MaterialTheme(colorScheme = colors, typography = NyaoType, shapes = NyaoShapes, content = content)
+    // прикол «Рукописный шрифт» из раздела «Разработчик»
+    val type = if (org.nyao.music.ui.Pranks.has("comic")) remember { org.nyao.music.ui.Pranks.cursive(NyaoType) } else NyaoType
+    MaterialTheme(colorScheme = colors, typography = type, shapes = NyaoShapes, content = content)
 }
 
 val TextStyle.tabular: TextStyle get() = copy(fontFeatureSettings = "tnum")

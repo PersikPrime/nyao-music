@@ -76,7 +76,10 @@ fun sourceShort(source: String): String = when (source) {
 @Composable
 fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(16.dp)) {
     Box(modifier.clip(shape).background(NyaoColors.S3), contentAlignment = Alignment.Center) {
-        if (url == null) {
+        if (org.nyao.music.ui.Pranks.has("cat")) {
+            // прикол «Котики вместо обложек»
+            androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(org.nyao.music.R.drawable.prank_cat), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else if (url == null) {
             NyaoWaves(Modifier.fillMaxSize().padding(14.dp), animate = false, strokeDp = 3f, alpha = 0.5f)
         } else {
             AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())

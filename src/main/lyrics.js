@@ -107,66 +107,104 @@ function plainLines(text) {
   return String(text).split(/\r?\n/).map((t) => ({ time: null, text: t.trim() }));
 }
 
+/** Провайдеры текстов по умолчанию — в этом порядке их и спрашиваем */
+export const LYRICS_PROVIDERS = ['ya', 'nyao', 'lrclib', 'ytm'];
+
 /**
- * Лучший текст из всех источников: с таймингами лучше, чем без.
+ * Порядок из настроек → полный список [{ id, on }]: неизвестное выкидываем, недостающее (новые провайдеры) — в конец, включённым.
+ */
+export function lyricsOrder(saved) {
+  const out = [];
+  for (const x of Array.isArray(saved) ? saved : []) {
+    const id = typeof x === 'string' ? x : x && x.id;
+    if (LYRICS_PROVIDERS.includes(id) && !out.some((o) => o.id === id)) out.push({ id, on: !(x && x.on === false) });
+  }
+  for (const id of LYRICS_PROVIDERS) if (!out.some((o) => o.id === id)) out.push({ id, on: true });
+  return out;
+}
+
+/**
+ * Лучший текст из источников в порядке order (как порядок загрузки дисков): первый с таймингами; если таких нет —
+ * первый без таймингов. wordsFirst — разметка по словам из Nyao LyricLabs (караоке) важнее порядка.
  * ya, yt — провайдеры (или null, если сервис недоступен); matchYa(track) → трек Яндекса для трека другого сервиса.
  */
-export async function findLyricsChain(track, { fetch = globalThis.fetch, ya = null, yt = null, matchYa = null, log = () => {} } = {}) {
+export async function findLyricsChain(track, { fetch = globalThis.fetch, ya = null, yt = null, matchYa = null, log = () => {}, order = null, wordsFirst = true, exclude = [] } = {}) {
+  // exclude — «попробовать другой источник»: эти провайдеры в этот раз пропускаем
+  const list = lyricsOrder(order).filter((p) => p.on && !exclude.includes(p.id)).map((p) => p.id);
   let plain = null;
   const diag = [];
   const why = (e) => (e && e.status ? `ошибка ${e.status}` : `ошибка: ${String((e && e.message) || e).slice(0, 80)}`);
   const yaName = (p) => (p ? `Яндекс Музыка · ${p}` : 'Яндекс Музыка');
-  // Nyao LyricLabs спрашиваем сразу, параллельно с Яндексом: если там слова размечены по времени (караоке),
-  // берём его даже при тексте из Яндекса — там только строки
-  const ownP = findLyrics(track, fetch, { base: NYAO_LYRICS_API, name: 'Nyao LyricLabs', search: false }).catch((e) => {
-    diag.push(`Nyao LyricLabs: ${why(e)}`);
-    return null;
-  });
-  const ownWords = () => Promise.race([ownP, new Promise((r) => { const tm = setTimeout(() => r(null), 2500); if (tm.unref) tm.unref(); })]).then((o) => (o && o.words ? o : null));
-  // 1) Яндекс: сам трек или найденный в Яндексе такой же
-  let yaId = track.source === 'ya' ? track.srcId : null;
-  if (!ya) diag.push('Яндекс: нет входа');
-  if (ya && !yaId && matchYa) {
-    const m = await matchYa(track).catch(() => null);
-    if (m) yaId = m.srcId;
-    else diag.push('Яндекс: такого трека нет');
-  }
-  if (ya && yaId) {
-    try {
-      const lrc = await ya.lyrics(yaId, 'LRC');
-      const lines = lrc ? parseLrc(lrc.text) : [];
-      if (lines.length) return (await ownWords()) || { synced: true, lines, source: yaName(lrc.provider) };
-      const txt = await ya.lyrics(yaId, 'TEXT');
-      if (txt) plain = { synced: false, lines: plainLines(txt.text), source: yaName(txt.provider) };
-      else diag.push('Яндекс: текста нет');
-    } catch (e) {
-      diag.push(`Яндекс: ${why(e)}`);
-      log(`[lyrics] ${track.id} Яндекс: ${e.stack || e.message}`);
-    }
-  }
-  // 2) Nyao LyricLabs — тексты, проверенные специалистами
-  const own = await ownP;
-  if (own && own.synced) return own;
-  if (!plain && own) plain = own;
-  // 3) LRCLIB
-  let lr = null;
-  try {
-    lr = await findLyrics(track, fetch);
-  } catch (e) {
-    diag.push(`LRCLIB: ${why(e)}`);
-  }
-  if (lr && lr.synced) return lr;
-  if (!lr) diag.push('LRCLIB: текста нет');
-  if (!plain && lr) plain = lr;
-  // 3) YouTube Music (без таймингов)
-  if (!plain && yt && track.source === 'yt') {
-    const t = await yt.lyrics(track.srcId).catch((e) => {
-      diag.push(`YouTube Music: ${why(e)}`);
+  const nyaoOn = list.includes('nyao');
+  // Nyao LyricLabs спрашиваем сразу, параллельно с остальными: если там слова размечены по времени (караоке),
+  // берём его даже при тексте из источника выше — там только строки
+  const ownP = nyaoOn
+    ? findLyrics(track, fetch, { base: NYAO_LYRICS_API, name: 'Nyao LyricLabs', search: false }).catch((e) => {
+      diag.push(`Nyao LyricLabs: ${why(e)}`);
       return null;
-    });
-    if (t) plain = { synced: false, lines: plainLines(t), source: 'YouTube Music' };
+    })
+    : Promise.resolve(null);
+  const ownWords = () => (wordsFirst && nyaoOn
+    ? Promise.race([ownP, new Promise((r) => { const tm = setTimeout(() => r(null), 2500); if (tm.unref) tm.unref(); })]).then((o) => (o && o.words ? o : null))
+    : Promise.resolve(null));
+
+  const get = {
+    // Яндекс: сам трек или найденный в Яндексе такой же
+    async ya() {
+      let yaId = track.source === 'ya' ? track.srcId : null;
+      if (!ya) {
+        diag.push('Яндекс: нет входа');
+        return null;
+      }
+      if (!yaId && matchYa) {
+        const m = await matchYa(track).catch(() => null);
+        if (m) yaId = m.srcId;
+        else diag.push('Яндекс: такого трека нет');
+      }
+      if (!yaId) return null;
+      try {
+        const lrc = await ya.lyrics(yaId, 'LRC');
+        const lines = lrc ? parseLrc(lrc.text) : [];
+        if (lines.length) return { synced: true, lines, source: yaName(lrc.provider) };
+        const txt = await ya.lyrics(yaId, 'TEXT');
+        if (txt) return { synced: false, lines: plainLines(txt.text), source: yaName(txt.provider) };
+        diag.push('Яндекс: текста нет');
+      } catch (e) {
+        diag.push(`Яндекс: ${why(e)}`);
+        log(`[lyrics] ${track.id} Яндекс: ${e.stack || e.message}`);
+      }
+      return null;
+    },
+    // Nyao LyricLabs — тексты, проверенные специалистами
+    nyao: () => ownP,
+    async lrclib() {
+      try {
+        const lr = await findLyrics(track, fetch);
+        if (!lr) diag.push('LRCLIB: текста нет');
+        return lr;
+      } catch (e) {
+        diag.push(`LRCLIB: ${why(e)}`);
+        return null;
+      }
+    },
+    // YouTube Music — только текст без таймингов и только для своих треков
+    async ytm() {
+      if (!yt || track.source !== 'yt') return null;
+      const t = await yt.lyrics(track.srcId).catch((e) => {
+        diag.push(`YouTube Music: ${why(e)}`);
+        return null;
+      });
+      return t ? { synced: false, lines: plainLines(t), source: 'YouTube Music' } : null;
+    }
+  };
+
+  const tag = (res, id) => (res ? { ...res, provider: res.provider || id } : res);
+  for (const id of list) {
+    const res = tag(await get[id](), id);
+    if (res && res.synced) return tag(id !== 'nyao' && !res.words && (await ownWords()), 'nyao') || res;
+    if (res && !plain) plain = res;
   }
-  if (plain) return plain;
-  log(`[lyrics] ${track.id} «${track.artist} — ${track.title}»: ${diag.join(' · ')}`);
+  if (plain) return tag(await ownWords(), 'nyao') || plain;
+  log(`[lyrics] ${track.id} «${track.artist} — ${track.title}»: ${diag.join(' · ') || 'все источники выключены'}`);
   return { synced: false, lines: [], source: null, diag };
 }
