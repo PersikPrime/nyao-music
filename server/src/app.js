@@ -477,7 +477,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
           // слишком старая сборка: синхронизацию не даём, просим обновиться
           // (сайт текстов /api/… — не приложение, сборки у него нет)
           // (Automator — не приложение Music, у него своя нумерация; /admin/* не проверяем)
-          if (cfg.minBuild && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/admin/') && clientBuild(req) < cfg.minBuild) {
+          if (cfg.minBuild && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/admin/') && url.pathname !== '/auth/logout' && clientBuild(req) < cfg.minBuild) {
             const e = new HttpError(426, 'Эта версия Nyao Music устарела — обнови приложение в настройках');
             e.extra = { minBuild: cfg.minBuild };
             throw e;

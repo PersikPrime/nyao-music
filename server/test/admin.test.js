@@ -196,6 +196,7 @@ test('статус: применить, история, минимальная �
     // старая сборка Music теперь получает 426, а Automator — нет
     assert.equal((await call('GET', '/me', { token: owner.token, build: 80 })).status, 426);
     assert.equal((await call('GET', '/admin/me', { token: owner.token, build: 80 })).status, 200);
+    assert.equal((await call('POST', '/auth/logout', { token: (await login(778)).token })).status, 200, 'выход работает без заголовка сборки');
     const hist = await call('GET', '/admin/status/history', { token: owner.token });
     assert.equal(hist.json.items.length, 1);
     assert.equal(hist.json.items[0].by.name, 'Юзер');
