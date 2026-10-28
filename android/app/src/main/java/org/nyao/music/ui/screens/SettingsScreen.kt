@@ -663,7 +663,7 @@ private fun UpdateCard(model: AppModel, showTitle: Boolean = true) {
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (i != null && i.available && i.notes.isNotBlank()) {
-            Text(i.notes.take(400), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(i.notes.replace(Regex("</?(sub|small)>"), "").take(400), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (i != null && i.available && i.apkUrl != null) {

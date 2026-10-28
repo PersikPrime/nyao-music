@@ -1154,3 +1154,4 @@ body.fs-on .toast { z-index: 1000; }
 .dev-row .bad { color: #FF8A80; }
 .dev-row .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #dev-fps { position: fixed; right: 12px; bottom: 12px; z-index: 9999; padding: 6px 10px; border-radius: 10px; background: rgba(0,0,0,.75); color: #8FE3B0; font: 600 12px/1 ui-monospace, monospace; pointer-events: none; }
+.notes-small { font-size: 11px; opacity: .8; }

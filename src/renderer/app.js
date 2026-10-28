@@ -1033,6 +1033,10 @@ const UPDATE_CHANNEL_HINT = {
   dev: 'Бета: новое раньше всех, иногда с недочётами. Если обычный релиз новее — придёт он.',
   nightly: 'Ночные сборки — эксперименты прямо из разработки, могут ломаться.'
 };
+/** Заметки релиза: текст как есть, а <sub>…</sub> (мелкий шрифт на GitHub) — мелким и здесь */
+function notesHtml(text) {
+  return esc(text).replace(/&lt;(sub|small)&gt;([\s\S]*?)&lt;\/\1&gt;/g, '<span class="notes-small">$2</span>');
+}
 function updateCardHtml() {
   const u = state.update;
   const i = u.info;
@@ -1062,7 +1066,7 @@ function updateCardHtml() {
     </div>
     <div class="hint" id="update-status">${status}</div>
     ${pct != null ? `<div class="update-bar"><span style="width:${pct}%"></span></div>` : ''}
-    ${i && i.available && i.notes ? `<details><summary>Что нового</summary><div class="hint" style="white-space:pre-wrap;margin-top:8px">${esc(i.notes)}</div></details>` : ''}
+    ${i && i.available && i.notes ? `<details><summary>Что нового</summary><div class="hint" style="white-space:pre-wrap;margin-top:8px">${notesHtml(i.notes)}</div></details>` : ''}
     ${installed ? `<div class="hint" style="margin-top:6px">Код обновлён без установщика; установщиком стоит ${esc(installed)}.</div>` : ''}
     <div class="update-channel">
       <span>Канал обновлений</span>
