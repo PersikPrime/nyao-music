@@ -125,6 +125,34 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         forget()
     }
 
+    /**
+     * Подключить Nyao Legacy (Android 4.x) по коду с его экрана. Токены Яндекса и YouTube Music шифруются
+     * открытым ключом устройства (RSA-OAEP-SHA1 + AES-256-GCM): сервер только передаёт пакет и прочитать его не может.
+     * → имя подключённого устройства
+     */
+    suspend fun legacyPair(code: String): String {
+        val c = code.uppercase().filter { it.isLetterOrDigit() }
+        if (c.length != 6) throw ApiException("Код — 6 символов с экрана старого устройства")
+        val info = request("GET", "/legacy/pair/code/$c")
+        val b64d = { s: String -> android.util.Base64.decode(s, android.util.Base64.DEFAULT) }
+        val b64 = { b: ByteArray -> android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP) }
+        val pub = java.security.KeyFactory.getInstance("RSA").generatePublic(java.security.spec.X509EncodedKeySpec(b64d(info.getString("publicKey"))))
+        val data = JSONObject().put("v", 1)
+        prefs.yandexToken?.takeIf { it.isNotBlank() }?.let { data.put("yandexToken", it) }
+        prefs.ytCookie?.takeIf { it.isNotBlank() }?.let { data.put("ytCookie", it) }
+        if (!data.has("yandexToken") && !data.has("ytCookie")) throw ApiException("Сначала войди в Яндекс Музыку или YouTube Music здесь")
+        val rnd = java.security.SecureRandom()
+        val aes = ByteArray(32).also { rnd.nextBytes(it) }
+        val iv = ByteArray(12).also { rnd.nextBytes(it) }
+        val rsa = javax.crypto.Cipher.getInstance("RSA/ECB/OAEPWithSHA-1AndMGF1Padding").apply { init(javax.crypto.Cipher.ENCRYPT_MODE, pub) }
+        val gcm = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(javax.crypto.Cipher.ENCRYPT_MODE, javax.crypto.spec.SecretKeySpec(aes, "AES"), javax.crypto.spec.GCMParameterSpec(128, iv))
+        }
+        val payload = b64(rsa.doFinal(aes)) + "." + b64(iv) + "." + b64(gcm.doFinal(data.toString().toByteArray(Charsets.UTF_8)))
+        request("POST", "/legacy/pair/code/$c", JSONObject().put("payload", payload))
+        return info.optString("device")
+    }
+
     suspend fun devices(): List<CloudDevice> {
         val r = request("GET", "/me")
         r.obj("user")?.let {

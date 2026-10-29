@@ -168,6 +168,7 @@ contextBridge.exposeInMainWorld('nyao', {
     logout: () => call('cloud:logout'),
     me: () => call('cloud:me'),
     removeDevice: (id) => call('cloud:removeDevice', id),
+    legacyPair: (code) => call('cloud:legacyPair', code),
     play: (p) => call('cloud:play', p),
     now: (info) => call('cloud:now', info),
     others: () => call('cloud:others'),

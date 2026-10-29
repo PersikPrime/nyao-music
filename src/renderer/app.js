@@ -1135,8 +1135,9 @@ function nyaoCardHtml() {
     <div class="devices">
       <div class="eyebrow">Устройства</div>
       ${devs ? devs.map((d) => `<div class="dev"><span class="dev-ic">${d.platform === 'android' ? '📱' : '💻'}</span><span class="dev-info"><b>${esc(d.device || PLATFORM_NAME[d.platform] || 'Устройство')}</b><span>${d.current ? 'это устройство' : 'был ' + ago(d.lastSeen)}</span></span>${d.current ? '' : `<button class="link-plain" data-action="cloud-device-remove" data-id="${esc(d.id)}">Отключить</button>`}</div>`).join('') : '<div class="skeleton" style="height:44px"></div>'}
+      <button class="link-plain" data-action="legacy-pair">Подключить по коду — Nyao Legacy на Android 4</button>
     </div>
-    <div class="hint">Токены музыкальных сервисов на сервер не отправляются — они остаются только на устройствах.</div>
+    <div class="hint">Токены музыкальных сервисов на сервере не хранятся — они остаются на устройствах. Для Nyao Legacy они передаются зашифрованными ключом самого устройства.</div>
   </section>`;
 }
 const TG_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.9 4.3 18.7 19.4c-.2 1-.9 1.3-1.7.8l-4.8-3.5-2.3 2.2c-.3.3-.5.5-1 .5l.3-4.9 8.9-8c.4-.3-.1-.5-.6-.2L6.5 13.2 1.8 11.7c-1-.3-1-1 .2-1.5L20.6 3c.9-.3 1.6.2 1.3 1.3z"/></svg>';
@@ -2772,6 +2773,18 @@ async function handleAction(el, e) {
       renderSettings();
       renderAccounts();
       break;
+    case 'legacy-pair': {
+      const code = await askText('Код с экрана Nyao Legacy', '', 'Подключить');
+      if (!code) break;
+      try {
+        const name = await api.cloud.legacyPair(code);
+        toast(`Подключено: ${name || 'устройство'}`);
+        loadCloudDevices();
+      } catch (e) {
+        toast(e.message || 'Не получилось подключить');
+      }
+      break;
+    }
     case 'cloud-device-remove':
       await api.cloud.removeDevice(el.dataset.id);
       toast('Устройство отключено');

@@ -61,6 +61,8 @@ fun ProfileScreen(model: AppModel, part: String = "all") {
     val s by Repo.prefs.settings.collectAsState()
     val lf by Repo.lastfm.state.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
+    var legacyOpen by remember { mutableStateOf(false) }
+    if (legacyOpen) LegacyPairDialog { legacyOpen = false }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().padding(horizontal = 16.dp).padding(top = 12.dp).padding(BottomInset),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -109,6 +111,7 @@ fun ProfileScreen(model: AppModel, part: String = "all") {
         SettingsGroup("Профиль") {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.BarChart, "Статистика") { model.go(Route.Stats) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Devices, "Устройства") { model.connectOpen = true }
+            if (user != null) SettingsRow(org.nyao.music.ui.components.NyaoIcons.Devices, "Подключить по коду", "Nyao Legacy на Android 4") { legacyOpen = true }
             if (user != null) SettingsRow(org.nyao.music.ui.components.NyaoIcons.Edit, "Мой профиль и приватность", social?.let { if (it.invisible) "невидимка" else when (it.visibility) { "all" -> "видят все"; "nobody" -> "скрыт"; else -> "только друзья" } }) { model.go(Route.SettingsPage("profile")) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Person, "Аккаунт Nyao", if (user != null) "вход выполнен" else "не выполнен", last = true) { model.go(Route.SettingsPage("account")) }
         }
@@ -679,4 +682,48 @@ private fun UpdateCard(model: AppModel, showTitle: Boolean = true) {
             }) { Text("Релизы") }
         }
     }
+}
+
+
+/** «Подключить по коду»: код с экрана Nyao Legacy (Android 4.x) */
+@Composable
+private fun LegacyPairDialog(onClose: () -> Unit) {
+    var code by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    var done by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { if (!busy) onClose() },
+        title = { Text(if (done) "Готово" else "Подключить по коду") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!done) {
+                    Text("Код — на экране Nyao Legacy. Устройство получит вход в Nyao и твои Яндекс Музыку и YouTube Music; сервер передаёт их зашифрованными и прочитать не может.", style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { v -> code = v.uppercase().filter { it.isLetterOrDigit() }.take(6) },
+                        label = { Text("Код, 6 символов") },
+                        singleLine = true,
+                        enabled = !busy,
+                    )
+                }
+                msg?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = if (done) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            if (done) TextButton(onClick = onClose) { Text("Закрыть") }
+            else TextButton(enabled = !busy && code.length == 6, onClick = {
+                busy = true
+                msg = null
+                scope.launch {
+                    runCatching { Repo.cloud.legacyPair(code) }
+                        .onSuccess { msg = "Подключено: ${it.ifBlank { "устройство" }}. Через пару секунд оно откроет главную."; done = true }
+                        .onFailure { msg = it.message ?: "Не получилось" }
+                    busy = false
+                }
+            }) { Text(if (busy) "Подключаем…" else "Подключить") }
+        },
+        dismissButton = { if (!done) TextButton(enabled = !busy, onClick = onClose) { Text("Отмена") } },
+    )
 }

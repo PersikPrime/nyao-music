@@ -728,6 +728,25 @@ function registerIpc() {
     return cloud.request(method, p, body);
   });
   handle('cloud:removeDevice', (id) => cloud.removeDevice(id));
+  // Nyao Legacy (Android 4.x): токены шифруются открытым ключом устройства (RSA-OAEP-SHA1 + AES-256-GCM),
+  // сервер только передаёт пакет и прочитать его не может
+  handle('cloud:legacyPair', async (raw) => {
+    const code = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code.length !== 6) throw new Error('Код — 6 символов с экрана старого устройства');
+    const info = await cloud.request('GET', `/legacy/pair/code/${code}`);
+    const data = { v: 1 };
+    if (secrets.get('yandexToken')) data.yandexToken = secrets.get('yandexToken');
+    if (secrets.get('ytmCookie')) data.ytCookie = secrets.get('ytmCookie');
+    if (!data.yandexToken && !data.ytCookie) throw new Error('Сначала войди в Яндекс Музыку или YouTube Music');
+    const pub = crypto.createPublicKey({ key: Buffer.from(info.publicKey, 'base64'), format: 'der', type: 'spki' });
+    const aes = crypto.randomBytes(32);
+    const iv = crypto.randomBytes(12);
+    const key = crypto.publicEncrypt({ key: pub, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha1' }, aes);
+    const c = crypto.createCipheriv('aes-256-gcm', aes, iv);
+    const enc = Buffer.concat([c.update(JSON.stringify(data), 'utf8'), c.final(), c.getAuthTag()]);
+    await cloud.request('POST', `/legacy/pair/code/${code}`, { payload: [key, iv, enc].map((b) => b.toString('base64')).join('.') });
+    return info.device || '';
+  });
   handle('cloud:play', (play) => {
     lastfm.scrobble({ track: play && play.track, listened: (play && play.listened) || 0 });
     return cloud.recordPlay(play);
