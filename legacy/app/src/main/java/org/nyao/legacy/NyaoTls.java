@@ -123,6 +123,24 @@ public final class NyaoTls {
         return dn;
     }
 
+    /**
+     * SNI — имя сервера в рукопожатии. Без него Cloudflare и многие серверы не знают, какой сертификат отдать.
+     * На 4.x сокет сам его не ставит: включаем через setHostname (есть у OpenSSLSocketImpl с Android 4.0).
+     */
+    public static String setSni(SSLSocket s, String host) {
+        try {
+            s.getClass().getMethod("setHostname", String.class).invoke(s, host);
+            try {
+                s.getClass().getMethod("setUseSessionTickets", boolean.class).invoke(s, true);
+            } catch (Throwable ignored) {
+                // не обязательно
+            }
+            return "включён";
+        } catch (Throwable t) {
+            return "не удалось (" + t.getClass().getSimpleName() + ")";
+        }
+    }
+
     /** Обёртка, которая запоминает цепочку от сервера — чтобы показать её даже при ошибке проверки */
     public static final class Recording implements X509TrustManager {
         private final X509TrustManager inner;
@@ -218,7 +236,9 @@ public final class NyaoTls {
 
         @Override
         public Socket createSocket(Socket s, String host, int port, boolean autoClose) throws IOException {
-            return patch(d.createSocket(s, host, port, autoClose));
+            Socket out = patch(d.createSocket(s, host, port, autoClose));
+            if (out instanceof SSLSocket) setSni((SSLSocket) out, host);
+            return out;
         }
 
         @Override

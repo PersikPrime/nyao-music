@@ -44,7 +44,7 @@ public class ProbeActivity extends Activity {
         btnNyao = (Button) findViewById(R.id.btnNyao);
         btnSystem = (Button) findViewById(R.id.btnSystem);
         ((TextView) findViewById(R.id.info)).setText(
-                "Nyao Legacy 0.1 - пробная сборка\n"
+                "Nyao Legacy 0.1 - пробная сборка 2\n"
                         + "Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ") - "
                         + Build.MANUFACTURER + " " + Build.MODEL);
         btnNyao.setOnClickListener(new View.OnClickListener() {
@@ -100,8 +100,65 @@ public class ProbeActivity extends Activity {
         }).start();
     }
 
+    /**
+     * Прямое рукопожатие, без встроенного HTTP-клиента: он на 4.4 после неудачи молча повторяет через SSLv3
+     * и прячет настоящую ошибку. Пробуем три набора шифров, чтобы понять, что именно не сходится.
+     */
+    private void raw(String host, X509TrustManager base) {
+        String[][] variants = {{"все стойкие", ""}, {"только GCM", "GCM"}, {"только CBC", "CBC"}};
+        for (String[] v : variants) {
+            NyaoTls.Recording rec = new NyaoTls.Recording(base);
+            SSLSocket s = null;
+            try {
+                NyaoTls.Tls12Factory f = new NyaoTls.Tls12Factory(rec);
+                java.net.Socket tcp = new java.net.Socket();
+                tcp.connect(new java.net.InetSocketAddress(host, 443), 15000);
+                tcp.setSoTimeout(15000);
+                s = (SSLSocket) f.createSocket(tcp, host, 443, true);
+                if (v[1].length() > 0) {
+                    java.util.List<String> only = new java.util.ArrayList<String>();
+                    for (String c : s.getEnabledCipherSuites()) if (c.contains(v[1])) only.add(c);
+                    s.setEnabledCipherSuites(only.toArray(new String[0]));
+                }
+                String sni = NyaoTls.setSni(s, host);
+                s.startHandshake();
+                boolean nameOk = javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(host, s.getSession());
+                line("  рукопожатие (" + v[0] + "): [OK] " + s.getSession().getProtocol() + " - " + s.getSession().getCipherSuite()
+                        + (nameOk ? "" : " [ИМЯ НЕ СОВПАЛО]") + " - SNI " + sni);
+                if (v[1].length() == 0) {
+                    chain(rec.lastChain);
+                    httpOver(s, host);
+                }
+            } catch (Throwable t) {
+                line("  рукопожатие (" + v[0] + "): [ОШИБКА] " + describe(t));
+                if (v[1].length() == 0) chain(rec.lastChain);
+            } finally {
+                try {
+                    if (s != null) s.close();
+                } catch (Throwable ignored) {
+                    // уже закрыт
+                }
+            }
+        }
+    }
+
+    /** Простой GET поверх уже установленного соединения */
+    private void httpOver(SSLSocket s, String host) throws Exception {
+        java.io.OutputStream out = s.getOutputStream();
+        out.write(("GET /updates/latest HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: NyaoLegacy/0.1 (Android "
+                + Build.VERSION.RELEASE + ")\r\nAccept: application/json\r\nConnection: close\r\n\r\n").getBytes("US-ASCII"));
+        out.flush();
+        String resp = new String(NyaoTls.readAll(s.getInputStream()), "UTF-8");
+        int eol = resp.indexOf("\r\n");
+        line("  " + (eol > 0 ? resp.substring(0, eol) : "ответ пустой"));
+        Matcher m = Pattern.compile("\"tag_name\"\\s*:\\s*\"([^\"]+)\"").matcher(resp);
+        if (m.find()) line("  последний релиз: " + m.group(1));
+    }
+
     private void probe(String host, X509TrustManager base) {
         line("\n>> " + host);
+        raw(host, base);
+        line("  -- через встроенный HTTP-клиент:");
         NyaoTls.Recording rec = new NyaoTls.Recording(base);
         HttpsURLConnection c = null;
         long t0 = SystemClock.elapsedRealtime();
