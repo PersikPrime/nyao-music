@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0B0B10"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="3dp"
+        android:orientation="horizontal">
+        <View android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="#FFD60A" />
+        <View android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="#F0574A" />
+        <View android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="#CFC4FF" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp"
+        android:textColor="#9C9CAB"
+        android:textSize="13sp" />
+
+    <Button
+        android:id="@+id/btnNyao"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginLeft="12dp"
+        android:layout_marginRight="12dp"
+        android:background="#CFC4FF"
+        android:text="Проверить с корнями Nyao"
+        android:textColor="#15121F"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/btnSystem"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginLeft="12dp"
+        android:layout_marginRight="12dp"
+        android:layout_marginTop="8dp"
+        android:background="#1F1F28"
+        android:text="Проверить системными сертификатами"
+        android:textColor="#F2F2F5"
+        android:textSize="15sp" />
+
+    <ScrollView
+        android:id="@+id/scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:layout_weight="1"
+        android:background="#16161D">
+
+        <TextView
+            android:id="@+id/log"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="12dp"
+            android:textColor="#F2F2F5"
+            android:textIsSelectable="true"
+            android:textSize="12sp"
+            android:typeface="monospace" />
+    </ScrollView>
+</LinearLayout>
