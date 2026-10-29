@@ -11,7 +11,7 @@ android {
     defaultConfig {
         applicationId = "org.nyao.legacy"
         minSdk = 16
-        targetSdk = 34
+        targetSdk = 23
         versionCode = 1
         versionName = "0.1"
         // устройства на 4.x — 32-битные ARM или Intel Atom; 64-битные библиотеки им не нужны

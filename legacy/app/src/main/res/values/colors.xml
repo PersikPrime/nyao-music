@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#0B0B10</color>
+    <color name="panel">#16161D</color>
+    <color name="panel2">#1F1F28</color>
+    <color name="line">#2A2A35</color>
+    <color name="text">#F2F2F5</color>
+    <color name="muted">#9C9CAB</color>
+    <color name="dim">#8A8A98</color>
+    <color name="accent">#CFC4FF</color>
+    <color name="onAccent">#15121F</color>
+    <color name="yellow">#FFD60A</color>
+    <color name="coral">#F0574A</color>
+
+    <style name="Nyao" parent="@android:style/Theme.Holo.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:textColor">@color/text</item>
+    </style>
+</resources>

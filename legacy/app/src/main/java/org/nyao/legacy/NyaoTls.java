@@ -160,6 +160,41 @@ public final class NyaoTls {
         }
     }
 
+    /** Сначала корни Nyao, потом системные: для Яндекса, YouTube и прочих сайтов */
+    public static final class Composite implements X509TrustManager {
+        private final X509TrustManager a;
+        private final X509TrustManager b;
+
+        public Composite(X509TrustManager a, X509TrustManager b) {
+            this.a = a;
+            this.b = b;
+        }
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+            b.checkClientTrusted(chain, authType);
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+            try {
+                a.checkServerTrusted(chain, authType);
+            } catch (CertificateException e) {
+                b.checkServerTrusted(chain, authType);
+            }
+        }
+
+        @Override
+        public X509Certificate[] getAcceptedIssuers() {
+            X509Certificate[] x = a.getAcceptedIssuers();
+            X509Certificate[] y = b.getAcceptedIssuers();
+            X509Certificate[] out = new X509Certificate[x.length + y.length];
+            System.arraycopy(x, 0, out, 0, x.length);
+            System.arraycopy(y, 0, out, x.length, y.length);
+            return out;
+        }
+    }
+
     /** Обёртка, которая запоминает цепочку от сервера — чтобы показать её даже при ошибке проверки */
     public static final class Recording implements X509TrustManager {
         private final X509TrustManager inner;

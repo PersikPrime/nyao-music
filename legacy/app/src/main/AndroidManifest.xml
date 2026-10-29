@@ -2,18 +2,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
+        android:name=".NyaoApp"
         android:allowBackup="false"
         android:label="Nyao Legacy"
-        android:theme="@android:style/Theme.Holo">
+        android:theme="@style/Nyao">
         <activity
-            android:name=".ProbeActivity"
-            android:exported="true">
+            android:name=".PairActivity"
+            android:exported="true"
+            android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".MainActivity" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".PlayerActivity" android:launchMode="singleTop" />
+        <activity android:name=".ProbeActivity" android:label="Проверка связи" />
+        <service android:name=".PlayerService" android:exported="false" />
     </application>
 </manifest>
