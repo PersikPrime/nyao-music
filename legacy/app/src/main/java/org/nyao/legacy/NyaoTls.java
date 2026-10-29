@@ -129,6 +129,14 @@ public final class NyaoTls {
      */
     public static String setSni(SSLSocket s, String host) {
         try {
+            if (org.conscrypt.Conscrypt.isConscrypt(s)) {
+                org.conscrypt.Conscrypt.setHostname(s, host);
+                return "включён";
+            }
+        } catch (Throwable ignored) {
+            // нет Conscrypt — дальше системный способ
+        }
+        try {
             s.getClass().getMethod("setHostname", String.class).invoke(s, host);
             try {
                 s.getClass().getMethod("setUseSessionTickets", boolean.class).invoke(s, true);
@@ -138,6 +146,17 @@ public final class NyaoTls {
             return "включён";
         } catch (Throwable t) {
             return "не удалось (" + t.getClass().getSimpleName() + ")";
+        }
+    }
+
+    /** Версия встроенного Conscrypt или текст ошибки, если он не загрузился на этом устройстве */
+    public static String conscryptInfo() {
+        try {
+            org.conscrypt.Conscrypt.Version v = org.conscrypt.Conscrypt.version();
+            return "Conscrypt " + v.major() + "." + v.minor() + "." + v.patch()
+                    + (org.conscrypt.Conscrypt.isAvailable() ? "" : " (недоступен)");
+        } catch (Throwable t) {
+            return "Conscrypt не загрузился: " + t;
         }
     }
 
@@ -170,14 +189,28 @@ public final class NyaoTls {
     /** Фабрика сокетов: только TLS 1.2+ и стойкие шифры */
     public static final class Tls12Factory extends SSLSocketFactory {
         private final SSLSocketFactory d;
+        private final boolean conscrypt;
         public volatile SSLSocket last;
 
         public Tls12Factory(X509TrustManager tm) throws Exception {
+            this(tm, false);
+        }
+
+        /**
+         * conscrypt = true — свой TLS-движок (BoringSSL внутри APK) вместо системного OpenSSL 4.x:
+         * в системном на 4.4 нет AES-GCM и ChaCha20, а серверы (Cloudflare, Caddy) старые CBC-шифры не принимают.
+         */
+        public Tls12Factory(X509TrustManager tm, boolean conscrypt) throws Exception {
+            this.conscrypt = conscrypt;
             SSLContext ctx;
-            try {
-                ctx = SSLContext.getInstance("TLSv1.2");
-            } catch (NoSuchAlgorithmException e) {
-                ctx = SSLContext.getInstance("TLS");
+            if (conscrypt) {
+                ctx = SSLContext.getInstance("TLS", org.conscrypt.Conscrypt.newProvider());
+            } else {
+                try {
+                    ctx = SSLContext.getInstance("TLSv1.2");
+                } catch (NoSuchAlgorithmException e) {
+                    ctx = SSLContext.getInstance("TLS");
+                }
             }
             ctx.init(null, new TrustManager[]{tm}, null);
             d = ctx.getSocketFactory();
@@ -187,7 +220,8 @@ public final class NyaoTls {
             if (s instanceof SSLSocket) {
                 SSLSocket ss = (SSLSocket) s;
                 ss.setEnabledProtocols(protocols(ss.getSupportedProtocols()));
-                ss.setEnabledCipherSuites(suites(ss.getEnabledCipherSuites(), ss.getSupportedCipherSuites()));
+                // у Conscrypt набор шифров по умолчанию и так современный
+                if (!conscrypt) ss.setEnabledCipherSuites(suites(ss.getEnabledCipherSuites(), ss.getSupportedCipherSuites()));
                 last = ss;
             }
             return s;

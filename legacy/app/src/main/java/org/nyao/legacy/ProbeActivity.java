@@ -44,7 +44,7 @@ public class ProbeActivity extends Activity {
         btnNyao = (Button) findViewById(R.id.btnNyao);
         btnSystem = (Button) findViewById(R.id.btnSystem);
         ((TextView) findViewById(R.id.info)).setText(
-                "Nyao Legacy 0.1 - пробная сборка 2\n"
+                "Nyao Legacy 0.1 - пробная сборка 3\n"
                         + "Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ") - "
                         + Build.MANUFACTURER + " " + Build.MODEL);
         btnNyao.setOnClickListener(new View.OnClickListener() {
@@ -82,6 +82,7 @@ public class ProbeActivity extends Activity {
                     } catch (Throwable t) {
                         line("Протоколы: не удалось узнать (" + describe(t) + ")");
                     }
+                    line(NyaoTls.conscryptInfo());
                     X509TrustManager base = nyao ? NyaoTls.nyaoTrust(ProbeActivity.this) : NyaoTls.systemTrust();
                     for (String host : HOSTS) probe(host, base);
                     line("\nГотово. Текст можно выделить и скопировать.");
@@ -104,13 +105,13 @@ public class ProbeActivity extends Activity {
      * Прямое рукопожатие, без встроенного HTTP-клиента: он на 4.4 после неудачи молча повторяет через SSLv3
      * и прячет настоящую ошибку. Пробуем три набора шифров, чтобы понять, что именно не сходится.
      */
-    private void raw(String host, X509TrustManager base) {
-        String[][] variants = {{"все стойкие", ""}, {"только GCM", "GCM"}, {"только CBC", "CBC"}};
+    private void raw(String host, X509TrustManager base, boolean conscrypt) {
+        String[][] variants = {{conscrypt ? "Conscrypt" : "системный TLS", ""}};
         for (String[] v : variants) {
             NyaoTls.Recording rec = new NyaoTls.Recording(base);
             SSLSocket s = null;
             try {
-                NyaoTls.Tls12Factory f = new NyaoTls.Tls12Factory(rec);
+                NyaoTls.Tls12Factory f = new NyaoTls.Tls12Factory(rec, conscrypt);
                 java.net.Socket tcp = new java.net.Socket();
                 tcp.connect(new java.net.InetSocketAddress(host, 443), 15000);
                 tcp.setSoTimeout(15000);
@@ -157,13 +158,14 @@ public class ProbeActivity extends Activity {
 
     private void probe(String host, X509TrustManager base) {
         line("\n>> " + host);
-        raw(host, base);
-        line("  -- через встроенный HTTP-клиент:");
+        raw(host, base, false);
+        raw(host, base, true);
+        line("  -- HTTP-клиент Android + Conscrypt:");
         NyaoTls.Recording rec = new NyaoTls.Recording(base);
         HttpsURLConnection c = null;
         long t0 = SystemClock.elapsedRealtime();
         try {
-            NyaoTls.Tls12Factory f = new NyaoTls.Tls12Factory(rec);
+            NyaoTls.Tls12Factory f = new NyaoTls.Tls12Factory(rec, true);
             c = (HttpsURLConnection) new URL("https://" + host + "/updates/latest").openConnection();
             c.setSSLSocketFactory(f);
             c.setConnectTimeout(15000);

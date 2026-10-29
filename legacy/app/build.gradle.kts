@@ -14,6 +14,10 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1"
+        // устройства на 4.x — 32-битные ARM или Intel Atom; 64-битные библиотеки им не нужны
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "x86")
+        }
     }
 
     compileOptions {
@@ -31,4 +35,9 @@ android {
         // старые API используются намеренно
         abortOnError = false
     }
+}
+
+dependencies {
+    // Свой TLS-движок (BoringSSL): TLS 1.2/1.3 с AES-GCM и ChaCha20 там, где системный OpenSSL 4.x их не умеет
+    implementation("org.conscrypt:conscrypt-android:2.5.2")
 }
