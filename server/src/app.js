@@ -10,6 +10,7 @@ import { socialRoutes } from './social.js';
 import { lyricsRoutes, lrclibError } from './lyrics.js';
 import { lyricsPage } from './lyrics-web.js';
 import { adminRoutes } from './admin.js';
+import { legacyRoutes } from './legacy.js';
 
 const LOGIN_TTL = 10 * 60_000;
 const MAX_BODY = 512 * 1024;
@@ -167,6 +168,11 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
   const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl, webUrl, sharePage: (o) => sharePage({ ...o, mirror }) });
   const share = shareRoutes({ q, mirror, androidCerts, webHosts });
   const lyrics = lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins: lyricsAdmins, catalog: yaCatalog });
+  const legacy = legacyRoutes({ HttpError, readJson, clip, limiter, createSession: async (userId, device, platform) => {
+    const token = newToken();
+    await q('INSERT INTO sessions (user_id, token_hash, device, platform) VALUES ($1, $2, $3, $4)', [userId, sha256(token), device, platform]);
+    return token;
+  } });
   const admin = adminRoutes({ q, HttpError, readJson, clip, adminIds, status, cfg, mirror, github, push, logs, log, dataDir, devIds });
   const routes = [
     ['GET', /^\/health$/, async () => ({ ok: true, minBuild: cfg.minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
@@ -448,6 +454,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     ...lyrics,
     ...social,
     ...share,
+    ...legacy,
     ...admin.routes
   ];
 
