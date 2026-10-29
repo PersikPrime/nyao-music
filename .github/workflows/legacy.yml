@@ -32,7 +32,10 @@ jobs:
           for k in ye yr; do
             curl -fsSL "https://letsencrypt.org/certs/gen-y/root-$k.pem" -o "isrg-root-$k.pem"
             K=$(echo $k | tr a-z A-Z)
-            openssl x509 -in "isrg-root-$k.pem" -noout -subject | grep -q "CN *= *ISRG Root $K" || { echo "::error::root-$k.pem: не тот сертификат"; exit 1; }
+            SUBJ=$(openssl x509 -in "isrg-root-$k.pem" -noout -subject)
+            echo "root-$k: $SUBJ"
+            # у поколения Y имя короче: «O = ISRG, CN = Root YE» вместо «ISRG Root X1»
+            echo "$SUBJ" | grep -Eq "ISRG.*CN *= *(ISRG )?Root $K\b" || { echo "::error::root-$k.pem: не тот сертификат ($SUBJ)"; exit 1; }
             openssl verify -CAfile "isrg-root-$k.pem" "isrg-root-$k.pem" > /dev/null || { echo "::error::root-$k.pem не самоподписанный"; exit 1; }
           done
           for f in *.pem; do echo "$f: $(openssl x509 -in "$f" -noout -subject -fingerprint -sha256 | tr '\n' ' ')"; done
