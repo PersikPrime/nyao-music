@@ -12,8 +12,8 @@ android {
         applicationId = "org.nyao.legacy"
         minSdk = 16
         targetSdk = 23
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.1.1"
         // устройства на 4.x — 32-битные ARM или Intel Atom; 64-битные библиотеки им не нужны
         ndk {
             abiFilters += listOf("armeabi-v7a", "x86")

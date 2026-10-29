@@ -21,6 +21,8 @@ public final class LocalProxy {
     private final ServerSocket server;
     private final Map<String, String> urls = new ConcurrentHashMap<String, String>();
     private final AtomicInteger seq = new AtomicInteger();
+    /** Последний запрос через прокси — для сообщения об ошибке */
+    public static volatile String last = "прокси ещё не вызывался";
 
     public static synchronized LocalProxy get() throws Exception {
         if (inst == null) inst = new LocalProxy();
@@ -59,6 +61,46 @@ public final class LocalProxy {
         return "http://127.0.0.1:" + server.getLocalPort() + "/s/" + key;
     }
 
+    /** Перенаправления вручную: HttpURLConnection не переходит между http и https и теряет Range */
+    static HttpURLConnection follow(String url, String range) throws Exception {
+        for (int i = 0; i < 6; i++) {
+            HttpURLConnection c = Net.open(url);
+            c.setInstanceFollowRedirects(false);
+            c.setRequestProperty("Accept-Encoding", "identity");
+            if (range != null) c.setRequestProperty("Range", range);
+            int code = c.getResponseCode();
+            String loc = c.getHeaderField("Location");
+            if (code >= 300 && code < 400 && loc != null) {
+                c.disconnect();
+                url = new java.net.URL(new java.net.URL(url), loc).toString();
+                continue;
+            }
+            return c;
+        }
+        throw new java.io.IOException("слишком много перенаправлений");
+    }
+
+    /** Скачать целиком в файл (запасной путь, если плеер не читает поток) */
+    public static void download(String url, java.io.File to) throws Exception {
+        HttpURLConnection c = follow(url, null);
+        try {
+            int code = c.getResponseCode();
+            if (code >= 400) throw new java.io.IOException("сервер ответил " + code);
+            InputStream in = c.getInputStream();
+            java.io.FileOutputStream out = new java.io.FileOutputStream(to);
+            try {
+                byte[] buf = new byte[32768];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            } finally {
+                out.close();
+                in.close();
+            }
+        } finally {
+            c.disconnect();
+        }
+    }
+
     private void serve(Socket s) {
         HttpURLConnection c = null;
         try {
@@ -76,9 +118,10 @@ public final class LocalProxy {
                 out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".getBytes("US-ASCII"));
                 return;
             }
-            c = Net.open(remote);
-            if (range != null) c.setRequestProperty("Range", range);
+            c = follow(remote, range);
             int code = c.getResponseCode();
+            last = "запрос " + (range != null ? range : "без Range") + " → " + code + " " + c.getHeaderField("Content-Type")
+                    + " " + c.getHeaderField("Content-Length") + " байт";
             StringBuilder h = new StringBuilder();
             h.append("HTTP/1.1 ").append(code).append(code == 206 ? " Partial Content" : code < 400 ? " OK" : " Error").append("\r\n");
             String type = c.getHeaderField("Content-Type");
@@ -96,8 +139,9 @@ public final class LocalProxy {
                 while ((n = body.read(buf)) > 0) out.write(buf, 0, n);
             }
             out.flush();
-        } catch (Exception ignored) {
-            // плеер закрыл соединение (перемотка, следующий трек) — это нормально
+        } catch (Exception e) {
+            // плеер закрыл соединение (перемотка, следующий трек) — это нормально; остальное запоминаем
+            if (!(e instanceof java.net.SocketException)) last = "ошибка прокси: " + e;
         } finally {
             if (c != null) c.disconnect();
             try {

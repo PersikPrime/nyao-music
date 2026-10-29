@@ -24,6 +24,8 @@ public final class Player {
     private boolean prepared;
     private int token; // защита от ответов для уже переключённого трека
     private boolean loadingMore;
+    private String remoteUrl;
+    private boolean triedFile;
 
     public final List<Track> queue = new ArrayList<Track>();
     public int index = -1;
@@ -119,10 +121,12 @@ public final class Player {
         final Track t = queue.get(at);
         ctx.startService(new Intent(ctx, PlayerService.class));
         changed();
+        triedFile = false;
         Bg.run(new Bg.Job<String>() {
             @Override
             public String run() throws Exception {
-                return LocalProxy.get().register(ya.streamUrl(t.id));
+                remoteUrl = ya.streamUrl(t.id);
+                return LocalProxy.get().register(remoteUrl);
             }
         }, new Bg.Done<String>() {
             @Override
@@ -164,7 +168,14 @@ public final class Player {
             mp = new MediaPlayer();
             mp.setAudioStreamType(AudioManager.STREAM_MUSIC);
             mp.setWakeMode(ctx, PowerManager.PARTIAL_WAKE_LOCK);
-            mp.setDataSource(url);
+            if (url.startsWith("/")) {
+                // файл в папке приложения: mediaserver сам его не откроет, отдаём дескриптор
+                java.io.FileInputStream fis = new java.io.FileInputStream(url);
+                mp.setDataSource(fis.getFD());
+                fis.close();
+            } else {
+                mp.setDataSource(url);
+            }
             mp.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                 @Override
                 public void onPrepared(MediaPlayer p) {
@@ -186,8 +197,14 @@ public final class Player {
                 @Override
                 public boolean onError(MediaPlayer p, int what, int extra) {
                     if (my != token) return true;
-                    error = "Плеер не смог открыть поток (" + what + "/" + extra + ")";
                     prepared = false;
+                    if (!triedFile && remoteUrl != null) {
+                        // поток не пошёл — качаем трек целиком и играем из файла
+                        triedFile = true;
+                        playFromFile(my, "поток: " + what + "/" + extra + ", " + LocalProxy.last);
+                        return true;
+                    }
+                    error = "Плеер не смог открыть трек (" + what + "/" + extra + "; " + LocalProxy.last + ")";
                     changed();
                     return true;
                 }
@@ -197,6 +214,35 @@ public final class Player {
             error = "Плеер: " + e.getMessage();
             changed();
         }
+    }
+
+    private void playFromFile(final int my, final String why) {
+        release();
+        changed();
+        final String url = remoteUrl;
+        final java.io.File f = new java.io.File(ctx.getCacheDir(), "track-" + my + ".mp3");
+        Bg.run(new Bg.Job<String>() {
+            @Override
+            public String run() throws Exception {
+                java.io.File[] old = ctx.getCacheDir().listFiles();
+                if (old != null) for (java.io.File x : old) if (x.getName().startsWith("track-")) x.delete();
+                LocalProxy.download(url, f);
+                return f.getAbsolutePath();
+            }
+        }, new Bg.Done<String>() {
+            @Override
+            public void ok(String path) {
+                if (my != token) return;
+                open(path, my);
+            }
+
+            @Override
+            public void fail(Exception e) {
+                if (my != token) return;
+                error = "Не удалось скачать трек: " + e.getMessage() + " (" + why + ")";
+                changed();
+            }
+        });
     }
 
     /** Догрузить волну, когда очередь подходит к концу */
