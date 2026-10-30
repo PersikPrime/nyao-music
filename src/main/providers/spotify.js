@@ -51,11 +51,12 @@ export class SpotifyError extends Error {
 
 export class SpotifyProvider {
   /** store: { get(key), set(key, value) } — защищённое хранилище; fetchFn — сетевой fetch; openUrl — открыть в браузере */
-  constructor({ store, fetchFn, openUrl, timeoutMs = 10_000 }) {
+  constructor({ store, fetchFn, openUrl, timeoutMs = 10_000, redirectUri = SP_REDIRECT }) {
     this.store = store;
     this.fetch = fetchFn;
     this.openUrl = openUrl;
     this.timeoutMs = timeoutMs;
+    this.redirectUri = redirectUri;
     this.blockedUntil = 0;
     this.log = [];
     this.refreshing = null;
@@ -112,8 +113,8 @@ export class SpotifyProvider {
         err ? reject(err) : resolve(val);
       };
       this.server = http.createServer((req, res) => {
-        const u = new URL(req.url, SP_REDIRECT);
-        if (u.pathname !== '/spotify-callback') {
+        const u = new URL(req.url, this.redirectUri);
+        if (u.pathname !== new URL(this.redirectUri).pathname) {
           res.writeHead(404).end();
           return;
         }
@@ -125,16 +126,16 @@ export class SpotifyProvider {
         else if (!ok) finish(new SpotifyError('Ответ входа не совпал — попробуй ещё раз'));
         else finish(null, u.searchParams.get('code'));
       });
-      this.server.on('error', (e) => finish(new SpotifyError(`Не открыть порт ${SP_PORT}: ${e.message}`)));
-      this.server.listen(SP_PORT, '127.0.0.1', () => {
+      this.server.on('error', (e) => finish(new SpotifyError(`Не открыть порт ${new URL(this.redirectUri).port}: ${e.message}`)));
+      this.server.listen(Number(new URL(this.redirectUri).port), '127.0.0.1', () => {
         const q = new URLSearchParams({
-          client_id: this.clientId, response_type: 'code', redirect_uri: SP_REDIRECT,
+          client_id: this.clientId, response_type: 'code', redirect_uri: this.redirectUri,
           code_challenge_method: 'S256', code_challenge: challenge, scope: SCOPES.join(' '), state
         });
         this.openUrl(`${AUTHORIZE}?${q}`);
       });
     });
-    const t = await this.tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: SP_REDIRECT, client_id: this.clientId, code_verifier: verifier });
+    const t = await this.tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: this.redirectUri, client_id: this.clientId, code_verifier: verifier });
     this.saveTokens(t);
   }
 

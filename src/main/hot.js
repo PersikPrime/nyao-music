@@ -32,7 +32,7 @@ export function compatOf(pkg, root = null) {
     }
     deps[name] = v;
   }
-  const key = JSON.stringify({ electron: (pkg.devDependencies && pkg.devDependencies.electron) || '', deps });
+  const key = JSON.stringify({ electron: (pkg.devDependencies && pkg.devDependencies.electron) || '', deps, ...(pkg.nyaoNativeAbi ? { nativeAbi: pkg.nyaoNativeAbi } : {}) });
   return crypto.createHash('sha256').update(key).digest('hex').slice(0, 12);
 }
 

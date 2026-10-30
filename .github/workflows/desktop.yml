@@ -6,7 +6,7 @@ on:
   push:
     # все ветки, включая nightly: на nightly пробуем Electron от castlabs (Widevine для Spotify)
     branches: ['**']
-    paths: ['test/**', 'src/**', 'build/**', 'package.json', 'package-lock.json', 'version.json', '.github/workflows/desktop.yml', '.github/scripts/**']
+    paths: ['native/**', 'scripts/build-native.mjs', 'test/**', 'src/**', 'build/**', 'package.json', 'package-lock.json', 'version.json', '.github/workflows/desktop.yml', '.github/scripts/**']
   workflow_dispatch:
 
 permissions:
@@ -32,6 +32,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/librespot
+      - name: Сборка нативного Spotify
+        run: npm run build:native
       - name: Проверка версии
         shell: bash
         run: |

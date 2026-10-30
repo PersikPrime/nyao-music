@@ -93,6 +93,11 @@ export class SpotifySync {
     Promise.resolve().then(fn).catch(() => {});
   }
 
+  resetBackend() {
+    this.loaded = null; this.confirmed = false; this.starting++;
+    this.snap = null; this.spList = []; this.modesSet = false; this.autoWaitUntil = 0;
+  }
+
   onTrack() {
     const cur = this.player.current;
     // тот же трек заново (повтор, дважды подряд) — включаем в Spotify с начала
@@ -169,7 +174,10 @@ export class SpotifySync {
     this.lastCommand = Date.now();
     this.api.play(uris, this.startPos).then(() => {
       // пока шёл запрос, трек успели пропустить — Spotify не должен заиграть поверх
-      if (token !== this.starting || this.loaded !== id) this.api.pause().catch(() => {});
+      if (token !== this.starting || this.loaded !== id) {
+        // A stale play completion must not pause a newer Spotify request.
+        if (!isSp(this.player.current) || this.audio.paused) this.api.pause().catch(() => {});
+      }
       else this.api.volume(this.audio.muted ? 0 : this.audio.volume).catch(() => {});
     }).catch((e) => {
       if (token !== this.starting || this.loaded !== id) return;

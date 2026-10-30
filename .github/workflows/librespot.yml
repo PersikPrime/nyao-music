@@ -1,0 +1,29 @@
+name: Librespot worker
+on:
+  push:
+    paths: ['native/**', '.github/workflows/librespot.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/librespot
+      - name: Resolve dependencies
+        run: |
+          cargo generate-lockfile --manifest-path native/librespot/Cargo.toml
+          echo NYAO_LOCK_BEGIN
+          cat native/librespot/Cargo.lock
+          echo NYAO_LOCK_END
+      - name: Tests without audio hardware
+        run: cargo test --locked --no-default-features --manifest-path native/librespot/Cargo.toml
+      - name: IPC smoke test
+        run: |
+          cargo build --locked --no-default-features --manifest-path native/librespot/Cargo.toml
+          printf '{"id":1,"command":"ping"}\n' | native/librespot/target/debug/nyao-librespot > worker-output.jsonl
+          python -c 'import json; lines=[json.loads(s) for s in open("worker-output.jsonl")]; assert lines[0]=={"event":"hello","protocol":1}; assert lines[1]["ok"] and lines[1]["data"]["protocol"]==1'
