@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage, Tray, Menu, globalShortcut, clipboard, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage, Tray, Menu, globalShortcut, clipboard, dialog, safeStorage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -14,6 +14,8 @@ import { SoundCloudProvider } from './providers/soundcloud.js';
 import { VKProvider } from './providers/vk.js';
 import { SpotifyProvider, SP_REDIRECT } from './providers/spotify.js';
 import { SpotifyEngine, silenceResponse } from './spotify/spotify-engine.js';
+import { LibrespotEngine } from './spotify/librespot-engine.js';
+import { SpotifyExperiment } from './spotify/experiment.js';
 import { checkUpdate, downloadAsset, fetchHot } from './updates.js';
 import { WaveMixer } from './wave.js';
 import { StreamService } from './stream.js';
@@ -142,6 +144,16 @@ async function pollStatus() {
 const up = (id) => !svcStatus.outages.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
 let ya, yt, sc, vk, sp, spEngine, wave, streams, catalog, win, cloud, lastfm, radio, live;
+let spExperiment, nativePermission = false;
+const LIBRESPOT_REDIRECT = 'http://127.0.0.1:43820/spotify-callback';
+const nativeAllowed = () => nativePermission && readVersion().channel === 'nightly' && cloud?.loggedIn && cloud.user?.dev === true;
+async function requireNativeDeveloper() {
+  if (readVersion().channel !== 'nightly' || !cloud?.loggedIn) { nativePermission = false; throw new Error('Librespot доступен разработчикам в nightly'); }
+  const me = await cloud.me();
+  if (!me?.user?.dev) { nativePermission = false; throw new Error('Нужен аккаунт разработчика Nyao'); }
+  nativePermission = true;
+}
+
 
 /**
  * Widevine (Electron от castlabs): компонент CDM скачивается и проверяется при первом запуске.
@@ -302,8 +314,28 @@ function initProviders() {
     }
   });
   // Spotify: официальный Web API + Web Playback SDK в скрытом окне (нужен Premium и свой Client ID)
-  sp = new SpotifyProvider({ store: secrets, fetchFn, openUrl: (url) => shell.openExternal(url) });
-  spEngine = new SpotifyEngine({ sp, widevine: widevineReady(), onChange: (st) => send('spotify:state', st) });
+  const standardApi = new SpotifyProvider({ store: secrets, fetchFn, openUrl: url => shell.openExternal(url) });
+  const nativeApi = new SpotifyProvider({
+    store: { get: key => secrets.get('librespot_' + key), set: (key, value) => secrets.set('librespot_' + key, value) },
+    fetchFn, openUrl: url => shell.openExternal(url), redirectUri: LIBRESPOT_REDIRECT,
+  });
+  const standardEngine = new SpotifyEngine({ sp: standardApi, widevine: widevineReady(), onChange: st => {
+    if (!spExperiment?.active) send('spotify:state', { ...st, backend: 'sdk' });
+  } });
+  const nativeName = 'nyao-librespot' + (process.platform === 'win32' ? '.exe' : '');
+  const nativeBinary = app.isPackaged
+    ? path.join(process.resourcesPath, 'librespot', nativeName)
+    : path.join(globalThis.__nyaoBundledRoot || path.join(__dirname, '..', '..'), 'native-bin', (process.platform === 'darwin' ? 'mac' : 'win') + '-' + process.arch, nativeName);
+  const nativeEngine = new LibrespotEngine({ api: nativeApi, binary: ['darwin', 'win32'].includes(process.platform) ? nativeBinary : null,
+    allowed: () => !!spExperiment?.visible && safeStorage.isEncryptionAvailable(),
+    deviceId: () => { let id = secrets.get('librespotDeviceId'); if (!id) { id = crypto.randomUUID(); secrets.set('librespotDeviceId', id); } return id; },
+    onChange: st => { if (spExperiment?.active) send('spotify:state', st); },
+  });
+  spExperiment = new SpotifyExperiment({ standardApi, standardEngine, nativeApi, nativeEngine, allowed: nativeAllowed, settings });
+  sp = spExperiment.api;
+  spEngine = spExperiment.engine;
+  nativeEngine.volume = settings.get().volume ?? 0.8;
+  setInterval(() => { if (nativeEngine.started && !spExperiment.visible) nativeEngine.release(); }, 2000).unref();
   cloud = new NyaoCloud({
     dir: app.getPath('userData'),
     getToken: () => secrets.get('nyaoToken'),
@@ -599,6 +631,8 @@ function registerIpc() {
       platform: `${process.platform} ${process.arch} · ${os.release()}`,
       userData: app.getPath('userData'),
       packaged: app.isPackaged,
+      flags: { librespot: !!(nativeAllowed() && settings.get().experimentalLibrespot) },
+      native: { available: !!spExperiment?.nativeEngine.available },
       memory: Math.round(process.memoryUsage().rss / 1048576),
       hot: hot ? { enabled: hot.store.enabled, running: hot.running, bundled: hot.bundled, compat: hot.compat, state: hot.store.state() } : null
     };
@@ -718,7 +752,7 @@ function registerIpc() {
     return user;
   });
   handle('cloud:cancel', () => cloud.cancelLogin());
-  handle('cloud:logout', () => cloud.logout());
+  handle('cloud:logout', async () => { spExperiment?.nativeEngine.release(); nativePermission = false; await cloud.logout(); });
   handle('cloud:me', () => cloud.me());
   // мини-соцсеть: профиль, друзья, приглашения, входящие — только эти адреса сервера
   // весь путь целиком: без «..», «//» и чужих адресов вроде /friends/../devices/5
@@ -849,34 +883,83 @@ function registerIpc() {
   handle('sc:flush', () => flushScLikes());
 
   // ---------- Spotify ----------
-  const spStatus = async () => {
-    const wv = await Promise.race([widevineReady(), new Promise((r) => setTimeout(() => r({ ok: false, reason: 'ещё загружается' }), 300))]);
-    return {
-      clientId: sp.clientId,
-      hasClientId: sp.hasClientId,
-      loggedIn: sp.loggedIn,
-      regionBlocked: sp.regionBlocked,
-      redirect: SP_REDIRECT,
-      widevine: wv,
-      engine: spEngine.status,
-      account: sp.loggedIn ? await spSafe(sp.getAccount(), { name: sp.regionBlocked ? 'Spotify (нужен VPN)' : 'Spotify', error: true }) : null
+  let nativeAccount = null;
+  async function nativeStatus() {
+    if (cloud?.loggedIn && cloud.user?.dev && readVersion().channel === 'nightly') {
+      try { await requireNativeDeveloper(); } catch { if (!cloud?.loggedIn || !cloud.user?.dev) nativePermission = false; }
+    } else nativePermission = false;
+    if (!nativeAllowed()) { spExperiment.nativeEngine.release(); return { permitted: false, flag: false, active: false }; }
+    if (spExperiment.active) spExperiment.standardEngine.release();
+    const api = spExperiment.nativeApi;
+    if (!settings.get().experimentalLibrespot) return { permitted: true, flag: false, active: false, available: spExperiment.nativeEngine.available };
+    return { permitted: true, flag: !!settings.get().experimentalLibrespot,
+      available: spExperiment.nativeEngine.available, active: spExperiment.active,
+      loggedIn: api.loggedIn, clientId: api.clientId, hasClientId: api.hasClientId,
+      redirect: LIBRESPOT_REDIRECT, regionBlocked: api.regionBlocked, engine: spExperiment.nativeEngine.status,
+      account: api.loggedIn ? await spSafe(api.getAccount().then(account => (nativeAccount = account)), nativeAccount || { name: 'Spotify (librespot)', error: true }) : null,
     };
+  }
+  const spStatus = async () => {
+    const standard = spExperiment.standardApi;
+    const [wv, account, native] = await Promise.all([
+      Promise.race([widevineReady(), new Promise(r => setTimeout(() => r({ ok: false, reason: 'ещё загружается' }), 300))]),
+      standard.loggedIn ? spSafe(standard.getAccount(), { name: standard.regionBlocked ? 'Spotify (нужен VPN)' : 'Spotify', error: true }) : null,
+      nativeStatus(),
+    ]);
+    return { clientId: standard.clientId, hasClientId: standard.hasClientId,
+      loggedIn: standard.loggedIn, regionBlocked: standard.regionBlocked, redirect: SP_REDIRECT,
+      widevine: wv, engine: spExperiment.standardEngine.status, account, native };
   };
   handle('spotify:status', () => spStatus());
-  handle('spotify:setClientId', (id) => {
-    sp.setClientId(id);
+  handle('spotify:setClientId', id => { spExperiment.standardApi.setClientId(id); return spStatus(); });
+  handle('spotify:login', async () => { await spExperiment.standardApi.login(); showWindow(); return spStatus(); });
+  handle('spotify:logout', () => { spExperiment.standardEngine.release(); spExperiment.standardApi.logout(); return spStatus(); });
+  handle('dev:librespotFlag', async on => {
+    await requireNativeDeveloper();
+    if (on !== true && on !== false) throw new Error('Неизвестное значение флага');
+    if (on) settings.set({ experimentalLibrespot: true }); else spExperiment.disable();
+    wave.invalidateLikes();
     return spStatus();
   });
-  handle('spotify:login', async () => {
-    await sp.login();
-    showWindow();
+  handle('dev:librespotClientId', async id => {
+    await requireNativeDeveloper();
+    if (!spExperiment.visible || !/^[0-9a-fA-F]{32}$/.test(String(id))) throw new Error('Нужен Client ID — 32 символа');
+    spExperiment.select(false); nativeAccount = null; spExperiment.nativeApi.setClientId(id); wave.invalidateLikes();
     return spStatus();
   });
-  handle('spotify:logout', () => {
-    spEngine.release();
-    sp.logout();
-    return spStatus();
+  handle('dev:librespotLogin', async () => {
+    await requireNativeDeveloper();
+    if (!spExperiment.visible) throw new Error('Сначала включи флаг librespot');
+    if (!spExperiment.nativeEngine.available) throw new Error('Для librespot нужен полный установщик этой версии');
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('Недоступно защищённое хранилище системы');
+    spExperiment.select(false);
+    await spExperiment.nativeApi.login();
+    const account = await spExperiment.nativeApi.getAccount(); nativeAccount = account;
+    if (!account.premium) throw new Error('Для librespot нужен Spotify Premium');
+    await spExperiment.nativeEngine.awaitReady();
+    // The worker has proved that it can establish its own Spotify session.
+    if (spExperiment.nativeEngine.username && spExperiment.nativeEngine.username !== account.uid) {
+      spExperiment.nativeEngine.release(); throw new Error('Аккаунт движка не совпал — войди заново');
+    }
+    spExperiment.select(true);
+    wave.invalidateLikes(); showWindow(); return spStatus();
   });
+  handle('dev:librespotUse', async on => {
+    await requireNativeDeveloper();
+    if (!spExperiment.visible) throw new Error('Флаг librespot выключен');
+    spExperiment.select(false);
+    if (on === true) {
+      const account = await spExperiment.nativeApi.getAccount(); nativeAccount = account;
+      if (!account.premium) throw new Error('Для librespot нужен Spotify Premium');
+      await spExperiment.nativeEngine.awaitReady(); spExperiment.select(true);
+    }
+    wave.invalidateLikes(); return spStatus();
+  });
+  handle('dev:librespotLogout', async () => {
+    await requireNativeDeveloper(); spExperiment.select(false); spExperiment.nativeApi.logout(); nativeAccount = null;
+    wave.invalidateLikes(); return spStatus();
+  });
+  handle('dev:librespotDebug', async () => { await requireNativeDeveloper(); return spExperiment.nativeEngine.debugText(); });
   handle('spotify:prewarm', async () => {
     if (!spOn()) return false;
     await spEngine.awaitReady(60_000);
@@ -1354,7 +1437,7 @@ function applyShortcuts() {
   }
 }
 app.on('will-quit', () => globalShortcut.unregisterAll());
-app.on('before-quit', () => { quitting = true; });
+app.on('before-quit', () => { quitting = true; spExperiment?.nativeEngine.release(); });
 
 app.on('window-all-closed', () => {
   rpc.disconnect();

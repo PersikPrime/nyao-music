@@ -1,5 +1,6 @@
 import { Player } from './player.js';
 import { spMode } from './sp-mode.js';
+import { librespotCard } from './librespot-ui.js';
 import { SpotifySync } from './spotify-sync.js';
 import { Ribbon } from './ribbon.js';
 import { Onboarding } from './onboarding.js';
@@ -355,6 +356,7 @@ function openAccountMenu(anchor) {
         <button class="acc-act ${st ? '' : 'primary'}" data-a="${st ? 'logout' : 'login'}" data-svc="${s.id}">${st ? 'Выйти' : 'Войти'}</button>
       </div>`;
     }).join('')}
+    ${nativeVisible() ? '<button data-a="native-settings">Spotify (librespot)</button>' : ''}
     <button data-a="settings">${SETTINGS_ICON_SM} Настройки аккаунтов</button>`;
   menu.hidden = false;
   const r = anchor.getBoundingClientRect();
@@ -367,6 +369,7 @@ function openAccountMenu(anchor) {
     const b = e.target.closest('[data-a]');
     if (!b) return;
     e.stopPropagation();
+    if (b.dataset.a === 'native-settings') { menu.hidden = true; return go('settings', { section: 'svc:sp-native' }); }
     if (b.dataset.a === 'settings') {
       menu.hidden = true;
       return go('settings');
@@ -1148,6 +1151,7 @@ async function loadCloud() {
   if (!st) return;
   state.cloud.loggedIn = st.loggedIn;
   state.cloud.user = st.user;
+  await loadStatus();
   renderAccounts();
   if (st.loggedIn) {
     loadOthers();
@@ -1192,6 +1196,7 @@ async function cloudLogin() {
     const user = await api.cloud.login();
     state.cloud.loggedIn = true;
     state.cloud.user = user;
+    await loadStatus();
     toast(`Привет, ${user.name}! Синхронизация включена`);
     loadOthers();
     loadCloudDevices();
@@ -1303,6 +1308,7 @@ const SECTIONS = {
   lastfm: 'Last.fm', discord: 'Discord', updates: 'Обновления', about: 'О приложении', wave: 'Моя волна'
 };
 function sectionTitle(sec) {
+  if (sec === 'svc:sp-native') return 'Spotify (librespot)';
   if (sec && sec.startsWith('svc:')) return (SERVICES.find((x) => x.id === sec.slice(4)) || {}).name || 'Сервис';
   return SECTIONS[sec] || 'Настройки';
 }
@@ -1344,7 +1350,7 @@ function renderSettings() {
     ${sgroup('Оформление', [
       srow({ icon: RI.palette, title: 'Вид приложения', value: layout() === 'wave' ? 'Моя волна' : 'Плеер', sec: 'view' })
     ])}
-    ${sgroup('Сервисы', SERVICES.map((x) => srow({ lead: svcDot(x), title: x.name, value: state.status[x.id] ? 'подключено' : 'войти', ok: !!state.status[x.id], sec: 'svc:' + x.id })))}
+    ${sgroup('Сервисы', [...SERVICES.map((x) => srow({ lead: svcDot(x), title: x.name, value: state.status[x.id] ? 'подключено' : 'войти', ok: !!state.status[x.id], sec: 'svc:' + x.id })), ...(nativeVisible() ? [srow({ lead: svcDot(SERVICES.find(x => x.id === 'sp')), title: 'Spotify (librespot)', value: state.spotify.native.active ? 'используется' : 'эксперимент', ok: state.spotify.native.active, sec: 'svc:sp-native' })] : [])])}
     ${sgroup('Интеграции', [
       srow({ lead: '<span class="dot" style="background:#D51007;color:#fff">fm</span>', title: 'Last.fm', value: lastfmState.connected ? lastfmState.name || 'подключено' : lastfmState.configured ? 'подключить' : 'выключен', ok: lastfmState.connected, sec: 'lastfm' }),
       srow({ lead: '<span class="dot" style="background:#5865F2;color:#fff">D</span>', title: 'Статус в Discord', value: state.settings.discordRpc ? 'включён' : 'выключен', ok: !!state.settings.discordRpc, sec: 'discord' })
@@ -1380,6 +1386,7 @@ function renderSettingsSection(sec) {
       <div class="pref-row"><span><b>«Настройки» отдельной кнопкой</b><span class="hint">В профиле остаются аккаунт, статистика и устройства, всё остальное — на своей странице</span></span>
         <button class="switch ${navPrefs() ? 'on' : ''}" role="switch" aria-checked="${navPrefs()}" aria-label="«Настройки» отдельной кнопкой" data-action="toggle-nav" data-k="navPrefs"><span></span></button></div>
     </section>`;
+  else if (sec === 'svc:sp-native' && nativeVisible()) body = librespotCard(state.spotify.native, esc);
   else if (sec === 'svc:sp') body = spCard();
   else if (sec.startsWith('svc:')) body = svcCard(sec.slice(4));
   else if (sec === 'lastfm') body = `<section class="card" id="lastfm-card">${lastfmCardInner()}</section>`;
@@ -1498,6 +1505,7 @@ async function saveLyricsPrefs(patch) {
 }
 
 // ---------- Раздел «Разработчик»: виден, если сервер Nyao отметил аккаунт как разработчика (NYAO_DEV_IDS) ----------
+const nativeVisible = () => !!(isDev() && state.spotify?.native?.permitted && state.spotify.native.flag);
 const isDev = () => !!(state.cloud.loggedIn && state.cloud.user && state.cloud.user.dev && api.dev);
 const devState = { info: null, probe: null, ping: null, offline: false, fps: false };
 function devCardHtml() {
@@ -1537,7 +1545,7 @@ function devCardHtml() {
     group('Приколы', `<div class="hint">Ломают вид и поведение, но приложение остаётся рабочим. Только в этом окне: перезапуск, плашка «Сбросить приколы» или Ctrl+Shift+Backspace — и всё как было.</div>
       <div class="dev-btns">${PRANKS.map(([id, title, hint]) => `<button class="btn ${pranks.has(id) ? 'primary' : ''}" data-action="dev-prank" data-v="${id}" title="${esc(hint)}">${pranks.has(id) ? '✓ ' : ''}${esc(title)}</button>`).join('')}</div>
       ${pranks.active().length ? '<div class="dev-btns"><button class="btn" data-action="dev-prank-reset">Сбросить все приколы</button></div>' : ''}`),
-    group('Флаги', '<div class="hint">Экспериментальных флагов пока нет — новые фичи сначала будут появляться здесь.</div>')
+    group('Флаги', `<div class="pref-row"><span><b>Spotify (librespot)</b><span class="hint">Экспериментальный нативный плеер. Добавляет отдельную привязку Spotify в сервисах. Только nightly на ПК.</span></span><button class="switch ${state.spotify?.native?.flag ? 'on' : ''}" role="switch" aria-checked="${!!state.spotify?.native?.flag}" aria-label="Spotify (librespot)" data-action="dev-librespot-flag"><span></span></button></div>${state.spotify?.native?.flag ? '<button class="btn" data-action="set-sec" data-sec="svc:sp-native">Открыть Spotify (librespot)</button>' : ''}`)
   ].join('');
 }
 async function loadDevInfo() {
@@ -1731,20 +1739,24 @@ const RENDER = { friends: () => friends.renderFriends(), user: () => friends.ren
 // ---------- Загрузка данных ----------
 /** Может ли Spotify играть сам; если нет — треки Spotify играют копиями из других сервисов */
 function syncSpMode() {
-  const s = state.spotify;
+  const previousNative = spMode.native;
+  const native = state.spotify?.native?.permitted && state.spotify.native.flag && state.spotify.native.active;
+  spMode.native = !!native;
+  const s = native ? state.spotify.native : state.spotify;
   const a = s && s.account;
   const was = spMode.fallback;
   spMode.fallback = !(s && s.loggedIn && !s.regionBlocked && a && !a.error && a.premium !== false);
   // Spotify снова может играть сам — значки «SP → Я» и пометки о копиях больше не нужны
   if (!spMode.fallback) spMode.subs.clear();
-  if (was !== spMode.fallback && player.current && player.current.source === 'sp') player.reload();
+  if ((was !== spMode.fallback || previousNative !== spMode.native) && player.current && player.current.source === 'sp') { spotifySync.resetBackend(); player.reload(); }
 }
 async function loadStatus() {
   state.status = await api.auth.status().catch(() => ({ ya: null, yt: null, sc: null, vk: null }));
   // Spotify — отдельно: вход со своим Client ID, свой экран в настройках
   if (api.spotify) {
     state.spotify = await api.spotify.status().catch(() => null);
-    state.status.sp = state.spotify && state.spotify.loggedIn ? state.spotify.account || { name: 'Spotify' } : null;
+    const selected = state.spotify?.native?.active ? state.spotify.native : state.spotify;
+    state.status.sp = selected?.loggedIn ? selected.account || { name: 'Spotify' } : null;
   }
   syncSpMode();
   renderAccounts();
@@ -2769,6 +2781,7 @@ async function handleAction(el, e) {
     case 'cloud-logout':
       await api.cloud.logout();
       state.cloud = { loggedIn: false, user: null, logging: false, devices: null, others: [] };
+      await loadStatus();
       toast('Вышел из аккаунта Nyao');
       renderSettings();
       renderAccounts();
@@ -3089,6 +3102,35 @@ async function handleAction(el, e) {
     case 'vk-log':
       api.vkLog && api.vkLog();
       break;
+    case 'dev-librespot-flag':
+    case 'native-save-id':
+    case 'native-login':
+    case 'native-use':
+    case 'native-logout': {
+      el.disabled = true;
+      try {
+        if (el.dataset.action === 'dev-librespot-flag') state.spotify = await api.dev.librespotFlag(!state.spotify?.native?.flag);
+        else if (el.dataset.action === 'native-save-id') {
+          const id = ($('[data-native-client]')?.value || '').trim();
+          state.spotify = await api.dev.librespotClientId(id);
+        } else if (el.dataset.action === 'native-login') {
+          toast('Открыл вход Spotify (librespot) в браузере');
+          state.spotify = await api.dev.librespotLogin();
+          toast('Spotify (librespot) подключён');
+        } else if (el.dataset.action === 'native-use') state.spotify = await api.dev.librespotUse(!state.spotify?.native?.active);
+        else state.spotify = await api.dev.librespotLogout();
+        syncSpMode();
+        await afterAuthChange();
+      } catch (error) { toast(error.message, true); await loadStatus(); renderSettings(); }
+      break;
+    }
+    case 'native-copy-redirect':
+      copyText(state.spotify?.native?.redirect || ''); toast('Скопировано'); break;
+    case 'native-debug': {
+      const log = await api.dev.librespotDebug().catch(e => e.message);
+      const pre = $('#native-log'); if (pre) pre.textContent = log;
+      break;
+    }
     case 'sp-save-id': {
       const v = ($('[data-sp-client]') || {}).value || '';
       if (!/^[0-9a-fA-F]{32}$/.test(v.trim())) {

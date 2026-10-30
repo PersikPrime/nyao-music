@@ -22,6 +22,12 @@ contextBridge.exposeInMainWorld('nyao', {
   coverColor: (url) => call('cover:color', url),
   dev: {
     info: () => call('dev:info'),
+    librespotFlag: (on) => call('dev:librespotFlag', on),
+    librespotClientId: (id) => call('dev:librespotClientId', id),
+    librespotLogin: () => call('dev:librespotLogin'),
+    librespotUse: (on) => call('dev:librespotUse', on),
+    librespotLogout: () => call('dev:librespotLogout'),
+    librespotDebug: () => call('dev:librespotDebug'),
     hotClearBad: () => call('dev:hotClearBad'),
     open: (what) => call('dev:open', what),
     ping: () => call('dev:ping'),

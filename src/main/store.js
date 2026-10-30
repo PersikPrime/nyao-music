@@ -6,6 +6,8 @@ import path from 'node:path';
 
 const DEFAULT_SETTINGS = {
   volume: 0.8,
+  experimentalLibrespot: false,
+  librespotActive: false,
   ytmShare: 30,          // доля треков YouTube Music в «Моей волне», %
   waveFresh: 60,         // свежесть волны: 0 — всё время одинаково, 100 — почти только недавние лайки
   waveDiversity: 'any', // any | favorite | discover | popular

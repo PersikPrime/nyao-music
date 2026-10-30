@@ -1,7 +1,7 @@
 {
   "name": "nyao-music",
   "productName": "Nyao Music",
-  "version": "0.8.95",
+  "version": "0.8.96",
   "description": "Единый плеер для Яндекс Музыки и YouTube Music с общей «Моей волной»",
   "author": "Takko",
   "license": "UNLICENSED",
@@ -15,7 +15,8 @@
     "dist": "node build/windows.cjs",
     "dist:mac": "electron-builder --mac",
     "bump": "node scripts/bump.mjs",
-    "test": "node --test test/*.test.js build/evs-sign.test.cjs"
+    "test": "node --test test/*.test.js build/evs-sign.test.cjs",
+    "build:native": "node scripts/build-native.mjs"
   },
   "dependencies": {
     "youtubei.js": "^18.1.0"
@@ -60,7 +61,10 @@
       "icon": "build/icon-mac.png",
       "identity": "-",
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "binaries": [
+        "Contents/Resources/librespot/nyao-librespot"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -80,6 +84,17 @@
           "nyao"
         ]
       }
+    ],
+    "extraResources": [
+      {
+        "from": "native-bin/${os}-${arch}",
+        "to": "librespot",
+        "filter": [
+          "nyao-librespot*",
+          "LICENSE.librespot"
+        ]
+      }
     ]
-  }
+  },
+  "nyaoNativeAbi": 1
 }
