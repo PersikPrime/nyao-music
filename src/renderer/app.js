@@ -20,7 +20,7 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const view = $('#view');
 const player = new Player($('#audio'));
 // треки Spotify: <audio> ведёт очередь (тишина той же длины), звук — устройство Spotify в главном процессе
-const spotifySync = new SpotifySync(player, window.nyao && window.nyao.spotify, { onMessage: (m) => toast(m, true) });
+const spotifySync = new SpotifySync(player, window.nyao && window.nyao.spotify, { onMessage: (m) => toast(m, true), onBackendChange: () => afterAuthChange() });
 if (window.nyao && window.nyao.spotify) spotifySync.start();
 const eq = new Equalizer(player.audio);
 

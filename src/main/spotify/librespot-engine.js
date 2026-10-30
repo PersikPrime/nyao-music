@@ -36,17 +36,21 @@ export class LibrespotEngine {
     this.volume = 0.8;
     this.diagnostics = [];
     this.workerVersion = 1;
+    this.lastFailure = null;
   }
   get available() { return !!this.binary && fs.existsSync(this.binary); }
   get started() { return !!this.child; }
   debugText() {
     return ['librespot 0.8.0 · helper ' + this.workerVersion + ' · ' + this.status.state + (this.status.code ? ' · ' + this.status.code : ''),
+      ...(this.lastFailure && this.status.state !== 'failed' ? ['Последний сбой: ' + this.lastFailure.code] : []),
       ...this.diagnostics.map(code => code + ' — ' + MESSAGES[code])].join('\n');
   }
   publish(extra = {}) { this.onChange({ backend: 'librespot', status: this.status, snapshot: this.snapshot, ...extra }); }
   fail(code, kind = 'engine') {
-    const message = MESSAGES[code] || 'Нативный плеер Spotify остановился — попробуй подключить его заново';
-    this.status = { state: 'failed', kind, code: Object.hasOwn(MESSAGES, code) ? code : 'not_ready', message };
+    const safeCode = Object.hasOwn(MESSAGES, code) ? code : 'not_ready';
+    const message = MESSAGES[safeCode];
+    this.status = { state: 'failed', kind, code: safeCode, message };
+    this.lastFailure = { ...this.status };
     this.publish({ error: { kind, message } });
   }
   async awaitReady() {
@@ -60,6 +64,7 @@ export class LibrespotEngine {
     }
     const epoch = this.epoch;
     const starting = (async () => {
+      this.lastFailure = null;
       this.status = { state: 'loading' }; this.publish();
       const token = await this.api.accessToken();
       if (epoch !== this.epoch || !this.allowed()) throw new Error('Подключение librespot отменено');

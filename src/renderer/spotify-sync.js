@@ -10,10 +10,11 @@ import { spMode } from './sp-mode.js';
 const isSp = (t) => !!t && t.source === 'sp' && !spMode.fallback;
 
 export class SpotifySync {
-  constructor(player, api, { onMessage } = {}) {
+  constructor(player, api, { onMessage, onBackendChange } = {}) {
     this.player = player;
     this.api = api;
     this.msg = onMessage || (() => {});
+    this.onBackendChange = onBackendChange || (() => {});
     this.loaded = null; // id трека, который Spotify должен играть
     this.confirmed = false; // Spotify сообщил, что играет наш трек
     this.lastCommand = 0;
@@ -38,6 +39,13 @@ export class SpotifySync {
       if (this.loaded) this.api.volume(p.audio.muted ? 0 : p.audio.volume).catch(() => {});
     });
     this.api.onState((st) => {
+      if (st.switchedToSdk) {
+        this.resetBackend();
+        this.audio.pause();
+        this.msg(st.message);
+        Promise.resolve().then(() => this.onBackendChange()).catch(() => {});
+        return;
+      }
       if (st.status) this.status = st.status;
       if ('snapshot' in st) this.snap = st.snapshot;
       if (st.error && isSp(p.current)) {

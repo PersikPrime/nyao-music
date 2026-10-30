@@ -10,6 +10,7 @@ export function librespotCard(s, esc) {
     (!s.available ? '<p class="note">Нужен полный установщик этой версии для macOS или Windows. Быстрое обновление не добавляет нативный плеер.</p>' : '') +
     (account ? '<div class="manual">' + button('native-use', s.active ? 'Вернуться к обычному Spotify' : 'Использовать librespot', s.available ? '' : 'disabled') + '</div>' : '') +
     (s.engine?.message ? '<p class="note">' + esc(s.engine.message) + '</p>' : '') +
+    (s.lastFailure && s.engine?.state !== 'failed' ? '<p class="note">Последний сбой: ' + esc(s.lastFailure.message) + '. Выбран обычный Spotify.</p>' : '') +
     '<details ' + (s.hasClientId ? '' : 'open') + '><summary>Подключение через браузер</summary><div class="hint">В своём приложении Spotify Developer Dashboard добавь Redirect URI:</div>' +
     '<div class="manual"><code>' + esc(s.redirect || '') + '</code>' + button('native-copy-redirect', 'Скопировать') + '</div>' +
     '<div class="hint">Можно использовать свой существующий Client ID. Client Secret не нужен. После сохранения нажми «Войти».</div>' +

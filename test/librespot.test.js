@@ -124,6 +124,54 @@ test('experiment: flag and role gate both provider and engine, SDK account stays
   assert.equal(x.active, false); assert.equal(x.visible, false); assert.ok(nativeStops >= 2);
   assert.equal(standardApi.loggedIn, true); assert.equal(nativeApi.loggedIn, true);
 });
+test('native metadata failure selects the working SDK only; disabled or unavailable SDK is left alone', () => {
+  const data = { experimentalLibrespot: true, librespotActive: true };
+  const standardApi = { loggedIn: true, regionBlocked: false };
+  let stops = 0, allowed = true;
+  const nativeEngine = { available: true, status: { state: 'failed', code: 'metadata_failed' }, release: () => stops++ };
+  const x = new SpotifyExperiment({ standardApi, nativeApi: { loggedIn: true }, nativeEngine,
+    standardEngine: { release: () => {} }, allowed: () => allowed,
+    settings: { get: () => data, set: patch => Object.assign(data, patch) } });
+  standardApi.loggedIn = false; assert.equal(x.fallbackFromMetadataFailure(), false);
+  standardApi.loggedIn = true; standardApi.regionBlocked = true; assert.equal(x.fallbackFromMetadataFailure(), false);
+  standardApi.regionBlocked = false; allowed = false; assert.equal(x.fallbackFromMetadataFailure(), false);
+  allowed = true; nativeEngine.status.code = 'decoder_failed'; assert.equal(x.fallbackFromMetadataFailure(), false);
+  nativeEngine.status.code = 'metadata_failed';
+  assert.equal(x.fallbackFromMetadataFailure(), true);
+  assert.equal(stops, 1); assert.equal(x.active, false);
+  assert.equal(data.experimentalLibrespot, true, 'the developer can explicitly retry the experiment');
+  assert.equal(x.api.loggedIn, true);
+});
+test('last native failure survives closing the worker during SDK fallback', async () => {
+  const f = fixture(), e = f.engine;
+  try {
+    await e.playUris([uri]);
+    e.receive({ event: 'error', generation: e.intent, code: 'metadata_failed', diagnostics: ['metadata_failed'] });
+    e.release();
+    assert.equal(e.lastFailure.code, 'metadata_failed');
+    assert.match(e.debugText(), /Последний сбой: metadata_failed/);
+    assert.ok(!e.debugText().includes('PRIVATE_TOKEN'));
+  } finally { e.release(); }
+});
+test('renderer fallback keeps the current item, pauses, and refreshes the selected account', async t => {
+  t.mock.method(globalThis, 'setInterval', () => 1);
+  const oldMode = spMode.fallback; spMode.fallback = false;
+  let callback, refreshed = 0, skipped = 0, notices = [];
+  const track = { source: 'sp', srcId: 'a' };
+  const player = { current: track, queue: [track], index: 0, addEventListener: () => {},
+    next: () => skipped++, audio: { paused: false, currentTime: 23, addEventListener: () => {},
+      pause() { this.paused = true; } } };
+  const api = { onState: cb => { callback = cb; }, prewarm: async () => {} };
+  try {
+    const sync = new SpotifySync(player, api, { onMessage: m => notices.push(m), onBackendChange: () => refreshed++ });
+    sync.loaded = 'a'; sync.start();
+    callback({ switchedToSdk: true, backend: 'sdk', message: 'Выбран обычный Spotify' });
+    await Promise.resolve();
+    assert.equal(skipped, 0); assert.equal(player.index, 0); assert.equal(player.current, track);
+    assert.equal(player.audio.paused, true); assert.equal(player.audio.currentTime, 23);
+    assert.equal(sync.loaded, null); assert.equal(refreshed, 1); assert.equal(notices.length, 1);
+  } finally { spMode.fallback = oldMode; }
+});
 test('native card is hidden by default, separate OAuth callback and installer compatibility', () => {
   assert.equal(librespotCard({ permitted: false, flag: true }), '');
   assert.equal(librespotCard({ permitted: true, flag: false }), '');

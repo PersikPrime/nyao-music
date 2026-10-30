@@ -21,6 +21,12 @@ export class SpotifyExperiment {
     else this.nativeEngine.release();
     this.settings.set({ librespotActive: !!on });
   }
+  fallbackFromMetadataFailure() {
+    if (!this.active || !this.standardApi.loggedIn || this.standardApi.regionBlocked ||
+        !['metadata_failed', 'metadata_denied'].includes(this.nativeEngine.status?.code)) return false;
+    this.select(false);
+    return true;
+  }
   disable() {
     this.nativeEngine.release();
     this.settings.set({ experimentalLibrespot: false, librespotActive: false });

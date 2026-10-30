@@ -14,6 +14,7 @@ import { SoundCloudProvider } from './providers/soundcloud.js';
 import { VKProvider } from './providers/vk.js';
 import { SpotifyProvider, SP_REDIRECT } from './providers/spotify.js';
 import { SpotifyEngine, silenceResponse } from './spotify/spotify-engine.js';
+import { versionLabel } from './version.js';
 import { LibrespotEngine } from './spotify/librespot-engine.js';
 import { SpotifyExperiment } from './spotify/experiment.js';
 import { checkUpdate, downloadAsset, fetchHot } from './updates.js';
@@ -46,7 +47,8 @@ function readVersion() {
       name: v.name,
       build: v.build,
       channel: v.channel || null,
-      label: `${v.name} (${v.build})${v.channel ? ' ' + v.channel : ''}`,
+      label: versionLabel(v),
+      displayVersion: v.displayVersion || null,
       // запущено горячее обновление: какая версия стоит установщиком
       installed: hot && hot.running != null ? `${hot.bundled.name} (${hot.bundled.build})` : null
     };
@@ -329,7 +331,16 @@ function initProviders() {
   const nativeEngine = new LibrespotEngine({ api: nativeApi, binary: ['darwin', 'win32'].includes(process.platform) ? nativeBinary : null,
     allowed: () => !!spExperiment?.visible && safeStorage.isEncryptionAvailable(),
     deviceId: () => { let id = secrets.get('librespotDeviceId'); if (!id) { id = crypto.randomUUID(); secrets.set('librespotDeviceId', id); } return id; },
-    onChange: st => { if (spExperiment?.active) send('spotify:state', st); },
+    onChange: st => {
+      if (!spExperiment?.active) return;
+      if (st.error && spExperiment.fallbackFromMetadataFailure()) {
+        wave?.invalidateLikes();
+        send('spotify:state', { backend: 'sdk', switchedToSdk: true,
+          message: 'Librespot не получил метаданные. Выбран обычный Spotify — нажми «Играть».' });
+        return;
+      }
+      send('spotify:state', st);
+    },
   });
   spExperiment = new SpotifyExperiment({ standardApi, standardEngine, nativeApi, nativeEngine, allowed: nativeAllowed, settings });
   sp = spExperiment.api;
@@ -895,7 +906,7 @@ function registerIpc() {
     return { permitted: true, flag: !!settings.get().experimentalLibrespot,
       available: spExperiment.nativeEngine.available, active: spExperiment.active,
       loggedIn: api.loggedIn, clientId: api.clientId, hasClientId: api.hasClientId,
-      redirect: LIBRESPOT_REDIRECT, regionBlocked: api.regionBlocked, engine: spExperiment.nativeEngine.status,
+      redirect: LIBRESPOT_REDIRECT, regionBlocked: api.regionBlocked, engine: spExperiment.nativeEngine.status, lastFailure: spExperiment.nativeEngine.lastFailure,
       account: api.loggedIn ? await spSafe(api.getAccount().then(account => (nativeAccount = account)), nativeAccount || { name: 'Spotify (librespot)', error: true }) : null,
     };
   }

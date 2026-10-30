@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compatOf, makeBundle, signBundle, verifyBundle, readBundle } from '../src/main/hot.js';
+import { compatOf, hotAssetName, makeBundle, signBundle, verifyBundle, readBundle } from '../src/main/hot.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -36,7 +36,7 @@ const sig = signBundle(buf, key);
 if (!verifyBundle(buf, sig, pub)) throw new Error('подпись не проверилась');
 readBundle(buf);
 fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
-const name = `NyaoMusic-${meta.name}.${meta.build}-app-${meta.compat}.nui`;
+const name = hotAssetName(meta);
 fs.writeFileSync(path.join(root, 'dist', name), buf);
 fs.writeFileSync(path.join(root, 'dist', `${name}.sig`), sig + '\n');
 console.log(`${name}: ${meta.count} файлов, ${(buf.length / 1024).toFixed(0)} КБ`);

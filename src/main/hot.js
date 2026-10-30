@@ -14,6 +14,13 @@ import zlib from 'node:zlib';
 
 export const FORMAT = 1;
 
+export function hotAssetName(meta) {
+  const version = meta.displayVersion
+    ? meta.displayVersion + '-build-' + meta.name + '.' + meta.build
+    : meta.name + '.' + meta.build;
+  return 'NyaoMusic-' + version + '-app-' + meta.compat + '.nui';
+}
+
 /**
  * Совместимость с установленным приложением: та же сборка Electron и те же версии библиотек.
  * Версии библиотек — фактически установленные (root/node_modules/<имя>/package.json), а не диапазон из package.json:
@@ -66,7 +73,8 @@ export function makeBundle(root, { exclude = [] } = {}) {
   add('src');
   delete files['src/main/compat.json'];
   const data = { format: FORMAT, name: ver.name, build: ver.build, channel: ver.channel || null, compat: compatOf(pkg, root), files };
-  return { buf: zlib.gzipSync(Buffer.from(JSON.stringify(data)), { level: 9 }), meta: { name: data.name, build: data.build, channel: data.channel, compat: data.compat, count: Object.keys(files).length } };
+  if (ver.displayVersion) data.displayVersion = ver.displayVersion;
+  return { buf: zlib.gzipSync(Buffer.from(JSON.stringify(data)), { level: 9 }), meta: { name: data.name, build: data.build, ...(data.displayVersion ? { displayVersion: data.displayVersion } : {}), channel: data.channel, compat: data.compat, count: Object.keys(files).length } };
 }
 
 export function signBundle(buf, privatePem) {
