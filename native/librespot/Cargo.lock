@@ -1783,6 +1783,7 @@ name = "nyao-librespot"
 version = "0.1.0"
 dependencies = [
  "librespot",
+ "log",
  "serde",
  "serde_json",
  "tokio",

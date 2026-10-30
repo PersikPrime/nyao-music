@@ -85,6 +85,26 @@ test('librespot: crash and playback failure retire the old worker before retry',
     await assert.rejects(e.playUris(['file:///etc/passwd']), /Некорректная/);
   } finally { e.release(); }
 });
+test('librespot: loader refusal stops playback and preserves only safe stage codes', async () => {
+  const f = fixture(), e = f.engine;
+  try {
+    await e.playUris([uri]);
+    e.receive({ event: 'error', generation: e.intent - 1, code: 'audio_key_rejected', diagnostics: ['metadata_failed'] });
+    assert.equal(e.status.state, 'ready');
+    e.receive({ event: 'error', generation: e.intent, kind: 'playback', code: 'audio_key_rejected',
+      diagnostics: ['audio_key_rejected', 'decoder_failed', 'Bearer PRIVATE_TOKEN', '__proto__', { token: 'PRIVATE_TOKEN' }] });
+    assert.equal(e.status.kind, 'engine', 'renderer stops instead of skipping the entire queue');
+    assert.deepEqual(e.diagnostics, ['audio_key_rejected', 'decoder_failed']);
+    assert.match(e.debugText(), /audio_key_rejected/);
+    assert.ok(!e.debugText().includes('PRIVATE_TOKEN'));
+    assert.ok(!e.debugText().includes('__proto__'));
+    assert.ok(!JSON.stringify(f.events).includes('PRIVATE_TOKEN'));
+    assert.equal(f.commands.filter(c => c.command === 'play').length, 1);
+    e.receive({ event: 'error', generation: e.intent, kind: 'playback', code: 'unavailable' });
+    assert.equal(e.status.kind, 'engine', 'older workers stop too');
+    assert.doesNotMatch(e.status.message, /Этот трек недоступен/);
+  } finally { e.release(); }
+});
 test('experiment: flag and role gate both provider and engine, SDK account stays intact', () => {
   const data = { experimentalLibrespot: false, librespotActive: false };
   let allowed = true, nativeStops = 0, sdkStops = 0;

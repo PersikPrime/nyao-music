@@ -14,6 +14,6 @@ export function librespotCard(s, esc) {
     '<div class="manual"><code>' + esc(s.redirect || '') + '</code>' + button('native-copy-redirect', 'Скопировать') + '</div>' +
     '<div class="hint">Можно использовать свой существующий Client ID. Client Secret не нужен. После сохранения нажми «Войти».</div>' +
     '<div class="manual" style="display:flex;gap:8px"><input type="text" data-native-client placeholder="Client ID (32 символа)" value="' + esc(s.clientId || '') + '" style="flex:1">' + button('native-save-id', 'Сохранить') + '</div>' +
-    '</details><details><summary>Что-то не работает?</summary><div class="manual">' + button('native-debug', 'Показать состояние') +
+    '</details><details><summary>Что-то не работает?</summary><div class="manual">' + button('native-debug', 'Показать причину сбоя') +
     '<pre id="native-log" class="hint" style="white-space:pre-wrap"></pre></div></details></section>';
 }

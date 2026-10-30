@@ -1,7 +1,7 @@
 {
   "name": "nyao-music",
   "productName": "Nyao Music",
-  "version": "0.8.96",
+  "version": "0.8.97",
   "description": "Единый плеер для Яндекс Музыки и YouTube Music с общей «Моей волной»",
   "author": "Takko",
   "license": "UNLICENSED",
@@ -96,5 +96,5 @@
       }
     ]
   },
-  "nyaoNativeAbi": 1
+  "nyaoNativeAbi": 2
 }

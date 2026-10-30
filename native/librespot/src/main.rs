@@ -1,5 +1,7 @@
 //! Local playback worker. Credentials arrive only over the private stdin pipe.
 //! No discovery, external controller, password login, disk audio cache or token logging.
+mod diagnostics;
+use diagnostics::DIAGNOSTICS;
 use std::{io::{self, Write}, sync::Arc, time::Duration};
 use librespot::{
     core::{authentication::Credentials, config::SessionConfig, session::Session, SpotifyUri},
@@ -78,12 +80,13 @@ impl Worker {
             self.paused = true;
             self.waiting = true;
             self.request = None;
+            DIAGNOSTICS.clear();
             player.load(track.clone(), true, position);
         }
     }
     async fn command(&mut self, cmd: &Command) -> Result<Value, &'static str> {
         match cmd.command.as_str() {
-            "ping" => Ok(json!({"protocol":1,"engine":"librespot","version":"0.8.0"})),
+            "ping" => Ok(json!({"protocol":1,"engine":"librespot","version":"0.8.0","workerVersion":2})),
             "connect" => {
                 self.reset();
                 let token = cmd.access_token.as_ref().filter(|t| !t.is_empty() && t.len() <= 8192).ok_or("auth")?;
@@ -98,6 +101,14 @@ impl Worker {
                     Ok(Ok(())) => {},
                     _ => { session.shutdown(); return Err("auth"); }
                 }
+                // Country arrives asynchronously after AP authentication. Empty context makes
+                // metadata country whitelists reject otherwise playable tracks.
+                let context_ready = tokio::time::timeout(Duration::from_secs(5), async {
+                    while session.user_data().country.is_empty() && !session.is_invalid() {
+                        tokio::time::sleep(Duration::from_millis(25)).await;
+                    }
+                }).await.is_ok() && !session.is_invalid() && !session.user_data().country.is_empty();
+                if !context_ready { session.shutdown(); return Err("session_context"); }
                 let mixer = mixer::find(None).ok_or("audio_backend")?(MixerConfig::default()).map_err(|_| "audio_backend")?;
                 // Start quietly; Nyao applies the user's saved volume before loading audio.
                 mixer.set_volume(0);
@@ -184,7 +195,7 @@ impl Worker {
                 self.duration = audio_item.duration_ms;
             },
             PlayerEvent::TimeToPreloadNextTrack { .. } => {
-                if let (Some(player), Some(next)) = (&self.player, self.tracks.get(self.index + 1)) { player.preload(next.clone()); }
+                // Keep the experimental loader serial; no background key requests while diagnosing failures.
             },
             PlayerEvent::EndOfTrack { track_id, .. } => {
                 if Some(track_id.to_string()) != self.uri() { return; }
@@ -200,7 +211,10 @@ impl Worker {
             },
             PlayerEvent::Unavailable { track_id, .. } => {
                 if Some(track_id.to_string()) != self.uri() { return; }
-                emit(json!({"event":"error","generation":self.generation,"kind":"playback","code":"unavailable"}));
+                if let Some(player) = &self.player { player.stop(); }
+                self.paused = true;
+                emit(json!({"event":"error","generation":self.generation,"kind":"engine",
+                    "code":DIAGNOSTICS.failure(),"diagnostics":DIAGNOSTICS.codes()}));
             },
             _ => {},
         }
@@ -209,7 +223,8 @@ impl Worker {
 
 #[tokio::main]
 async fn main() {
-    // All stdout is framed IPC. Do not install a logger or print received commands.
+    // All stdout is framed IPC. The logger emits only allowlisted stage codes.
+    DIAGNOSTICS.install();
     emit(json!({"event":"hello","protocol":1}));
     let mut input = BufReader::new(tokio::io::stdin()).lines();
     let mut worker = Worker::default();
