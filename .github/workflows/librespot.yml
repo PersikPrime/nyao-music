@@ -16,7 +16,7 @@ jobs:
           workspaces: native/librespot
       - name: Resolve dependencies
         run: |
-          cargo generate-lockfile --manifest-path native/librespot/Cargo.toml
+          cargo fetch --locked --manifest-path native/librespot/Cargo.toml
           echo NYAO_LOCK_BEGIN
           cat native/librespot/Cargo.lock
           echo NYAO_LOCK_END

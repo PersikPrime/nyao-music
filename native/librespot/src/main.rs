@@ -158,7 +158,11 @@ impl Worker {
             return;
         }
         if self.waiting { return; }
-        if let Some(id) = event.get_play_request_id() {
+        let event_request = match &event {
+            PlayerEvent::PositionChanged { play_request_id, .. } => Some(*play_request_id),
+            _ => event.get_play_request_id(),
+        };
+        if let Some(id) = event_request {
             if self.request != Some(id) { return; }
         }
         let playing_event = matches!(&event, PlayerEvent::Playing { .. });

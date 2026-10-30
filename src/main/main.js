@@ -889,6 +889,7 @@ function registerIpc() {
       try { await requireNativeDeveloper(); } catch { if (!cloud?.loggedIn || !cloud.user?.dev) nativePermission = false; }
     } else nativePermission = false;
     if (!nativeAllowed()) { spExperiment.nativeEngine.release(); return { permitted: false, flag: false, active: false }; }
+    if (spExperiment.active) spExperiment.standardEngine.release();
     const api = spExperiment.nativeApi;
     return { permitted: true, flag: !!settings.get().experimentalLibrespot,
       available: spExperiment.nativeEngine.available, active: spExperiment.active,

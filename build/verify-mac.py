@@ -13,6 +13,10 @@ def verify(root):
         raise RuntimeError(f"{root}: expected exactly one packaged .app")
     app = apps[0]
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+    worker = app / "Contents" / "Resources" / "librespot" / "nyao-librespot"
+    if not worker.is_file():
+        raise RuntimeError(f"{app}: missing bundled librespot worker")
+    subprocess.run(["codesign", "--verify", "--strict", str(worker)], check=True)
     bundles = [app] + list((app / "Contents" / "Frameworks").rglob("*.app"))
     for bundle in bundles:
         result = subprocess.run(

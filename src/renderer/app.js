@@ -1,5 +1,6 @@
 import { Player } from './player.js';
 import { spMode } from './sp-mode.js';
+import { librespotCard } from './librespot-ui.js';
 import { SpotifySync } from './spotify-sync.js';
 import { Ribbon } from './ribbon.js';
 import { Onboarding } from './onboarding.js';
@@ -355,6 +356,7 @@ function openAccountMenu(anchor) {
         <button class="acc-act ${st ? '' : 'primary'}" data-a="${st ? 'logout' : 'login'}" data-svc="${s.id}">${st ? 'Выйти' : 'Войти'}</button>
       </div>`;
     }).join('')}
+    ${nativeVisible() ? '<button data-a="native-settings">Spotify (librespot)</button>' : ''}
     <button data-a="settings">${SETTINGS_ICON_SM} Настройки аккаунтов</button>`;
   menu.hidden = false;
   const r = anchor.getBoundingClientRect();
@@ -367,6 +369,7 @@ function openAccountMenu(anchor) {
     const b = e.target.closest('[data-a]');
     if (!b) return;
     e.stopPropagation();
+    if (b.dataset.a === 'native-settings') { menu.hidden = true; return go('settings', { section: 'svc:sp-native' }); }
     if (b.dataset.a === 'settings') {
       menu.hidden = true;
       return go('settings');
@@ -595,792 +598,7 @@ const WAVE_SHAPES = [
 function waveShapesHtml(animate) {
   return `<div class="wave-shapes ${animate ? 'anim' : ''}" aria-hidden="true">${WAVE_SHAPES.map(([side, lobes, depth, rot, r, pos, col], i) => {
     const place = Object.entries(pos).filter(([k]) => k !== 'pill').map(([k, v]) => `${k}:${v}em`).join(';');
-    const style = `${place};--i:${i};--dx:${side === 'l' ? -1 : 1};--c:var(${col === 'a' ? '--accent' : `--accent-${col}`})`;
-    if (pos.pill) {
-      const [w, h, deg] = pos.pill;
-      return `<span class="wsh pill" style="${style};width:${w}em;height:${h}em;--rot:${deg}deg"></span>`;
-    }
-    const { d, size } = polarPath(r * 10, lobes, depth, rot);
-    return `<svg class="wsh" style="${style};width:${(size / 10).toFixed(2)}em;height:${(size / 10).toFixed(2)}em" viewBox="0 0 ${size.toFixed(1)} ${size.toFixed(1)}"><path d="${d}"/></svg>`;
-  }).join('')}</div><div class="wave-fade" aria-hidden="true"></div>`;
-}
-function waveSummary() {
-  const s = state.settings || {};
-  const div = (DIVERSITY.find((d) => d[0] === s.waveDiversity) || DIVERSITY[0])[1];
-  const mood = (MOODS.find((m) => m[0] === s.waveMood) || [])[1];
-  return [div, mood, shareLabel(s.ytmShare ?? 30)].filter(Boolean).join(' · ');
-}
-function waveTuneHtml() {
-  return `<div class="wave-scrim" data-action="wave-tune-close"></div>
-  <aside class="wave-tune" role="dialog" aria-label="Настроить волну">
-    <div class="wt-head"><h2>Настроить волну</h2><button class="ic dr-close" data-action="wave-tune-close" aria-label="Закрыть" title="Закрыть (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
-    <div class="wt-body">${waveControlsHtml()}</div>
-  </aside>`;
-}
-function closeWaveTune() {
-  if (!state.waveTune) return false;
-  state.waveTune = false;
-  $('.wave-tune-layer', view)?.classList.remove('open');
-  $('.wave-tune-btn', view)?.setAttribute('aria-expanded', 'false');
-  return true;
-}
-function renderWave() {
-  const t = player.current;
-  const waveOn = player.mode === 'wave';
-  const playing = waveOn && player.playing;
-  const next = waveOn ? player.queue.slice(player.index + 1, player.index + 6) : [];
-  const animate = !state.waveShown;
-  state.waveShown = true;
-  const extra = [state.status.yt && ['yt', 'YouTube Music'], state.status.sc && ['sc', 'SoundCloud'], state.status.vk && ['vk', 'VK'], state.status.sp && ['sp', 'Spotify']].filter(Boolean);
-  view.innerHTML = `<div class="wave-view">
-    <section class="wave-hero">
-      ${waveShapesHtml(animate)}
-      <div class="top">
-        <span class="glass-cap srcs">${state.status.ya ? '<span class="dotsrc ya"></span>Яндекс' : ''}${extra.map(([k, n]) => `<span class="plus">+</span><span class="dotsrc ${k}"></span>${n}`).join('')}<span class="plus">→</span><span class="one">одна волна</span></span>
-        <span class="glass-cap" id="wave-summary">${esc(waveSummary())}</span>
-      </div>
-      <div class="center">
-        <h1 class="wave-title">Моя волна</h1>
-        <button class="wave-play" data-action="wave-toggle" aria-label="${playing ? 'Пауза' : 'Слушать волну'}">${playing ? ICONS.pauseBig : ICONS.playBig}</button>
-        <div class="wave-row">
-          ${waveOn && t ? `<button class="now-pill" data-action="fullscreen" title="Полный экран">${coverHtml(t, '')}<span class="ttl">${esc(t.title)}</span><span class="muted">${esc(t.artist)}</span>${trackBadge(t)}</button>` : ''}
-          <button class="wave-tune-btn" data-action="wave-tune" aria-haspopup="dialog" aria-expanded="${!!state.waveTune}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4"/></svg>Настроить волну</button>
-        </div>
-      </div>
-    </section>
-    <section class="next-up">
-      ${waveOn && t && t.waveReason ? `<p class="hint">${esc(t.waveReason)}</p>` : ''}
-      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><h2 class="sec" style="font-size:17px">Дальше в волне</h2><span class="hint">лайки и прослушивания улучшают общую волну</span></div>
-      ${next.length ? `<div class="next-grid">${next.map((n, i) => `<button class="next-card" data-action="q-play" data-i="${player.index + 1 + i}">${coverHtml(n, 'xs')}<span class="meta"><span class="t" style="display:block">${esc(n.title)}</span><span class="s" style="display:block">${esc(n.artist)}</span></span><span class="dotsrc ${n.source}"></span></button>`).join('')}</div>` : '<div class="hint">Запусти волну — здесь появятся следующие треки.</div>'}
-    </section>
-  </div>
-  <div class="wave-tune-layer ${state.waveTune ? 'open' : ''}">${waveTuneHtml()}</div>`;
-  $$('input[data-input="share"], input[data-input="fresh"]', view).forEach(setRangeFill);
-}
-
-// ---------- Выезжающая панель справа: «Об исполнителе / Далее / Об этом треке» и очередь ----------
-// Открывается кнопками в плеере, закрывается той же кнопкой, крестиком или Esc
-function openDrawer(mode = 'info') {
-  state.drawer = mode;
-  const el = $('#drawer');
-  el.classList.add('open');
-  el.setAttribute('aria-hidden', 'false');
-  el.removeAttribute('inert');
-  el.setAttribute('aria-label', mode === 'queue' ? 'Очередь' : 'Об исполнителе и треке');
-  renderDrawer(true);
-  if (mode === 'info') loadNpArtist();
-  syncDrawerButtons();
-}
-function closeDrawer() {
-  if (!state.drawer) return false;
-  state.drawer = null;
-  const el = $('#drawer');
-  el.classList.remove('open');
-  el.setAttribute('aria-hidden', 'true');
-  el.setAttribute('inert', '');
-  syncDrawerButtons();
-  return true;
-}
-function toggleDrawer(mode) {
-  if (state.drawer === mode) closeDrawer();
-  else openDrawer(mode);
-}
-function syncDrawerButtons() {
-  $('#pb-panel').classList.toggle('on', state.drawer === 'info');
-  $('#pb-panel').setAttribute('aria-pressed', String(state.drawer === 'info'));
-  $('#pb-queue').classList.toggle('on', state.drawer === 'queue');
-  $('#pb-queue').setAttribute('aria-pressed', String(state.drawer === 'queue'));
-}
-function queueListHtml() {
-  return tracksHtml(player.queue, 'queue', { action: 'q-play' });
-}
-function renderDrawer(scrollToCur) {
-  const el = $('#drawer');
-  if (!state.drawer || !el) return;
-  const t = player.current;
-  const head = (title) => `<div class="dr-head"><span class="dr-title">${title}</span><button class="ic dr-close" data-action="drawer-close" aria-label="Закрыть панель" title="Закрыть (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
-  if (state.drawer === 'queue') {
-    const label = player.mode === 'wave' ? 'Моя волна · без конца' : player.queue.length ? `${player.label ? esc(player.label) + ' · ' : ''}${player.queue.length}` : 'Очередь пуста';
-    el.innerHTML = `${head('Очередь')}<div class="dr-sub">${label}</div><div class="dr-scroll"><div id="qlist">${queueListHtml()}</div></div>`;
-    $$('#qlist .trow', el).forEach((r) => (r.draggable = true));
-    if (scrollToCur) {
-      // только прокрутка списка: scrollIntoView двигал бы всё окно, пока панель ещё за краем
-      const cur = $('#qlist .trow.cur', el);
-      const sc = $('.dr-scroll', el);
-      if (cur && sc) sc.scrollTop = Math.max(0, cur.offsetTop - sc.offsetTop - sc.clientHeight / 2 + cur.offsetHeight / 2);
-    }
-    return;
-  }
-  const nx = player.queue[player.index + 1];
-  const a = state.npArtist.data && t && state.npArtist.ref === t.artistRef ? state.npArtist.data : null;
-  el.innerHTML = `${head('Сейчас играет')}<div class="dr-scroll">
-    ${t ? `<div class="np-card artist" ${t.artistRef ? `data-action="open-artist" data-ref="${esc(t.artistRef)}"` : ''}>
-      <div class="ph">${a && a.cover ? `<img src="${esc(a.cover)}" alt="">` : ''}<span class="eyebrow" style="position:absolute;left:16px;top:14px;color:#fff">Об исполнителе</span></div>
-      <div class="bd"><span style="font-size:18px;font-weight:700">${esc(a ? a.name : t.artist)}</span>
-      <span class="muted" style="font-size:12px">${a ? [a.refs.ya ? 'есть в Яндексе' : '', a.refs.yt ? 'есть в YouTube Music' : ''].filter(Boolean).join(' · ') : t.artistRef ? 'Загружаю…' : ''}</span>
-      ${a && a.description ? `<span class="np-desc">${esc(a.description)}</span>` : ''}</div>
-    </div>` : '<div class="empty">Ничего не играет.<br><br><button class="btn primary" data-action="wave-toggle">' + ICONS.play + 'Моя волна</button></div>'}
-    <div class="np-card">
-      <div class="h"><span>Далее</span><button class="link" data-action="drawer-queue">Открыть очередь</button></div>
-      ${nx ? `<div class="np-next" data-action="q-play" data-i="${player.index + 1}">${coverHtml(nx, 'xs')}<div style="flex:1;min-width:0"><div class="np-next-t">${esc(nx.title)}</div><div class="muted" style="font-size:12px">${esc(nx.artist)}</div></div>${trackBadge(nx)}</div>` : '<span class="muted" style="font-size:13px">Дальше пусто</span>'}
-    </div>
-    ${t ? `<div class="np-card"><div class="h"><span>Об этом треке</span></div><div class="facts">
-      <span>Название</span><span>${esc(t.title)}</span>
-      <span>Исполнитель</span><span>${esc(t.artist)}</span>
-      ${t.album ? `<span>Альбом</span><span>${t.albumRef ? `<button class="link-plain" data-action="open-album" data-ref="${esc(t.albumRef)}">${esc(t.album)}</button>` : esc(t.album)}</span>` : ''}
-      <span>Источник</span><span>${srcName(t.source)}</span>
-      <span>Откуда</span><span>${esc(player.label || '—')}</span>
-      <span id="facts-more" style="display:contents"></span>
-    </div></div>` : ''}
-  </div>`;
-  if (t) loadTrackFacts(t);
-}
-
-// «Об этом треке»: год, жанр, лейбл — догружаются у сервиса
-const factsCache = new Map();
-async function loadTrackFacts(t) {
-  let d = factsCache.get(t.id);
-  if (!d) {
-    d = await api.trackDetails(t).catch(() => ({}));
-    factsCache.set(t.id, d || {});
-  }
-  const el = $('#facts-more');
-  if (!el || !player.current || player.current.id !== t.id || !d) return;
-  const rows = [
-    ['Год', d.year],
-    ['Жанр', d.genre],
-    ['Лейбл', d.label],
-    ['Номер в альбоме', d.position],
-    ['Прослушиваний', Number.isFinite(d.plays) ? d.plays.toLocaleString('ru-RU') : null],
-    ['Возраст', d.explicit ? '18+' : null]
-  ].filter((r) => r[1]);
-  el.innerHTML = rows.map(([k, v]) => `<span>${k}</span><span>${esc(v)}</span>`).join('');
-}
-
-/** Текст текущего трека. Один запрос на трек: все, кто спросил (экран, полный экран), ждут его же */
-/** opts.exclude — «другой источник»: эти провайдеры пропустить (найденное заменит текст в кэше) */
-function ensureLyrics(opts = null) {
-  const t = player.current;
-  if (!t) return Promise.resolve(null);
-  if (opts || state.lyrics.id !== t.id || !state.lyrics.promise) {
-    const id = t.id;
-    const promise = api.lyrics(t, opts || undefined).catch(() => null).then((data) => {
-      if (state.lyrics.id === id) state.lyrics.data = data;
-      return data;
-    });
-    state.lyrics = { id, data: undefined, promise };
-  }
-  return state.lyrics.promise;
-}
-
-function libraryCounts() {
-  const l = state.lib.lists || [];
-  return { all: l.length + 1, ya: l.filter((p) => p.source === 'ya').length, yt: l.filter((p) => p.source === 'yt').length, sc: l.filter((p) => p.source === 'sc').length, vk: l.filter((p) => p.source === 'vk').length, sp: l.filter((p) => p.source === 'sp').length, mix: l.filter((p) => p.source === 'mix').length };
-}
-
-function renderLibrary() {
-  const lib = state.lib;
-  const c = libraryCounts();
-  const likes = likedEntries();
-  const all = lib.lists ? [...likes, ...lib.lists] : null;
-  const isLiked = (p) => p.id === 'liked' || p.id.startsWith('liked:');
-  const shown = all ? all.filter((p) => lib.filter === 'all' || p.source === lib.filter || (p.id === 'liked' && lib.filter === 'mix')) : null;
-  const sel = all ? all.find((p) => p.id === lib.selected) : null;
-  const f = (v, label, dot) => `<button class="chip solid ${lib.filter === v ? 'on' : ''}" data-action="lib-filter" data-v="${v}">${dot ? `<span class="d" style="background:${dot}"></span>` : ''}${label}</button>`;
-  const heart = (size, src = 'mix') => `<div class="cover" style="background:${(SRC_TINT[src] || SRC_TINT.mix)[0]}">${ICONS.heartOn.replace('width="20" height="20"', `width="${size}" height="${size}" style="color:${(SRC_TINT[src] || SRC_TINT.mix)[1]}"`)}</div>`;
-  view.innerHTML = `<div class="split">
-    <div class="scroll">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
-        <h1 class="page">Медиатека</h1>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <div class="pill-seg" role="radiogroup" aria-label="Как показывать «Мне нравится»">${[[true, 'Лайки по сервисам'], [false, 'Одним списком']].map(([v, l]) => `<button role="radio" aria-checked="${!!state.settings.splitLiked === v}" class="${!!state.settings.splitLiked === v ? 'on' : ''}" data-action="split-liked" data-v="${v ? 1 : 0}">${l}</button>`).join('')}</div>
-          <button class="btn" data-action="mix-builder">${ICONS.plus}Новый микс</button>
-        </div>
-      </div>
-      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${state.status.vk ? f('vk', 'VK', 'var(--vk)') : ''}${state.status.sp || c.sp ? f('sp', 'Spotify', 'var(--sp)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}${f('artists', `Исполнители${state.favArtists.length ? ' · ' + state.favArtists.length : ''}`)}</div>
-      ${lib.filter === 'artists' ? (state.favArtists.length ? `<div class="tiles">${state.favArtists.map((x) => `<button class="tile fav-tile" data-action="open-artist" data-ref="${esc((x.refs && (x.refs.ya || x.refs.yt)) || x.ref)}">
-          ${coverHtml({ cover: x.cover, source: String(x.ref).slice(0, 2) }, 'round')}<div class="t">${esc(x.name)}</div><div class="s">${x.at ? 'любимый исполнитель' : 'из Яндекса'}</div></button>`).join('')}</div>`
-        : '<div class="empty">Здесь будут любимые исполнители. Открой исполнителя и нажми ♥ рядом с «Слушать» — его треки станут чаще попадать в «Мою волну».</div>') : shown ? `<div class="tiles">${shown.map((p) => `<button class="tile ${p.id === lib.selected ? 'sel' : ''}" data-action="lib-select" data-id="${esc(p.id)}">
-          ${isLiked(p) ? heart('40%', p.source) : coverHtml(p, '', true)}
-          <div class="t">${esc(p.title)}</div><div class="s">${isLiked(p) ? esc(p.sub) : esc(p.source === 'ya' ? 'Яндекс' : srcName(p.source)) + (p.count ? ' · ' + p.count : '')}</div>
-        </button>`).join('')}</div>` : '<div class="tiles">' + '<div class="skeleton" style="aspect-ratio:1"></div>'.repeat(8) + '</div>'}
-    </div>
-    <aside class="aside">
-      ${sel ? `<div class="aside-head">
-        <div class="pl-head">
-          ${isLiked(sel) ? heart('50', sel.source) : coverHtml(sel)}
-          <div style="min-width:0"><span class="muted" style="font-size:12px">${sel.id === 'liked' ? 'Общий список лайков' : isLiked(sel) ? 'Лайки одного сервиса' : sel.source === 'mix' ? 'Смешанный плейлист' : sel.source === 'ya' ? 'Плейлист Яндекса' : sel.source === 'sc' ? 'Плейлист SoundCloud' : sel.source === 'vk' ? 'Плейлист VK' : sel.source === 'sp' ? 'Плейлист Spotify' : 'Плейлист YouTube Music'}</span>
-          <h2>${esc(sel.title)}</h2>
-          <span class="muted" style="font-size:12px">${lib.tracks ? `${lib.tracks.length} треков · ${fmt(lib.tracks.reduce((a, t) => a + (t.duration || 0), 0))}` : 'Загружаю…'}</span></div>
-        </div>
-        <div class="row-actions">
-          <button class="btn primary" data-action="pl-play" ${lib.tracks && lib.tracks.length ? '' : 'disabled'}>${ICONS.play}Слушать</button>
-          <button class="icbtn" data-action="pl-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
-          <span class="grow"></span>
-          ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}${lib.tracks.some((t) => t.source === 'sc') ? `<span class="dotsrc sc" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sc').length}` : ''}${lib.tracks.some((t) => t.source === 'vk') ? `<span class="dotsrc vk" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'vk').length}` : ''}${lib.tracks.some((t) => t.source === 'sp') ? `<span class="dotsrc sp" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sp').length}` : ''}</span>` : ''}
-          ${lib.tracks && lib.tracks.length ? `<button class="icbtn" data-action="pl-transfer" aria-label="Перенести в другой сервис" title="Перенести в другой сервис">${ICONS.transfer}</button>` : ''}
-          ${sel.source === 'mix' && !isLiked(sel) ? `<button class="icbtn" data-action="del-mix" aria-label="Удалить микс">${ICONS.ban}</button>` : ''}
-        </div>
-      </div>
-      <div class="aside-scroll">${lib.tracks ? (lib.tracks.length ? tracksHtml(lib.tracks, 'lib', { num: false }) : `<div class="empty">${isLiked(sel) ? 'В этом сервисе лайков пока нет.' : sel.source === 'mix' ? 'Микс пустой. Добавляй треки через «⋯» в любом списке.' : 'Здесь пока пусто'}</div>`) : '<div class="skeleton" style="height:300px;margin:8px"></div>'}</div>` : '<div class="empty">Выбери плейлист</div>'}
-    </aside>
-  </div>`;
-}
-
-function renderSearch() {
-  const s = state.search;
-  const arranged = arrangeSearch(s.res, s.filter, s.q);
-  const merged = arranged.tracks;
-  const { best, albums } = arranged;
-  const artists = arranged.artists.filter((a) => a !== best);
-  const srcLabel = (x) => (x === 'ya' ? 'Яндекс Музыка' : x === 'yt' ? 'YouTube Music' : srcName(x));
-  const extra = s.loading || !s.res ? '' : `
-    ${best ? `<button class="best-artist" data-action="open-artist" data-ref="${esc(best.ref)}">${coverHtml(best, 'round')}<span class="ba-meta"><span class="eyebrow">Исполнитель · ${esc(srcLabel(best.source))}</span><b>${esc(best.name)}</b><span class="muted">Популярное, альбомы и все треки</span></span><span class="ba-go">${ICONS.play}</span></button>` : ''}
-    ${artists.length ? `<section><h2 class="sec" style="margin:18px 0 12px">Исполнители</h2><div class="artist-row">${artists.map((a) => `<button class="artist-chip" data-action="open-artist" data-ref="${esc(a.ref)}">${coverHtml(a, 'round')}<b>${esc(a.name)}</b><span>${badge(a.source)}</span></button>`).join('')}</div></section>` : ''}
-    ${albums.length ? `<section><h2 class="sec" style="margin:18px 0 12px">Альбомы</h2><div class="recent-row">${albums.map((al) => `<button class="rcard" data-action="open-album" data-ref="${esc(al.ref)}">${coverHtml(al, '', true)}<b>${esc(al.title)}</b><span>${esc(al.artist || '')}${al.year ? ' · ' + esc(al.year) : ''}</span></button>`).join('')}</div></section>` : ''}
-    ${merged.length ? `<div class="sec-head" style="margin:22px 0 12px"><h2 class="sec">Треки</h2><span class="grow"></span><button class="btn sm" data-action="search-next" title="Сразу после текущего трека">${ICONS.plus}Играть следующими</button><button class="btn sm" data-action="search-last">${ICONS.plus}В конец очереди</button></div>` : ''}`;
-  const f = (v, label, dot) => `<button class="chip solid ${s.filter === v ? 'on' : ''}" data-action="search-filter" data-v="${v}">${dot ? `<span class="d" style="background:${dot}"></span>` : ''}${label}</button>`;
-  view.innerHTML = `<div class="scroll">
-    <h1 class="page">Поиск</h1>
-    <form class="search-field" data-form="search" style="max-width:640px">${ICONS.search}<input name="q" type="search" value="${esc(s.q)}" placeholder="Трек или исполнитель" aria-label="Поиск"></form>
-    ${s.res ? `<div class="chips">${f('all', 'Все')}${f('ya', `Яндекс · ${s.res.ya.length}`, 'var(--ya)')}${f('yt', `YouTube Music · ${s.res.yt.length}`, 'var(--yt-bright)')}${f('sc', `SoundCloud · ${(s.res.sc || []).length}`, 'var(--sc)')}${(s.res.vk || []).length ? f('vk', `VK · ${s.res.vk.length}`, 'var(--vk)') : ''}${(s.res.sp || []).length || state.status.sp ? f('sp', `Spotify · ${(s.res.sp || []).length}`, 'var(--sp)') : ''}</div>` : ''}
-    ${extra}
-    ${s.loading ? '<div class="skeleton" style="height:300px"></div>' : s.res ? (merged.length ? tracksHtml(merged, 'search') : !best && !artists.length && !albums.length ? '<div class="empty">Ничего не нашлось</div>' : '') : ''}
-  </div>`;
-  const input = $('input[name=q]', view);
-  if (input && !s.res) input.focus();
-}
-
-function renderArtist() {
-  const st = state.artist;
-  const a = st.data;
-  if (!a) {
-    view.innerHTML = `<div class="page-view"><div class="artist-hero"><button class="back" data-action="back">${ICONS.back}Назад</button><div class="in">${st.error ? `<h1 class="artist-name" style="font-size:32px">Не удалось открыть исполнителя</h1><span class="muted">${esc(st.error)}</span>` : '<div class="skeleton" style="height:80px;width:50%"></div>'}</div></div></div>`;
-    return;
-  }
-  const pref = sourcePref();
-  const kinds = [['album', 'Альбомы'], ['single', 'Синглы и EP'], ['compilation', 'Сборники']].filter(([k]) => a.albums.some((x) => x.kind === k));
-  const kind = kinds.some(([k]) => k === st.kind) ? st.kind : (kinds[0] || ['album'])[0];
-  const albums = a.albums.filter((x) => x.kind === kind);
-  lists['artist-popular'] = a.popular;
-  const latest = a.albums.filter((x) => x.year).sort((x, y) => String(y.year).localeCompare(String(x.year)))[0];
-  view.innerHTML = `<div class="page-view">
-    <section class="artist-hero">
-      ${a.cover ? `<img class="bg" src="${esc(a.cover)}" alt="">` : '<canvas id="artist-ribbon"></canvas>'}
-      <button class="back" data-action="back">${ICONS.back}Назад</button>
-      <div class="in">
-        <div class="src-chips">${a.refs.ya ? `<span class="src-chip">${badge('ya')}есть в Яндексе</span>` : ''}${a.refs.yt ? `<span class="src-chip">${badge('yt')}есть в YouTube Music</span>` : ''}</div>
-        <h1 class="artist-name">${esc(a.name)}</h1>
-        ${a.listeners && a.listeners.ya ? `<span class="muted" style="font-size:14px">${Number(a.listeners.ya).toLocaleString('ru-RU')} слушателей за месяц в Яндексе</span>` : ''}
-      </div>
-    </section>
-    <section class="act-row">
-      <button class="bigplay" data-action="artist-play" aria-label="Слушать исполнителя">${ICONS.play}</button>
-      <button class="icbtn" data-action="artist-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
-      <button class="icbtn fav-artist ${favOf(a) ? 'on' : ''}" data-action="artist-like" aria-pressed="${!!favOf(a)}" aria-label="${favOf(a) ? 'Убрать из любимых исполнителей' : 'В любимые исполнители'}" title="${favOf(a) ? 'В любимых — чаще в «Моей волне»' : 'Любимый исполнитель — чаще в «Моей волне»'}">${favOf(a) ? ICONS.heartOn : ICONS.heart}</button>
-      <span class="grow"></span>
-      <div class="pill-seg" role="radiogroup" aria-label="Источник">${[['auto', 'Вместе', ''], ['ya', 'Яндекс', 'ya'], ['yt', 'YouTube Music', 'yt']].map(([v, l, d]) => `<button role="radio" aria-checked="${pref === v}" class="${pref === v ? 'on' : ''}" data-action="set-pref" data-v="${v}">${d ? `<span class="dotsrc ${d}"></span>` : ''}${l}</button>`).join('')}</div>
-    </section>
-    <section class="two-col">
-      <div class="main">
-        <h2 class="sec" style="margin-bottom:10px">Популярное</h2>
-        ${a.popular.length ? `<div class="tracks">${a.popular.map((r, i) => mergedRowHtml(r, i, 'artist-popular')).join('')}</div>` : '<div class="hint">Популярных треков нет</div>'}
-        <button class="btn all-tracks" data-action="artist-all">${ICONS.list || ''}Все треки</button>
-      </div>
-      ${latest ? `<div class="side"><button class="release" data-action="open-album" data-ref="${esc(latest.ref)}">
-        <span class="eyebrow">Последний релиз</span>
-        <span class="row">${coverHtml(latest)}<span style="display:flex;flex-direction:column;gap:4px"><span style="font-size:18px;font-weight:700">${esc(latest.title)}</span><span class="muted" style="font-size:13px">${latest.kind === 'single' ? 'Сингл' : 'Альбом'}${latest.year ? ' · ' + esc(latest.year) : ''}</span></span></span>
-      </button></div>` : ''}
-    </section>
-    ${a.albums.length ? `<section class="sect">
-      <div class="sect-head"><h2>Альбомы и синглы</h2>${kinds.map(([k, l]) => `<button class="chip solid ${kind === k ? 'on' : ''}" data-action="artist-kind" data-v="${k}">${l}</button>`).join('')}</div>
-      <div class="album-grid">${albums.map((al) => `<button class="album-tile" data-action="open-album" data-ref="${esc(al.ref)}">${coverHtml(al, '', true)}<span class="t">${esc(al.title)}</span><span class="s">${al.kind === 'single' ? 'Сингл' : al.kind === 'compilation' ? 'Сборник' : 'Альбом'}${al.year ? ' · ' + esc(al.year) : ''}</span></button>`).join('')}</div>
-    </section>` : ''}
-    ${a.similar.length ? `<section class="sect">
-      <div class="sect-head"><h2>Похожие исполнители</h2></div>
-      <div class="artist-grid">${a.similar.map((s) => `<button class="artist-tile" data-action="open-artist" data-ref="${esc(s.ref)}"><div class="cover round" style="background:#14101e">${esc((s.name || '?').charAt(0).toUpperCase())}${s.cover ? `<img src="${esc(s.cover)}" alt="">` : ''}</div><span class="t">${esc(s.name)}</span></button>`).join('')}</div>
-    </section>` : ''}
-  </div>`;
-  if (!a.cover) new Ribbon($('#artist-ribbon'), { lines: 12, cy: 0.45, amp: 0.8, accent: accentColor() });
-}
-
-/** Простой список треков: «Все треки» исполнителя */
-function renderTrackList() {
-  const tl = state.trackList;
-  view.innerHTML = `<div class="scroll">
-    <button class="back" data-action="back">${ICONS.back}Назад</button>
-    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:12px 0 18px">
-      <div><span class="eyebrow">${esc(tl.sub)}</span><h1 class="page">${esc(tl.title)}</h1>${tl.tracks ? `<span class="muted" style="font-size:13px">${tl.tracks.length} ${pl(tl.tracks.length, 'трек', 'трека', 'треков')}</span>` : ''}</div>
-      <div class="row-actions" style="padding:0"><button class="btn primary" data-action="tl-play" ${tl.tracks && tl.tracks.length ? '' : 'disabled'}>${ICONS.play}Слушать</button><button class="icbtn" data-action="tl-shuffle" aria-label="Вперемешку">${ICONS.shuffle}</button></div>
-    </div>
-    ${tl.error ? `<div class="hint err">${esc(tl.error)}</div>` : !tl.tracks ? '<div class="skeleton" style="height:320px"></div>' : tl.tracks.length ? tracksHtml(tl.tracks, 'tracklist') : '<div class="empty">Треков не нашлось</div>'}
-  </div>`;
-}
-
-function renderAlbum() {
-  const st = state.album;
-  const al = st.data;
-  if (!al) {
-    view.innerHTML = `<div class="page-view"><section class="album-head"><button class="back" data-action="back">${ICONS.back}Назад</button>${st.error ? `<div class="info"><h1 style="font-size:32px">Не удалось открыть альбом</h1><span class="muted">${esc(st.error)}</span></div>` : '<div class="skeleton cover" style="width:240px;height:240px"></div>'}</section></div>`;
-    return;
-  }
-  const pref = sourcePref();
-  lists['album'] = al.tracks;
-  const total = al.tracks.reduce((s, r) => s + (r.duration || 0), 0);
-  view.innerHTML = `<div class="page-view">
-    <section class="album-head">
-      <button class="back" data-action="back">${ICONS.back}Назад</button>
-      ${coverHtml({ cover: al.cover, source: al.refs.ya ? 'ya' : 'yt' })}
-      <div class="info">
-        <span style="font-size:13px;font-weight:600;color:#b4b4bb">${al.kind === 'single' ? 'Сингл' : 'Альбом'}</span>
-        <h1>${esc(al.title)}</h1>
-        <div class="by">${al.artistRef ? `<button class="link-plain" style="color:var(--text);font-weight:600" data-action="open-artist" data-ref="${esc(al.artistRef)}">${esc(al.artist)}</button>` : esc(al.artist)}${al.year ? `<span>·</span><span>${esc(al.year)}</span>` : ''}<span>·</span><span>${al.tracks.length} треков, ${fmt(total)}</span>
-        ${al.refs.ya ? badge('ya') : ''}${al.refs.yt ? badge('yt') : ''}</div>
-      </div>
-    </section>
-    <section class="act-row">
-      <button class="bigplay" data-action="album-play" aria-label="Слушать альбом">${ICONS.play}</button>
-      <button class="icbtn" data-action="album-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
-      <span class="grow"></span>
-      <span class="muted" style="font-size:13px">Играть из</span>
-      <div class="pill-seg" role="radiogroup" aria-label="Источник воспроизведения">${[['auto', 'Авто', ''], ['ya', 'Яндекс', 'ya'], ['yt', 'YouTube Music', 'yt']].map(([v, l, d]) => `<button role="radio" aria-checked="${pref === v}" class="${pref === v ? 'on' : ''}" data-action="set-pref" data-v="${v}">${d ? `<span class="dotsrc ${d}"></span>` : ''}${l}</button>`).join('')}</div>
-    </section>
-    <section class="album-table">
-      <div class="hd"><span style="text-align:right">#</span><span>Название</span><span>Где есть</span><span style="text-align:right">Время</span></div>
-      <div class="tracks" style="padding-top:8px">${al.tracks.map((r, i) => {
-        const t = pick(r);
-        const any = r.ya || r.yt;
-        const cur = t && player.current && player.current.id === t.id;
-        return `<div class="trow ${cur ? 'cur' : ''} ${t ? '' : 'unavail'}" data-action="play-merged" data-list="album" data-i="${i}">
-          <span class="n" style="text-align:right">${cur ? '▶' : i + 1}</span>
-          <span class="meta"><span class="t" style="display:block">${esc(r.title)}</span><span class="s" style="display:block">${any ? artistLink(any) : ''}</span></span>
-          ${availHtml(r, t)}
-          <span class="dur" style="width:auto">${r.duration ? fmt(r.duration) : ''}</span>
-        </div>`;
-      }).join('')}</div>
-      <p class="note">Блёклая метка — трек есть, но играет из другого источника; пустая — в этом сервисе трека нет. «Авто» берёт Яндекс, если трек там есть.</p>
-    </section>
-  </div>`;
-}
-
-const SVC_HELP = {
-  ya: { manual: 'Вставить OAuth-токен вручную', input: '<input type="text" data-manual="ya" placeholder="y0_AgAAAA…">' },
-  yt: { manual: 'Вставить cookies вручную (если Google не пускает в окне входа)', input: '<textarea rows="3" data-manual="yt" placeholder="SAPISID=…; __Secure-3PAPISID=…; …"></textarea>' },
-  sc: {
-    manual: 'Войти через свой браузер (если окно входа не пускает)',
-    input: `<div class="hint" style="margin-bottom:8px">1. <button class="link-plain" data-action="open-url" data-url="https://soundcloud.com/signin" style="color:var(--accent)">Открой soundcloud.com</button> в своём браузере и войди.<br>2. Нажми F12 (на Mac — ⌥⌘I) → вкладка «Application» / «Хранилище» → Cookies → https://soundcloud.com.<br>3. Скопируй значение <b>oauth_token</b> и вставь сюда.</div><input type="text" data-manual="sc" placeholder="2-123456-…">`
-  },
-  vk: {
-    manual: 'Что-то не работает?',
-    input: `<div class="hint">VK Музыка в этой сборке экспериментальная: у VK нет открытого API, Nyao работает через сайт vk.com от имени твоей сессии. Если что-то не грузится — открой лог и пришли его разработчику.</div><button class="btn" data-action="vk-log">Открыть vk-debug.log</button>`
-  }
-};
-/** Spotify: свой Client ID → вход (PKCE) → плеер на Web Playback SDK (нужен Premium) */
-function spCard() {
-  const s = state.spotify || {};
-  const acc = state.status.sp;
-  const eng = s.engine || { state: 'idle' };
-  const engText = { idle: 'запустится с первым треком', loading: 'загружается…', connecting: 'подключается…', ready: 'готов', not_ready: 'нет связи, переподключается', failed: eng.message || 'ошибка' }[eng.state] || eng.state;
-  const wv = s.widevine || {};
-  const status = acc
-    ? `Вход выполнен: ${esc(acc.name)}${acc.premium === false ? ' · без Premium плеер Spotify не играет — работают поиск и библиотека' : ''}`
-    : 'Не подключено';
-  return `<div class="card">
-    <div class="svc">
-      <div class="logo" style="background:var(--sp);color:#000">SP</div>
-      <div class="info"><div class="name">Spotify</div><div class="st">${status}</div></div>
-      ${acc ? '<button class="btn danger" data-action="sp-logout">Выйти</button>' : `<button class="btn primary" data-action="sp-login" ${s.hasClientId ? '' : 'disabled'}>Войти</button>`}
-    </div>
-    ${s.regionBlocked ? '<div class="hint" style="color:#ffb37a">Spotify сейчас отвечает «недоступен в этой стране». Без VPN Nyao его пропускает, остальные сервисы работают как обычно.</div>' : ''}
-    ${acc ? `<div class="hint">Плеер: <b>${esc(engText)}</b> · Widevine: ${wv.ok ? 'готов' : esc(wv.reason || 'проверяется')}. Звук идёт из официального плеера Spotify — прослушивания засчитываются в твой Spotify.</div>` : ''}
-    ${acc ? '' : `<div class="hint" style="margin-top:10px"><b>Один раз настроить</b><br>
-      1. Открой <button class="link-plain" data-action="open-url" data-url="https://developer.spotify.com/dashboard" style="color:var(--accent)">developer.spotify.com/dashboard</button> → Create app (или своё приложение с телефона).<br>
-      2. В Redirect URIs добавь адрес ниже — посимвольно:<br>
-      <code style="user-select:all">${esc(s.redirect || '')}</code> <button class="link-plain" data-action="sp-copy-redirect" style="color:var(--accent)">Копировать</button><br>
-      3. Отметь Web API и Web Playback SDK.<br>
-      4. В User Management добавь почту своего Spotify.<br>
-      5. Вставь Client ID из Basic Information. Client Secret не нужен.</div>
-    <div class="manual" style="display:flex;gap:8px;margin-top:8px"><input type="text" data-sp-client placeholder="Client ID (32 символа)" value="${esc(s.clientId || '')}" style="flex:1"><button class="btn" data-action="sp-save-id">Сохранить</button></div>
-    <div class="hint">Client ID и вход хранятся только на этом компьютере.</div>`}
-    <details><summary>Что-то не работает?</summary><div class="manual"><button class="btn" data-action="sp-debug">Показать журнал</button><pre class="hint" id="sp-log" style="white-space:pre-wrap;max-height:320px;overflow:auto"></pre></div></details>
-  </div>`;
-}
-
-function svcCard(svc) {
-  const st = state.status[svc];
-  const meta = SERVICES.find((x) => x.id === svc);
-  const extra = svc === 'ya' && st && st.plus === false ? ' · без Плюса полные треки могут не играть' : svc === 'sc' && st ? ' · треки Go+ играют только отрывком' : svc === 'vk' ? ' · бета, только на ПК' : '';
-  return `<div class="card">
-    <div class="svc">
-      <div class="logo" style="background:${meta.bg};color:${meta.fg}">${meta.short}</div>
-      <div class="info"><div class="name">${meta.name}</div>
-        <div class="st">${st ? `Вход выполнен: ${esc(st.name)}${st.error ? ' (токен не принят — войди заново)' : ''}${extra}` : svc === 'sc' ? 'Не подключено · поиск работает и без входа' : 'Не подключено'}</div></div>
-      ${st ? `<button class="btn danger" data-action="logout" data-svc="${svc}">Выйти</button>` : `<button class="btn primary" data-action="login" data-svc="${svc}">Войти</button>`}
-    </div>
-    ${svc === 'yt' ? `<div class="hint svc-diag">Плейлисты не открываются? <button class="link-plain" data-action="yt-log">Открой отчёт</button> и пришли его разработчику — там только ошибки и структура ответа YouTube, без cookies и личных данных.</div>` : ''}
-    <details><summary>${SVC_HELP[svc].manual}</summary>
-      <div class="manual">${SVC_HELP[svc].input}
-      ${svc === 'vk' ? '' : `<button class="btn" data-action="manual-save" data-svc="${svc}">Сохранить</button>`}</div>
-    </details>
-  </div>`;
-}
-
-/** Центр обновлений: версия, проверка релиза на GitHub, скачивание установщика */
-// Каналы обновлений — как в центре обновлений macOS
-const UPDATE_CHANNELS = [['stable', 'Обычные'], ['dev', 'Бета'], ['nightly', 'Ночные']];
-const UPDATE_CHANNEL_HINT = {
-  stable: 'Проверенные релизы.',
-  dev: 'Бета: новое раньше всех, иногда с недочётами. Если обычный релиз новее — придёт он.',
-  nightly: 'Ночные сборки — эксперименты прямо из разработки, могут ломаться.'
-};
-/** Заметки релиза: текст как есть, а <sub>…</sub> (мелкий шрифт на GitHub) — мелким и здесь */
-function notesHtml(text) {
-  return esc(text).replace(/&lt;(sub|small)&gt;([\s\S]*?)&lt;\/\1&gt;/g, '<span class="notes-small">$2</span>');
-}
-function updateCardHtml() {
-  const u = state.update;
-  const i = u.info;
-  const ready = u.hotReady || (i && i.staged);
-  const hot = i && i.available && i.hot && api.updates.hot ? i.hot : null;
-  const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`);
-  let status = 'Нажми «Проверить», чтобы посмотреть свежий релиз на GitHub.';
-  if (u.checking) status = 'Проверяю…';
-  else if (u.error) status = `Не получилось: ${esc(u.error)}`;
-  else if (ready) status = 'Обновление скачано. Перезапуск займёт пару секунд — трек продолжит играть с того же места.';
-  else if (hot) status = `Доступна версия <b>${esc(i.latest.label)}</b> · быстрое обновление, ${kb(hot.size)}`;
-  else if (i && i.available) status = `Доступна версия <b>${esc(i.latest.label)}</b>${i.asset ? ` · ${(i.asset.size / 1048576).toFixed(0)} МБ` : ' · файла для этой системы в релизе нет'}`;
-  else if (i) status = `Установлена последняя версия${i.latest ? ` (${esc(i.latest.label)})` : ''}.`;
-  const pct = u.progress != null ? Math.round(u.progress * 100) : null;
-  let button;
-  if (ready) button = `<button class="btn primary" data-action="update-relaunch">Перезапустить</button>`;
-  else if (hot) button = `<button class="btn primary" data-action="update-hot" ${u.hotBusy ? 'disabled' : ''}>${u.hotBusy ? 'Обновляю…' : 'Обновить за секунды'}</button>`;
-  else if (i && i.available && i.asset) button = `<button class="btn primary" data-action="update-install" ${pct != null ? 'disabled' : ''}>${pct != null ? `Скачиваю… ${pct}%` : 'Скачать и установить'}</button>`;
-  else button = `<button class="btn" data-action="update-check" ${u.checking ? 'disabled' : ''}>Проверить</button>`;
-  const installed = state.versionInfo && state.versionInfo.installed;
-  const channel = (i && i.channel) || (state.settings && state.settings.updateChannel) || (state.versionInfo && state.versionInfo.channel) || 'stable';
-  return `<section class="card update-card">
-    <div class="svc">
-      <div class="logo" style="background:var(--accent-soft);color:var(--accent)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></div>
-      <div class="info"><div class="name">Центр обновлений</div><div class="st">Сейчас: Nyao Music ${esc(state.version || '')}</div></div>
-      ${button}
-    </div>
-    <div class="hint" id="update-status">${status}</div>
-    ${pct != null ? `<div class="update-bar"><span style="width:${pct}%"></span></div>` : ''}
-    ${i && i.available && i.notes ? `<details><summary>Что нового</summary><div class="hint" style="white-space:pre-wrap;margin-top:8px">${notesHtml(i.notes)}</div></details>` : ''}
-    ${installed ? `<div class="hint" style="margin-top:6px">Код обновлён без установщика; установщиком стоит ${esc(installed)}.</div>` : ''}
-    <div class="update-channel">
-      <span>Канал обновлений</span>
-      <div class="seg">${UPDATE_CHANNELS.map(([id, label]) => `<button class="${id === channel ? 'on' : ''}" data-action="update-channel" data-v="${id}">${label}</button>`).join('')}</div>
-      <div class="hint">${UPDATE_CHANNEL_HINT[channel]}${i && !i.available && i.latest && i.latest.build < (i.current && i.current.build) ? ' Версия в этом канале старше установленной — обновление придёт, когда канал её догонит.' : ''}</div>
-    </div>
-    <div class="update-links">
-      ${i && i.url ? `<button class="link-plain" data-action="update-page">Открыть релизы на GitHub</button>` : ''}
-      ${hot && i.asset && !ready ? `<button class="link-plain" data-action="update-install">Скачать полный установщик</button>` : ''}
-      ${installed ? `<button class="link-plain" data-action="update-reset-hot">Вернуть версию из установщика</button>` : ''}
-    </div>
-  </section>`;
-}
-async function checkUpdates(silent = false) {
-  state.update.checking = true;
-  state.update.error = null;
-  if (isSettingsRoute()) renderSettings();
-  try {
-    state.update.info = await api.updates.check();
-    if (state.update.info.required) showOutdated(state.update.info.minBuild);
-    if (silent && state.update.info.available) toast(`Доступна Nyao Music ${state.update.info.latest.label} — ${state.update.info.hot ? 'обновить за секунды' : 'обновить'} можно в Настройках`);
-  } catch (e) {
-    state.update.error = e.message;
-  }
-  state.update.checking = false;
-  if (isSettingsRoute()) renderSettings();
-}
-
-// ---------- Аккаунт Nyao (свой сервер): вход через Telegram, синхронизация, продолжение ----------
-function nyaoAvatar(cls = 'av') {
-  const u = state.cloud.loggedIn && state.cloud.user;
-  if (u && u.picture) return `<span class="${cls} nyao-av"><img src="${esc(u.picture)}" alt=""></span>`;
-  const letter = u ? esc(String(u.name || 'N').trim().charAt(0).toUpperCase()) : 'N';
-  return `<span class="${cls} nyao-av">${letter}</span>`;
-}
-const PLATFORM_NAME = { win32: 'Windows', darwin: 'macOS', android: 'Android', linux: 'Linux' };
-function ago(ts) {
-  const m = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
-  if (m < 2) return 'сейчас';
-  if (m < 60) return `${m} мин назад`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h} ч назад`;
-  return `${Math.round(h / 24)} дн назад`;
-}
-function nyaoCardHtml() {
-  const c = state.cloud;
-  if (!api.cloud) return '';
-  if (!c.loggedIn) {
-    return `<section class="card nyao-card">
-      <div class="svc">${nyaoAvatar('logo')}
-        <div class="info"><div class="name">Аккаунт Nyao</div>
-          <div class="st">${c.logging ? 'Открыл Telegram в браузере — подтверди вход там, а потом возвращайся сюда.' : 'Миксы, настройки волны и история на всех твоих устройствах + «продолжить с телефона».'}</div></div>
-        ${c.logging ? '<button class="btn" data-action="cloud-cancel">Отмена</button>' : `<button class="btn primary tg" data-action="cloud-login">${TG_ICON}Войти через Telegram</button>`}
-      </div>
-      <div class="hint">Токены Яндекса, YouTube и SoundCloud на сервер не отправляются — они остаются только на этом устройстве.</div>
-    </section>`;
-  }
-  const u = c.user || {};
-  const devs = c.devices;
-  return `<section class="card nyao-card">
-    <div class="svc">${nyaoAvatar('logo')}
-      <div class="info"><div class="name">${esc(u.name || 'Аккаунт Nyao')}</div><div class="st">${u.username ? '@' + esc(u.username) + ' · ' : ''}синхронизация включена</div></div>
-      <button class="btn" data-action="go" data-route="profile">Мой профиль</button>
-      <button class="btn danger" data-action="cloud-logout">Выйти</button>
-    </div>
-    <div class="devices">
-      <div class="eyebrow">Устройства</div>
-      ${devs ? devs.map((d) => `<div class="dev"><span class="dev-ic">${d.platform === 'android' ? '📱' : '💻'}</span><span class="dev-info"><b>${esc(d.device || PLATFORM_NAME[d.platform] || 'Устройство')}</b><span>${d.current ? 'это устройство' : 'был ' + ago(d.lastSeen)}</span></span>${d.current ? '' : `<button class="link-plain" data-action="cloud-device-remove" data-id="${esc(d.id)}">Отключить</button>`}</div>`).join('') : '<div class="skeleton" style="height:44px"></div>'}
-      <button class="link-plain" data-action="legacy-pair">Подключить по коду — Nyao Legacy на Android 4</button>
-    </div>
-    <div class="hint">Токены музыкальных сервисов на сервере не хранятся — они остаются на устройствах. Для Nyao Legacy они передаются зашифрованными ключом самого устройства.</div>
-  </section>`;
-}
-const TG_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.9 4.3 18.7 19.4c-.2 1-.9 1.3-1.7.8l-4.8-3.5-2.3 2.2c-.3.3-.5.5-1 .5l.3-4.9 8.9-8c.4-.3-.1-.5-.6-.2L6.5 13.2 1.8 11.7c-1-.3-1-1 .2-1.5L20.6 3c.9-.3 1.6.2 1.3 1.3z"/></svg>';
-
-async function loadCloud() {
-  if (!api.cloud) return;
-  const st = await api.cloud.status().catch(() => null);
-  if (!st) return;
-  state.cloud.loggedIn = st.loggedIn;
-  state.cloud.user = st.user;
-  renderAccounts();
-  if (st.loggedIn) {
-    loadOthers();
-    // свежий профиль с сервера: в нём, например, отметка разработчика
-    loadCloudDevices(true);
-    friends.load().then(() => {
-      friendsBadge = friends.unread();
-      renderRail();
-      friends.askNick();
-    });
-  }
-}
-async function loadCloudDevices(silent = false) {
-  try {
-    const me = await api.cloud.me();
-    state.cloud.user = me.user;
-    state.cloud.devices = me.devices;
-  } catch (e) {
-    const st = await api.cloud.status().catch(() => ({ loggedIn: false }));
-    state.cloud.loggedIn = st.loggedIn;
-    if (st.loggedIn && !silent) toast(e.message, true);
-  }
-  if (isSettingsRoute()) renderSettings();
-}
-async function loadOthers() {
-  if (!state.cloud.loggedIn) return;
-  try {
-    const list = await api.cloud.others();
-    const cur = player.current;
-    // показываем только свежее (за последние 12 часов) и не то, что уже играет здесь
-    state.cloud.others = list.filter((d) => d.track && Date.now() - d.updatedAt < 12 * 3600_000 && !(cur && cur.id === d.track.id)).slice(0, 1);
-  } catch {
-    state.cloud.others = [];
-  }
-  if (state.route === 'home') renderHome();
-}
-async function cloudLogin() {
-  if (state.cloud.logging) return;
-  state.cloud.logging = true;
-  if (isSettingsRoute()) renderSettings();
-  try {
-    const user = await api.cloud.login();
-    state.cloud.loggedIn = true;
-    state.cloud.user = user;
-    toast(`Привет, ${user.name}! Синхронизация включена`);
-    loadOthers();
-    loadCloudDevices();
-    friends.load().then(() => friends.askNick());
-  } catch (e) {
-    if (!/отмен/i.test(e.message)) toast(e.message, true);
-  }
-  state.cloud.logging = false;
-  renderAccounts();
-  if (isSettingsRoute()) renderSettings();
-}
-function continueHtml() {
-  const d = state.cloud.others[0];
-  if (!d) return '';
-  const t = d.track;
-  const pos = d.playing ? d.position + (Date.now() - d.updatedAt) / 1000 : d.position;
-  return `<section class="continue-card">
-    ${coverHtml(t, 'sm')}
-    <div class="meta"><span class="eyebrow">${d.platform === 'android' ? '📱' : '💻'} Продолжить с «${esc(d.device)}» · ${ago(d.updatedAt)}</span>
-      <b>${esc(t.title)}</b><span class="muted">${esc(t.artist)} · ${fmt(Math.min(pos, t.duration || pos))}</span></div>
-    <button class="btn primary" data-action="resume-device" data-id="${esc(d.deviceId)}">${ICONS.play}Продолжить</button>
-    <button class="icbtn" data-action="resume-dismiss" data-id="${esc(d.deviceId)}" aria-label="Скрыть">✕</button>
-  </section>`;
-}
-let nowTimer;
-let lastQueueKey = '';
-function pushNow(force = false) {
-  roomPush();
-  if (!api.cloud || !state.cloud.loggedIn) return;
-  clearTimeout(nowTimer);
-  nowTimer = setTimeout(() => {
-    const t = player.current;
-    // очередь («откуда играет и что дальше») — только когда она поменялась, чтобы перенос на другое устройство брал весь список
-    const key = t ? `${t.id}|${player.index}|${player.queue.length}|${player.mode}|${player.label}` : '';
-    const queue = t && key !== lastQueueKey ? queueSnapshot(player.queue, player.index, player.label, player.mode) : null;
-    lastQueueKey = key;
-    api.cloud.now({ track: t, position: player.audio.currentTime || 0, playing: player.playing, context: player.mode || '', volume: player.audio.volume, force: force === true, ...(queue ? { queue } : {}) }).catch(() => {});
-  }, force === true ? 100 : 800);
-}
-/** Забрать музыку с другого устройства: весь его список или волну, с того же места */
-function playHandoff(d, fallbackLabel) {
-  const plan = handoffPlan(d);
-  if (!plan) return;
-  if (state.room && !state.room.isHost) leaveRoom(true);
-  playListAt(plan.tracks, plan.index, plan.label || fallbackLabel, plan.position);
-  if (plan.mode === 'wave') {
-    player.mode = 'wave';
-    player.maybeMore();
-  }
-  renderBar();
-}
-
-/** macOS: оформление Nyao (как на Windows) или Liquid Glass — как выбор темы на Android */
-function themePickerHtml() {
-  const cur = IS_MAC ? 'glass' : 'nyao';
-  const opts = [['nyao', 'Nyao', 'как на Windows'], ['glass', 'Liquid Glass', 'стекло и размытие macOS']];
-  return `<div class="accent-pick">
-    <div><b>Оформление</b><span class="hint">Окно перезагрузится в новой теме, музыка продолжит играть с того же места.</span></div>
-    <div class="seg theme-seg" role="radiogroup" aria-label="Оформление">${opts.map(([v, n, h]) => `<button role="radio" aria-checked="${cur === v}" class="${cur === v ? 'on' : ''}" data-action="set-theme" data-v="${v}"><b>${n}</b><span>${h}</span></button>`).join('')}</div>
-  </div>`;
-}
-
-function accentPickerHtml() {
-  const cur = (state.settings && state.settings.accent) || 'lavender';
-  return `<div class="accent-pick">
-    <div><b>Акцентный цвет</b><span class="hint">Как в Android 16: один цвет красит фигуры «Моей волны», кнопки, выделение и прогресс. «Из обложки» подстраивается под текущий трек.</span></div>
-    <div class="accent-row" role="radiogroup" aria-label="Акцентный цвет">${ACCENTS.map(([id, label]) => {
-      const p = id === 'cover' ? null : paletteFor(id, { mac: IS_MAC });
-      const sw = p ? `<span class="sw"><i style="background:${p.a}"></i><i style="background:${p.strong}"></i><i style="background:${p.deep}"></i></span>` : '<span class="sw cover"></span>';
-      return `<button class="accent-sw ${cur === id ? 'on' : ''}" role="radio" aria-checked="${cur === id}" data-action="set-accent" data-v="${id}">${sw}<span class="nm">${label}</span></button>`;
-    }).join('')}</div>
-  </div>`;
-}
-
-// ---------- Профиль: аккаунт, друзья, комнаты и все настройки (как на Android) ----------
-const PROFILE_ROUTES = ['settings', 'friends', 'together', 'stats', 'user', 'profile'];
-const RI = {
-  stats: 'M5 20V11M12 20V5M19 20v-6',
-  devices: 'M3 5.5h13v9H3zM7 18.5h5M9.5 14.5v4M18.5 9h2.5v10.5h-2.5z',
-  person: 'M12 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M5 20c.9-3.6 3.6-5.5 7-5.5s6.1 1.9 7 5.5',
-  edit: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
-  sound: 'M4 9.5h3.5L12 5v14l-4.5-4.5H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11',
-  keys: 'M3.5 6.5h17v11h-17zM7 10h1M11 10h2M16 10h1M7.5 14h9',
-  lyrics: 'M5 7h14M5 12h14M5 17h9',
-  dev: 'M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14',
-  gear: 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1',
-  palette: 'M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.7-.8 1.7-1.6 0-1-.9-1.5-.9-2.4 0-.9.7-1.5 1.6-1.5h2c2 0 3.6-1.6 3.6-3.6 0-4.4-3.6-7.9-8-7.9M7.5 12a1 1 0 1 0 0 .1M10 8a1 1 0 1 0 0 .1M14.5 8a1 1 0 1 0 0 .1',
-  update: 'M20 12a8 8 0 1 1-2.3-5.7M20 4.5v4h-4',
-  info: 'M12 21a9 9 0 1 0 0-18a9 9 0 1 0 0 18M12 11v5M12 7.8v.2',
-  chevron: 'M9.5 6l6 6-6 6'
-};
-function rowIcon(d) {
-  return `<span class="srow-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg></span>`;
-}
-function srow({ icon, lead, title, value, ok, action = 'set-sec', sec, route, extra = '' }) {
-  const data = route ? `data-action="go" data-route="${route}"` : `data-action="${action}" data-sec="${esc(sec || '')}"`;
-  return `<button class="srow" ${data} ${extra}>${lead || rowIcon(icon)}<span class="srow-t">${title}</span>${value ? `<span class="srow-v ${ok ? 'ok' : ''}">${value}</span>` : ''}<svg class="srow-ch" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="${RI.chevron}"/></svg></button>`;
-}
-function sgroup(title, rows) {
-  return `<section class="sgroup"><div class="sgroup-t">${title}</div><div class="sgroup-b">${rows.join('')}</div></section>`;
-}
-/** Вкладки раздела профиля: Профиль / Друзья / Вместе */
-function profileTabs(active) {
-  const t = (route, label) => `<button class="ptab ${active === route ? 'on' : ''}" data-action="go" data-route="${route}">${label}</button>`;
-  return `<div class="ptabs">${t('settings', 'Профиль')}${t('friends', 'Друзья')}${t('together', 'Вместе')}</div>`;
-}
-const SECTIONS = {
-  account: 'Аккаунт Nyao', sound: 'Звук и воспроизведение', lyrics: 'Текст песни', dev: 'Разработчик', keys: 'Управление и окно', view: 'Вид приложения',
-  lastfm: 'Last.fm', discord: 'Discord', updates: 'Обновления', about: 'О приложении', wave: 'Моя волна'
-};
-function sectionTitle(sec) {
-  if (sec && sec.startsWith('svc:')) return (SERVICES.find((x) => x.id === sec.slice(4)) || {}).name || 'Сервис';
-  return SECTIONS[sec] || 'Настройки';
-}
-
-function renderSettings() {
-  const sec = state.params && state.params.section;
-  if (sec) return renderSettingsSection(sec);
-  const c = state.cloud;
-  const u = c.user || {};
-  const prof = state.social && state.social.profile;
-  const connected = SERVICES.filter((x) => state.status[x.id]);
-  const visLabel = prof ? (prof.invisible ? 'невидимка' : prof.visibility === 'all' ? 'видят все' : prof.visibility === 'nobody' ? 'скрыт' : 'только друзья') : '';
-  // отдельные «Настройки» — только группы настроек; профиль тогда — только шапка и «Профиль»
-  const part = state.route === 'prefs' ? 'prefs' : navPrefs() ? 'profile' : 'all';
-  const showProfile = part !== 'prefs';
-  const showPrefs = part !== 'profile';
-  view.innerHTML = `<div class="scroll settings phub">
-    ${part === 'prefs' ? '<h1 class="page">Настройки</h1>' : profileTabs('settings')}
-    ${showProfile ? `
-    <button class="pcard" ${c.loggedIn ? 'data-action="fr-me"' : 'data-action="set-sec" data-sec="account"'}>
-      ${nyaoAvatar('pcard-av')}
-      <span class="pcard-info"><b>${esc(c.loggedIn ? u.name || 'Аккаунт Nyao' : 'Аккаунт Nyao')}</b>
-        <span class="hint">${c.loggedIn ? (prof ? '@' + esc(prof.nick) : u.username ? '@' + esc(u.username) : 'синхронизация включена') : c.logging ? 'Подтверди вход в Telegram' : 'Войди, чтобы история, миксы и друзья были везде'}</span>
-        ${connected.length ? `<span class="pcard-svcs">${connected.map((x) => svcDot(x)).join('')}</span>` : ''}</span>
-      ${c.loggedIn ? '' : c.logging ? '<span class="btn" data-action="cloud-cancel">Отмена</span>' : `<span class="btn primary tg" data-action="cloud-login">${TG_ICON}Войти через Telegram</span>`}
-    </button>
-    ${sgroup('Профиль', [
-      srow({ icon: RI.stats, title: 'Статистика', route: 'stats' }),
-      srow({ icon: RI.devices, title: 'Устройства', action: 'open-connect' }),
-      ...(c.loggedIn ? [srow({ icon: RI.edit, title: 'Мой профиль и приватность', value: visLabel, route: 'profile' })] : []),
-      srow({ icon: RI.person, title: 'Аккаунт Nyao', value: c.loggedIn ? 'вход выполнен' : 'не выполнен', ok: c.loggedIn, sec: 'account' })
-    ])}` : ''}
-    ${part === 'profile' ? sgroup('Настройки', [srow({ icon: RI.gear, title: 'Все настройки', route: 'prefs' })]) : ''}
-    ${showPrefs ? `${sgroup('Приложение', [
-      srow({ icon: RI.sound, title: 'Звук и воспроизведение', value: normalizeEq(state.settings.eq).on ? 'эквалайзер вкл.' : '', sec: 'sound' }),
-      srow({ icon: RI.lyrics, title: 'Текст песни', value: LYRIC_PROVIDERS[(lyricsOrder().find((p) => p.on) || { id: 'ya' }).id].name, sec: 'lyrics' }),
-      srow({ icon: RI.keys, title: 'Управление и окно', sec: 'keys' })
-    ])}
-    ${sgroup('Оформление', [
-      srow({ icon: RI.palette, title: 'Вид приложения', value: layout() === 'wave' ? 'Моя волна' : 'Плеер', sec: 'view' })
-    ])}
-    ${sgroup('Сервисы', SERVICES.map((x) => srow({ lead: svcDot(x), title: x.name, value: state.status[x.id] ? 'подключено' : 'войти', ok: !!state.status[x.id], sec: 'svc:' + x.id })))}
-    ${sgroup('Интеграции', [
-      srow({ lead: '<span class="dot" style="background:#D51007;color:#fff">fm</span>', title: 'Last.fm', value: lastfmState.connected ? lastfmState.name || 'подключено' : lastfmState.configured ? 'подключить' : 'выключен', ok: lastfmState.connected, sec: 'lastfm' }),
-      srow({ lead: '<span class="dot" style="background:#5865F2;color:#fff">D</span>', title: 'Статус в Discord', value: state.settings.discordRpc ? 'включён' : 'выключен', ok: !!state.settings.discordRpc, sec: 'discord' })
-    ])}
-    ${isDev() ? sgroup('Разработчик', [srow({ icon: RI.dev, title: 'Разработчик', value: 'тесты и диагностика', sec: 'dev' })]) : ''}
-    ${sgroup('О приложении', [
-      srow({ icon: RI.update, title: 'Обновления', value: state.update.info && state.update.info.available ? 'есть новая версия' : esc(state.version || ''), ok: !!(state.update.info && state.update.info.available), sec: 'updates' }),
-      srow({ icon: RI.info, title: 'О приложении', sec: 'about' })
-    ])}` : ''}
-  </div>`;
-  refreshLastfm();
-}
-
-function renderSettingsSection(sec) {
-  let body = '';
-  if (sec === 'account') body = nyaoCardHtml();
-  else if (sec === 'sound') body = soundCardHtml() + eqCardHtml();
-  else if (sec === 'lyrics') body = lyricsCardHtml();
-  else if (sec === 'dev' && isDev()) body = devCardHtml();
-  else if (sec === 'keys') body = controlCardHtml();
-  else if (sec === 'wave') body = waveControlsHtml();
-  else if (sec === 'view') body = `<section class="card">
-      <div class="hint">Что главное при запуске. Через аккаунт Nyao едет на все устройства.</div>
-      ${layoutChoiceHtml(layout(), 'data-action="set-layout"')}
-      ${ON_MAC ? themePickerHtml() : ''}
-      ${accentPickerHtml()}
-      <div class="pref-row"><span><b>«Мне нравится» по сервисам</b><span class="hint">Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud — плюс общий.</span></span>
-        <button class="switch ${state.settings.splitLiked ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.splitLiked}" aria-label="«Мне нравится» по сервисам" data-action="split-liked" data-v="${state.settings.splitLiked ? 0 : 1}"><span></span></button></div>
-      ${layout() === 'player' ? `<div class="pref-row"><span><b>Вкладка «Моя волна» в меню</b><span class="hint">В режиме «Плеер» волна живёт плиткой на главной. Можно вернуть её отдельной вкладкой.</span></span>
-        <button class="switch ${state.settings.waveTab ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.waveTab}" aria-label="Вкладка «Моя волна» в меню" data-action="toggle-wavetab"><span></span></button></div>` : ''}
-      <div class="pref-row"><span><b>«Друзья» отдельной кнопкой</b><span class="hint">Друзья, профили и заявки — в боковой панели, а не внутри профиля</span></span>
-        <button class="switch ${navFriends() ? 'on' : ''}" role="switch" aria-checked="${navFriends()}" aria-label="«Друзья» отдельной кнопкой" data-action="toggle-nav" data-k="navFriends"><span></span></button></div>
-      <div class="pref-row"><span><b>«Настройки» отдельной кнопкой</b><span class="hint">В профиле остаются аккаунт, статистика и устройства, всё остальное — на своей странице</span></span>
-        <button class="switch ${navPrefs() ? 'on' : ''}" role="switch" aria-checked="${navPrefs()}" aria-label="«Настройки» отдельной кнопкой" data-action="toggle-nav" data-k="navPrefs"><span></span></button></div>
-    </section>`;
-  else if (sec === 'svc:sp') body = spCard();
+    const style = `${place};--i:${i};--dx:${side =…23887 tokens truncated…p') body = spCard();
   else if (sec.startsWith('svc:')) body = svcCard(sec.slice(4));
   else if (sec === 'lastfm') body = `<section class="card" id="lastfm-card">${lastfmCardInner()}</section>`;
   else if (sec === 'discord') body = discordCardHtml();
@@ -1498,6 +716,7 @@ async function saveLyricsPrefs(patch) {
 }
 
 // ---------- Раздел «Разработчик»: виден, если сервер Nyao отметил аккаунт как разработчика (NYAO_DEV_IDS) ----------
+const nativeVisible = () => !!(isDev() && state.spotify?.native?.permitted && state.spotify.native.flag);
 const isDev = () => !!(state.cloud.loggedIn && state.cloud.user && state.cloud.user.dev && api.dev);
 const devState = { info: null, probe: null, ping: null, offline: false, fps: false };
 function devCardHtml() {
@@ -1537,7 +756,7 @@ function devCardHtml() {
     group('Приколы', `<div class="hint">Ломают вид и поведение, но приложение остаётся рабочим. Только в этом окне: перезапуск, плашка «Сбросить приколы» или Ctrl+Shift+Backspace — и всё как было.</div>
       <div class="dev-btns">${PRANKS.map(([id, title, hint]) => `<button class="btn ${pranks.has(id) ? 'primary' : ''}" data-action="dev-prank" data-v="${id}" title="${esc(hint)}">${pranks.has(id) ? '✓ ' : ''}${esc(title)}</button>`).join('')}</div>
       ${pranks.active().length ? '<div class="dev-btns"><button class="btn" data-action="dev-prank-reset">Сбросить все приколы</button></div>' : ''}`),
-    group('Флаги', '<div class="hint">Экспериментальных флагов пока нет — новые фичи сначала будут появляться здесь.</div>')
+    group('Флаги', `<div class="pref-row"><span><b>Spotify (librespot)</b><span class="hint">Экспериментальный нативный плеер. Добавляет отдельную привязку Spotify в сервисах. Только nightly на ПК.</span></span><button class="switch ${state.spotify?.native?.flag ? 'on' : ''}" role="switch" aria-checked="${!!state.spotify?.native?.flag}" aria-label="Spotify (librespot)" data-action="dev-librespot-flag"><span></span></button></div>${state.spotify?.native?.flag ? '<button class="btn" data-action="set-sec" data-sec="svc:sp-native">Открыть Spotify (librespot)</button>' : ''}`)
   ].join('');
 }
 async function loadDevInfo() {
@@ -1731,20 +950,24 @@ const RENDER = { friends: () => friends.renderFriends(), user: () => friends.ren
 // ---------- Загрузка данных ----------
 /** Может ли Spotify играть сам; если нет — треки Spotify играют копиями из других сервисов */
 function syncSpMode() {
-  const s = state.spotify;
+  const previousNative = spMode.native;
+  const native = state.spotify?.native?.permitted && state.spotify.native.flag && state.spotify.native.active;
+  spMode.native = !!native;
+  const s = native ? state.spotify.native : state.spotify;
   const a = s && s.account;
   const was = spMode.fallback;
   spMode.fallback = !(s && s.loggedIn && !s.regionBlocked && a && !a.error && a.premium !== false);
   // Spotify снова может играть сам — значки «SP → Я» и пометки о копиях больше не нужны
   if (!spMode.fallback) spMode.subs.clear();
-  if (was !== spMode.fallback && player.current && player.current.source === 'sp') player.reload();
+  if ((was !== spMode.fallback || previousNative !== spMode.native) && player.current && player.current.source === 'sp') { spotifySync.resetBackend(); player.reload(); }
 }
 async function loadStatus() {
   state.status = await api.auth.status().catch(() => ({ ya: null, yt: null, sc: null, vk: null }));
   // Spotify — отдельно: вход со своим Client ID, свой экран в настройках
   if (api.spotify) {
     state.spotify = await api.spotify.status().catch(() => null);
-    state.status.sp = state.spotify && state.spotify.loggedIn ? state.spotify.account || { name: 'Spotify' } : null;
+    const selected = state.spotify?.native?.active ? state.spotify.native : state.spotify;
+    state.status.sp = selected?.loggedIn ? selected.account || { name: 'Spotify' } : null;
   }
   syncSpMode();
   renderAccounts();
@@ -2769,6 +1992,7 @@ async function handleAction(el, e) {
     case 'cloud-logout':
       await api.cloud.logout();
       state.cloud = { loggedIn: false, user: null, logging: false, devices: null, others: [] };
+      await loadStatus();
       toast('Вышел из аккаунта Nyao');
       renderSettings();
       renderAccounts();
@@ -3089,6 +2313,35 @@ async function handleAction(el, e) {
     case 'vk-log':
       api.vkLog && api.vkLog();
       break;
+    case 'dev-librespot-flag':
+    case 'native-save-id':
+    case 'native-login':
+    case 'native-use':
+    case 'native-logout': {
+      el.disabled = true;
+      try {
+        if (el.dataset.action === 'dev-librespot-flag') state.spotify = await api.dev.librespotFlag(!state.spotify?.native?.flag);
+        else if (el.dataset.action === 'native-save-id') {
+          const id = ($('[data-native-client]')?.value || '').trim();
+          state.spotify = await api.dev.librespotClientId(id);
+        } else if (el.dataset.action === 'native-login') {
+          toast('Открыл вход Spotify (librespot) в браузере');
+          state.spotify = await api.dev.librespotLogin();
+          toast('Spotify (librespot) подключён');
+        } else if (el.dataset.action === 'native-use') state.spotify = await api.dev.librespotUse(!state.spotify?.native?.active);
+        else state.spotify = await api.dev.librespotLogout();
+        syncSpMode();
+        await afterAuthChange();
+      } catch (error) { toast(error.message, true); await loadStatus(); renderSettings(); }
+      break;
+    }
+    case 'native-copy-redirect':
+      copyText(state.spotify?.native?.redirect || ''); toast('Скопировано'); break;
+    case 'native-debug': {
+      const log = await api.dev.librespotDebug().catch(e => e.message);
+      const pre = $('#native-log'); if (pre) pre.textContent = log;
+      break;
+    }
     case 'sp-save-id': {
       const v = ($('[data-sp-client]') || {}).value || '';
       if (!/^[0-9a-fA-F]{32}$/.test(v.trim())) {
