@@ -27,11 +27,11 @@ export class LibrespotEngine {
   }
   get available() { return !!this.binary && fs.existsSync(this.binary); }
   get started() { return !!this.child; }
-  debugText() { return 'librespot 0.8.0 · ' + this.status.state; }
+  debugText() { return 'librespot 0.8.0 · ' + this.status.state + (this.status.code ? ' · ' + this.status.code : ''); }
   publish(extra = {}) { this.onChange({ backend: 'librespot', status: this.status, snapshot: this.snapshot, ...extra }); }
   fail(code, kind = 'engine') {
     const message = MESSAGES[code] || 'Нативный плеер Spotify остановился — попробуй подключить его заново';
-    this.status = { state: 'failed', kind, message };
+    this.status = { state: 'failed', kind, code: Object.hasOwn(MESSAGES, code) ? code : 'not_ready', message };
     this.publish({ error: { kind, message } });
   }
   async awaitReady() {
@@ -81,7 +81,7 @@ export class LibrespotEngine {
       this.status = { state: 'ready', deviceId: 'librespot' }; this.publish();
       return 'librespot';
     })().catch(error => {
-      if (epoch === this.epoch) { this.release(); this.fail('not_ready'); }
+      if (epoch === this.epoch) { this.release(); this.fail(error.code || 'not_ready'); }
       throw error;
     }).finally(() => { if (this.starting === starting) this.starting = null; });
     this.starting = starting;
@@ -92,7 +92,11 @@ export class LibrespotEngine {
       const call = this.calls.get(message.id);
       if (!call) return;
       this.calls.delete(message.id); clearTimeout(call.timer);
-      message.ok ? call.resolve(message.data) : call.reject(new Error(MESSAGES[message.code] || MESSAGES.protocol));
+      if (message.ok) call.resolve(message.data);
+      else {
+        const code = Object.hasOwn(MESSAGES, message.code) ? message.code : 'protocol';
+        const error = new Error(MESSAGES[code]); error.code = code; call.reject(error);
+      }
       return;
     }
     if (message.event === 'hello') {

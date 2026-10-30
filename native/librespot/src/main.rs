@@ -261,4 +261,14 @@ mod tests {
         assert!(ping.access_token.is_none());
         assert!(serde_json::from_str::<Command>(r#"{"command":"ping"}"#).is_err());
     }
+    #[test]
+    fn stale_positions_cannot_move_the_current_track() {
+        let track = parse_tracks(&["spotify:track:4uLU6hMCjMI75M1A2tKUQC".into()]).unwrap().remove(0);
+        let mut w = Worker { tracks: vec![track.clone()], request: Some(2), position: 123, ..Worker::default() };
+        // Upstream get_play_request_id does not cover PositionChanged in 0.8.0.
+        w.event(PlayerEvent::PositionChanged { play_request_id: 1, track_id: track.clone(), position_ms: 9999 });
+        assert_eq!(w.position, 123);
+        w.event(PlayerEvent::PositionChanged { play_request_id: 2, track_id: track, position_ms: 456 });
+        assert_eq!(w.position, 456);
+    }
 }

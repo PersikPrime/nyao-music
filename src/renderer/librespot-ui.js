@@ -6,7 +6,7 @@ export function librespotCard(s, esc) {
     '<div class="info"><div class="name">Spotify (librespot)</div><div class="st">' +
     (account ? 'Подключено: ' + esc(account.name) + (s.active ? ' · используется' : ' · выключено') : 'Экспериментальный плеер · нужен Premium') +
     '</div></div>' + (s.loggedIn ? button('native-logout', 'Выйти') : button('native-login', 'Войти', s.hasClientId && s.available ? '' : 'disabled')) +
-    '</div><div class="hint">Привязка отдельная от обычного Spotify. Музыка воспроизводится на этом компьютере, отдельное приложение Spotify не требуется.</div>' +
+    '</div><div class="hint">Привязка отдельная от обычного Spotify. Музыка воспроизводится на этом компьютере, отдельное приложение Spotify не требуется. Эквалайзер Nyao пока не применяется к этому движку.</div>' +
     (!s.available ? '<p class="note">Нужен полный установщик этой версии для macOS или Windows. Быстрое обновление не добавляет нативный плеер.</p>' : '') +
     (account ? '<div class="manual">' + button('native-use', s.active ? 'Вернуться к обычному Spotify' : 'Использовать librespot', s.available ? '' : 'disabled') + '</div>' : '') +
     (s.engine?.message ? '<p class="note">' + esc(s.engine.message) + '</p>' : '') +

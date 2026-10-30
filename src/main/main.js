@@ -327,7 +327,7 @@ function initProviders() {
     ? path.join(process.resourcesPath, 'librespot', nativeName)
     : path.join(globalThis.__nyaoBundledRoot || path.join(__dirname, '..', '..'), 'native-bin', (process.platform === 'darwin' ? 'mac' : 'win') + '-' + process.arch, nativeName);
   const nativeEngine = new LibrespotEngine({ api: nativeApi, binary: ['darwin', 'win32'].includes(process.platform) ? nativeBinary : null,
-    allowed: () => !!spExperiment?.visible,
+    allowed: () => !!spExperiment?.visible && safeStorage.isEncryptionAvailable(),
     deviceId: () => { let id = secrets.get('librespotDeviceId'); if (!id) { id = crypto.randomUUID(); secrets.set('librespotDeviceId', id); } return id; },
     onChange: st => { if (spExperiment?.active) send('spotify:state', st); },
   });
@@ -891,6 +891,7 @@ function registerIpc() {
     if (!nativeAllowed()) { spExperiment.nativeEngine.release(); return { permitted: false, flag: false, active: false }; }
     if (spExperiment.active) spExperiment.standardEngine.release();
     const api = spExperiment.nativeApi;
+    if (!settings.get().experimentalLibrespot) return { permitted: true, flag: false, active: false, available: spExperiment.nativeEngine.available };
     return { permitted: true, flag: !!settings.get().experimentalLibrespot,
       available: spExperiment.nativeEngine.available, active: spExperiment.active,
       loggedIn: api.loggedIn, clientId: api.clientId, hasClientId: api.hasClientId,
@@ -902,7 +903,7 @@ function registerIpc() {
     const standard = spExperiment.standardApi;
     const [wv, account, native] = await Promise.all([
       Promise.race([widevineReady(), new Promise(r => setTimeout(() => r({ ok: false, reason: 'ещё загружается' }), 300))]),
-      standard.loggedIn ? spSafe(standard.getAccount(), { name: 'Spotify', error: true }) : null,
+      standard.loggedIn ? spSafe(standard.getAccount(), { name: standard.regionBlocked ? 'Spotify (нужен VPN)' : 'Spotify', error: true }) : null,
       nativeStatus(),
     ]);
     return { clientId: standard.clientId, hasClientId: standard.hasClientId,

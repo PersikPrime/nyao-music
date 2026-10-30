@@ -94,6 +94,7 @@ export class SpotifySync {
   }
 
   resetBackend() {
+    this.resumeAt = { id: this.player.current?.srcId, position: this.audio.currentTime * 1000 };
     this.loaded = null; this.confirmed = false; this.starting++;
     this.snap = null; this.spList = []; this.modesSet = false; this.autoWaitUntil = 0;
   }
@@ -166,7 +167,8 @@ export class SpotifySync {
     this.loaded = id;
     this.confirmed = false;
     this.pendingSince = Date.now();
-    this.startPos = this.audio.currentTime * 1000;
+    this.startPos = this.resumeAt?.id === id ? this.resumeAt.position : this.audio.currentTime * 1000;
+    this.resumeAt = null;
     this.spList = this.upcoming();
     if (!this.spList.length) this.spList = [id];
     const uris = this.spList.map((x) => `spotify:track:${x}`);

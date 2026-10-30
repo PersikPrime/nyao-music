@@ -129,3 +129,15 @@ test('Spotify sync: completion of an old play cannot pause the newer Spotify tra
     completions[1](); await Promise.resolve();
   } finally { spMode.fallback = oldMode; }
 });
+test('Spotify sync: backend switch preserves the position before HTML audio reloads', async () => {
+  const oldMode = spMode.fallback; spMode.fallback = false;
+  const t = { source: 'sp', srcId: 'a' }, positions = [];
+  const player = { current: t, queue: [t], index: 0, audio: { paused: false, currentTime: 45, volume: 1 } };
+  const api = { play: async (_uris, position) => { positions.push(position); }, volume: async () => {} };
+  try {
+    const sync = new SpotifySync(player, api);
+    sync.resetBackend(); player.audio.currentTime = 0;
+    sync.reconcile(); await Promise.resolve();
+    assert.deepEqual(positions, [45000]);
+  } finally { spMode.fallback = oldMode; }
+});

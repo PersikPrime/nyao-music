@@ -100,11 +100,11 @@ export class SpotifyProvider {
   /** Открывает страницу входа в браузере и ждёт ответа на 127.0.0.1 (до 5 минут) */
   async login() {
     if (!this.hasClientId) throw new SpotifyError('Сначала впиши Client ID');
+    if (this.server) throw new SpotifyError('Вход Spotify уже открыт — заверши его в браузере');
     const verifier = b64url(crypto.randomBytes(64));
     const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
     const state = b64url(crypto.randomBytes(16));
     const code = await new Promise((resolve, reject) => {
-      if (this.server) this.server.close();
       const timer = setTimeout(() => finish(new SpotifyError('Вход не завершён за 5 минут')), 5 * 60_000);
       const finish = (err, val) => {
         clearTimeout(timer);
