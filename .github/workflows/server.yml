@@ -121,7 +121,7 @@ jobs:
           tar -C server --exclude=node_modules --exclude=test -czf - . | $SSH "tar -xzf - -C $REMOTE_DIR && chmod 600 $REMOTE_DIR/.env"
           $SSH "cd $REMOTE_DIR && docker compose up -d --build --remove-orphans && docker image prune -f > /dev/null && docker compose ps"
           # том /data/status создан Docker'ом от root, а сервер работает как node: Automator пишет статус сам — отдаём ему папку
-          $SSH "cd $REMOTE_DIR && docker compose exec -T -u root api sh -c 'mkdir -p /data/status && chown -R node /data/status'" || echo "::warning::Не удалось отдать /data/status пользователю node — техработы из Automator не включатся"
+          $SSH "cd $REMOTE_DIR && docker compose exec -T -u root api sh -c 'mkdir -p /data/status /data/banners && chown -R node /data/status /data/banners'" || echo "::warning::Не удалось отдать /data/status и /data/banners пользователю node — техработы и баннеры профилей не заработают"
 
       - name: Проверка
         run: |
