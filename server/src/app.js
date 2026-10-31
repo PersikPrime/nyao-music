@@ -165,7 +165,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     Object.assign(login, { status: 'done', token, user: publicUser(user) });
   }
 
-  const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl, webUrl, sharePage: (o) => sharePage({ ...o, mirror }) });
+  const social = socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl, webUrl, sharePage: (o) => sharePage({ ...o, mirror }), dataDir, limiter });
   const share = shareRoutes({ q, mirror, androidCerts, webHosts });
   const lyrics = lyricsRoutes({ q, HttpError, readJson, clip, limiter, admins: lyricsAdmins, catalog: yaCatalog });
   const legacy = legacyRoutes({ HttpError, readJson, clip, limiter, createSession: async (userId, device, platform) => {
@@ -173,7 +173,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     await q('INSERT INTO sessions (user_id, token_hash, device, platform) VALUES ($1, $2, $3, $4)', [userId, sha256(token), device, platform]);
     return token;
   } });
-  const admin = adminRoutes({ q, HttpError, readJson, clip, adminIds, status, cfg, mirror, github, push, logs, log, dataDir, devIds });
+  const admin = adminRoutes({ q, HttpError, readJson, clip, adminIds, status, cfg, mirror, github, push, logs, log, dataDir, devIds, publicUrl });
   const routes = [
     ['GET', /^\/health$/, async () => ({ ok: true, minBuild: cfg.minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
     // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)
@@ -497,7 +497,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
         // файл не-JSON (например, TTML с текстом песни): { __raw: { type, body, filename? } }
         if (out && out.__raw) {
           const r = out.__raw;
-          return send(res, 200, r.body, { 'Content-Type': r.type, ...(r.filename ? { 'Content-Disposition': contentDisposition(r.filename) } : {}) });
+          return send(res, 200, r.body, { 'Content-Type': r.type, ...(r.cache ? { 'Cache-Control': r.cache } : {}), ...(r.filename ? { 'Content-Disposition': contentDisposition(r.filename) } : {}) });
         }
         return send(res, 200, out);
       }

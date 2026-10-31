@@ -268,7 +268,25 @@ export const SCHEMA = [
     track_id BIGINT,
     by_user BIGINT REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  )`
+  )`,
+  // профиль 0.100: цвет, форма аватара, баннер, ссылки на соцсети
+  `ALTER TABLE profiles ADD COLUMN IF NOT EXISTS color TEXT`,
+  `ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_shape TEXT`,
+  `ALTER TABLE profiles ADD COLUMN IF NOT EXISTS banner TEXT`,
+  `ALTER TABLE profiles ADD COLUMN IF NOT EXISTS links JSONB`,
+  // что проверить модератору в Automator (баннеры и ссылки показываются сразу, модерация — после)
+  `CREATE TABLE IF NOT EXISTS profile_moderation (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    value TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'new',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_at TIMESTAMPTZ,
+    reviewed_by BIGINT,
+    reason TEXT NOT NULL DEFAULT ''
+  )`,
+  `CREATE INDEX IF NOT EXISTS profile_moderation_status ON profile_moderation (status, created_at)`
 ];
 
 export async function migrate(pool) {

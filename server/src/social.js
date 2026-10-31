@@ -3,6 +3,7 @@
 // Приватность по умолчанию: профиль видят только друзья, «невидимка» прячет всё сразу.
 import crypto from 'node:crypto';
 import { REACTIONS } from './hub.js';
+import { AVATAR_SHAPES, COLOR_RE, MAX_LINKS, BANNER_MAX, cleanLink, imageType, bannerStore } from './profile-extras.js';
 
 export const NICK_RE = /^[a-z0-9_.]{3,24}$/;
 // search — занято адресом /users/search; ник только из цифр спутался бы с id пользователя
@@ -28,7 +29,14 @@ export function nickProblem(nick) {
   return null;
 }
 
-export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl = '', webUrl = '', sharePage = null }) {
+export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTrack, page, publicUrl = '', webUrl = '', sharePage = null, dataDir = '/data', limiter = null }) {
+  const banners = bannerStore(dataDir);
+  const bannerUrl = (name) => (name ? `${publicUrl}/media/banners/${name}` : null);
+  const bannerLimit = limiter ? limiter(6) : () => {};
+  const asLinks = (v) => (asObj(v) || []).filter((x) => x && x.url);
+  async function moderate(uid, kind, value) {
+    await q('INSERT INTO profile_moderation (user_id, kind, value) VALUES ($1, $2, $3)', [uid, kind, value]).catch(() => {});
+  }
   /** Профиль пользователя; если его ещё нет — заводим с ником user_xxxxxx */
   async function ensureProfile(uid) {
     const cur = await q('SELECT * FROM profiles WHERE user_id = $1', [uid]);
@@ -61,7 +69,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
 
   /** Маленькая карточка пользователя для списков */
   function card(r) {
-    return { id: String(r.user_id ?? r.id), nick: r.nick, name: r.name || '', picture: r.picture || null };
+    return { id: String(r.user_id ?? r.id), nick: r.nick, name: r.name || '', picture: r.picture || null, shape: r.avatar_shape || null, color: r.color || null };
   }
 
   async function userCard(uid) {
@@ -230,7 +238,8 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       ...s.user,
       nick: p.nick, nickSet: !!p.nick_set, bio: p.bio,
       visibility: p.visibility, showNow: p.show_now, showStats: p.show_stats, showLikes: p.show_likes, invisible: p.invisible, allowDuo: p.allow_duo !== false,
-      statusTrack: asObj(p.status_track), pinned: asObj(p.pinned) || []
+      statusTrack: asObj(p.status_track), pinned: asObj(p.pinned) || [],
+      color: p.color || null, avatarShape: p.avatar_shape || 'cookie', banner: bannerUrl(p.banner), links: asLinks(p.links)
     };
   }
 
@@ -294,6 +303,30 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       for (const [k, col] of [['showNow', 'show_now'], ['showStats', 'show_stats'], ['showLikes', 'show_likes'], ['invisible', 'invisible'], ['allowDuo', 'allow_duo']]) {
         if (body[k] !== undefined) set(col, !!body[k]);
       }
+      if (body.color !== undefined) {
+        if (body.color !== null && !COLOR_RE.test(String(body.color))) throw new HttpError(400, 'Цвет — в виде #RRGGBB');
+        set('color', body.color ? String(body.color).toUpperCase() : null);
+      }
+      if (body.avatarShape !== undefined) {
+        if (!AVATAR_SHAPES.includes(body.avatarShape)) throw new HttpError(400, 'Форма аватара: cookie, circle или squircle');
+        set('avatar_shape', body.avatarShape);
+      }
+      let newLinks = null;
+      if (body.links !== undefined) {
+        const list = Array.isArray(body.links) ? body.links : [];
+        if (list.length > MAX_LINKS) throw new HttpError(400, `Не больше ${MAX_LINKS} ссылок`);
+        newLinks = [];
+        for (const x of list) {
+          const l = cleanLink(typeof x === 'string' ? x : x && x.url);
+          if (l.error) throw new HttpError(400, l.error);
+          if (!newLinks.some((y) => y.url === l.url)) newLinks.push(l);
+        }
+        set('links', JSON.stringify(newLinks));
+      }
+      if (body.banner === null && p.banner) {
+        set('banner', null);
+        banners.remove(p.banner);
+      }
       if (body.statusTrack !== undefined) set('status_track', body.statusTrack ? JSON.stringify(cleanTrack(body.statusTrack)) : null);
       if (body.pinned !== undefined) {
         const list = (Array.isArray(body.pinned) ? body.pinned : []).slice(0, 3).map((x) => ({ id: clip(x && x.id, 128), title: clip(x && x.title, 128), cover: x && x.cover ? clip(x.cover, 512) : null, kind: clip(x && x.kind, 16) })).filter((x) => x.id);
@@ -307,12 +340,40 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
           throw e;
         }
       }
+      // новые ссылки — модератору в Automator (старые, что уже были, повторно не шлём)
+      if (newLinks) {
+        const old = new Set(asLinks(p.links).map((x) => x.url));
+        const added = newLinks.filter((x) => !old.has(x.url));
+        if (added.length) await moderate(s.uid, 'links', JSON.stringify(added));
+      }
       // «невидимка» включилась — друзья сразу перестают видеть, что играет
       if (body.invisible === true || body.showNow === false) {
         for (const f of await friendIds(s.uid)) hub.pushUser(f, { type: 'social', kind: 'now', user: { id: String(s.uid) }, now: null, online: body.invisible === true ? false : undefined });
       }
       return ownProfile(await ensureProfile(s.uid), s);
     }, true],
+    // баннер профиля: картинка уже обрезана и сжата приложением (JPEG/PNG/WebP, до 380 КБ)
+    ['POST', /^\/profile\/banner$/, async ({ s, req }) => {
+      bannerLimit(s.uid);
+      const body = await readJson(req);
+      const b64 = String(body.image || '').replace(/^data:image\/[a-z]+;base64,/, '');
+      const buf = Buffer.from(b64, 'base64');
+      if (!buf.length) throw new HttpError(400, 'Нужна картинка');
+      if (buf.length > BANNER_MAX) throw new HttpError(413, 'Картинка слишком большая — до 380 КБ');
+      const ext = imageType(buf);
+      if (!ext) throw new HttpError(400, 'Баннер — JPEG, PNG или WebP');
+      const p = await ensureProfile(s.uid);
+      const name = banners.save(s.uid, buf, ext);
+      await q('UPDATE profiles SET banner = $2, updated_at = now() WHERE user_id = $1', [s.uid, name]);
+      if (p.banner) banners.remove(p.banner);
+      await moderate(s.uid, 'banner', name);
+      return ownProfile(await ensureProfile(s.uid), s);
+    }, true],
+    ['GET', /^\/media\/banners\/([A-Za-z0-9.-]{8,64})$/, async ({ m }) => {
+      const f = banners.read(m[1]);
+      if (!f) throw new HttpError(404, 'Нет такой картинки');
+      return { __raw: { type: f.type, body: f.body, cache: 'public, max-age=31536000, immutable' } };
+    }],
     ['GET', /^\/nick\/check$/, async ({ s, url }) => {
       const nick = String(url.searchParams.get('nick') || '').trim().replace(/^@/, '');
       const bad = nickProblem(nick);
@@ -368,6 +429,10 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
         friends: Number(friendsCount) || 0,
         statusTrack: asObj(p.status_track),
         pinned: asObj(p.pinned) || [],
+        color: p.color || null,
+        avatarShape: p.avatar_shape || 'cookie',
+        banner: bannerUrl(p.banner),
+        links: asLinks(p.links),
         now: rel === 'friends' || rel === 'self' ? await nowOf(uid, p) : null,
         // «невидимка» прячет и статистику со значками — для всех, кроме себя
         // разрешил ли он друзьям совпадение вкусов и «микс на двоих»
@@ -381,7 +446,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
     ['GET', /^\/friends$/, async ({ s }) => {
       await ensureProfile(s.uid);
       const { rows } = await q(
-        `SELECT f.a, f.b, f.status, f.requester, f.created_at, u.id, u.name, u.picture, p.nick, p.show_now, p.invisible
+        `SELECT f.a, f.b, f.status, f.requester, f.created_at, u.id, u.name, u.picture, p.nick, p.show_now, p.invisible, p.avatar_shape, p.color
            FROM friendships f
            JOIN users u ON u.id = CASE WHEN f.a = $1 THEN f.b ELSE f.a END
            JOIN profiles p ON p.user_id = u.id

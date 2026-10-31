@@ -7,6 +7,7 @@ import { WORKFLOWS } from './github.js';
 import { lyricsAdminRoutes } from './admin-lyrics.js';
 import { labelRoutes } from './admin-label.js';
 import { pushAdminRoutes } from './admin-push.js';
+import { profileAdminRoutes } from './admin-profiles.js';
 
 export const PERMISSIONS = [
   'users.read', 'users.sessions', 'users.edit', 'users.ban',
@@ -17,7 +18,8 @@ export const PERMISSIONS = [
   'server.read', 'logs.read', 'ops.restart', 'ops.deploy', 'ops.logs',
   'push.read', 'push.test', 'push.broadcast',
   'audit.read', 'audit.all',
-  'stats.read', 'automator.read'
+  'stats.read', 'automator.read',
+  'profiles.read', 'profiles.moderate'
 ];
 
 const all = () => [...PERMISSIONS];
@@ -25,7 +27,7 @@ const reads = () => PERMISSIONS.filter((p) => p.endsWith('.read') || p === 'audi
 export const ROLES = {
   owner: all(),
   admin: all().filter((p) => !['lyrics.roles', 'ops.deploy', 'ops.restart'].includes(p)),
-  support: ['users.read', 'users.sessions', 'status.read', 'audit.read', 'automator.read'],
+  support: ['users.read', 'users.sessions', 'status.read', 'audit.read', 'automator.read', 'profiles.read', 'profiles.moderate'],
   // назначать роли LyricLabs может только владелец
   lyrics: [...PERMISSIONS.filter((p) => p.startsWith('lyrics.') && p !== 'lyrics.roles'), 'audit.read', 'automator.read'],
   label: [...PERMISSIONS.filter((p) => p.startsWith('label.')), 'audit.read', 'automator.read'],
@@ -802,7 +804,8 @@ export function adminRoutes(ctx) {
 
     ...lyricsAdminRoutes({ ...ctx, guard }),
     ...labelRoutes({ ...ctx, guard, getSetting, setSetting }),
-    ...pushAdminRoutes({ ...ctx, guard })
+    ...pushAdminRoutes({ ...ctx, guard }),
+    ...profileAdminRoutes({ ...ctx, guard })
   ];
 
   function needGithub() {

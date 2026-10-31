@@ -351,3 +351,49 @@ test('ссылки «Поделиться» на сайте: приглашен�
     t.close();
   }
 });
+
+test('профиль 0.100: цвет, форма аватара, ссылки, баннер и модерация', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nyao-prof-'));
+  const t = await setup({ dataDir: dir, adminIds: new Map([['tg2', 'owner']]) });
+  try {
+    const a = await t.user('Takko');
+    const admin = await t.user('Admin');
+    assert.equal((await t.call('PUT', '/profile', { token: a.token, body: { color: 'red' } })).status, 400);
+    assert.equal((await t.call('PUT', '/profile', { token: a.token, body: { avatarShape: 'star' } })).status, 400);
+    assert.equal((await t.call('PUT', '/profile', { token: a.token, body: { links: ['javascript:alert(1)'] } })).status, 400);
+    const p = (await t.call('PUT', '/profile', { token: a.token, body: { color: '#c6b8ff', avatarShape: 'circle', links: ['t.me/takko', 'https://soundcloud.com/shaderism', 'https://example.org/'] } })).json;
+    assert.equal(p.color, '#C6B8FF');
+    assert.equal(p.avatarShape, 'circle');
+    assert.deepEqual(p.links.map((l) => l.kind), ['telegram', 'soundcloud', 'site']);
+    assert.equal(p.links[0].url, 'https://t.me/takko');
+
+    // баннер: только картинка
+    assert.equal((await t.call('POST', '/profile/banner', { token: a.token, body: { image: Buffer.from('hello').toString('base64') } })).status, 400);
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200)]);
+    const withBanner = (await t.call('POST', '/profile/banner', { token: a.token, body: { image: jpg.toString('base64') } })).json;
+    assert.match(withBanner.banner, /^https:\/\/api\.test\/media\/banners\/\d+-[a-z0-9]{10}\.jpg$/);
+    const file = withBanner.banner.split('/').pop();
+    const img = await t.call('GET', `/media/banners/${file}`);
+    assert.equal(img.status, 200);
+
+    // очередь модерации в Automator: ссылки и баннер
+    const list = (await t.call('GET', '/admin/profiles/moderation', { token: admin.token })).json;
+    assert.equal(list.waiting, 2);
+    const b = list.items.find((x) => x.kind === 'banner');
+    assert.equal(b.banner.current, true);
+    assert.equal((await t.call('GET', '/admin/profiles/moderation', { token: a.token })).status, 403);
+    assert.equal((await t.call('POST', `/admin/profiles/moderation/${b.id}`, { token: admin.token, body: { action: 'remove', reason: 'не по правилам' } })).status, 200);
+    const after = (await t.call('GET', '/profile', { token: a.token })).json;
+    assert.equal(after.banner, null);
+    assert.equal(fs.existsSync(path.join(dir, 'banners', file)), false);
+    const l = list.items.find((x) => x.kind === 'links');
+    await t.call('POST', `/admin/profiles/moderation/${l.id}`, { token: admin.token, body: { action: 'remove' } });
+    assert.deepEqual((await t.call('GET', '/profile', { token: a.token })).json.links, []);
+    assert.equal((await t.call('GET', '/admin/profiles/moderation', { token: admin.token })).json.waiting, 0);
+  } finally {
+    t.close();
+  }
+});
