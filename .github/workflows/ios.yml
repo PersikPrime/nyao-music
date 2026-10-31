@@ -36,9 +36,9 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             MARKETING_VERSION="$N.$B" CURRENT_PROJECT_VERSION="$B" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tee xcodebuild.log | grep -E "error:|warning: unre|BUILD" || true
-          grep -E "error:" xcodebuild.log | sort -u | head -40 | while read -r l; do echo "::error::$l"; done
+          grep -E "error:" xcodebuild.log | sort -u | head -40 | while read -r l; do echo "::error::$l"; done || true
           if [ ! -f "build/Build/Products/Release-iphoneos/Nyao Music.app/Nyao Music" ]; then
-            grep -iE "error|failed|undefined" xcodebuild.log | grep -v "^\s*$" | tail -30 | while read -r l; do echo "::error::$l"; done
+            grep -iE "error|failed|undefined" xcodebuild.log | grep -v "^\s*$" | tail -30 | while read -r l; do echo "::error::$l"; done || true
             tail -15 xcodebuild.log | while read -r l; do echo "::warning::$l"; done
             exit 1
           fi
