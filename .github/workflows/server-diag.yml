@@ -26,15 +26,17 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
           cat > probe.mjs <<'JS'
-          const { TelegramOIDC } = await import(process.cwd() + '/src/telegram.js');
-          const ips = String(process.env.TG_RELAY_IPS || '').split(',').filter(Boolean);
-          const tg = new TelegramOIDC({ clientId: 'x', clientSecret: 'y', redirectUri: 'https://x/cb', relay: process.env.TG_RELAY, relayIps: ips });
-          const t = Date.now();
-          try {
-            await tg.jwks();
-            console.log(`::notice::JWKS Telegram через ретранслятор: ок за ${Date.now() - t} мс, IP ${tg.goodIp || 'по DNS'}`);
-          } catch (e) {
-            console.log(`::error::JWKS Telegram: ${e.message}`);
+          const { pinnedFetch, RELAY_IPS } = await import(process.cwd() + '/src/telegram.js');
+          const url = process.env.TG_RELAY.replace(/\/$/, '') + '/.well-known/jwks.json';
+          for (const ip of [...RELAY_IPS, '104.16.123.96', '172.66.0.227']) {
+            for (let k = 0; k < 2; k++) {
+              const t = Date.now();
+              try {
+                const r = await pinnedFetch(url, { ip, timeout: 6000, headers: { 'user-agent': 'NyaoServer/1.0', accept: 'application/json' } });
+                const body = (await r.text()).replace(/\s+/g, ' ').slice(0, 90);
+                console.log(`::notice::${ip} #${k}: HTTP ${r.status} ${Date.now() - t} мс — ${body}`);
+              } catch (e) { console.log(`::error::${ip} #${k}: ${e.message}`); }
+            }
           }
           JS
           $SSH "cd $REMOTE_DIR && docker compose exec -T api node --input-type=module -" < probe.mjs
