@@ -1,4 +1,5 @@
 import { profileLink } from './social.js';
+import { avatarSvg, badgeSvg, cookiePath, tintOf, inkOn, cleanColor, linkIcon, linkLabel, prepareBanner, groupInbox, AVATAR_SHAPES, PROFILE_COLORS } from './profile-ui.js';
 // Мини-соцсеть на ПК: друзья и что они слушают, профиль, заявки, входящие, приглашения,
 // совпадение вкусов и «Микс на двоих». Экран собирается из HTML-строк, как и остальное приложение.
 // ctx — то, что даёт app.js: api, state, view, esc, coverHtml, badge, toast, go, player, copyText, ago.
@@ -27,11 +28,13 @@ export function createFriends(ctx) {
   const call = (m, p, b) => api.social(m, p, b);
   const display = (u) => (u && (u.name || (u.nick ? '@' + u.nick : ''))) || 'Друг';
 
-  function avatar(u, size = 44) {
-    const pic = u && u.picture;
-    const letter = esc(String((u && (u.name || u.nick)) || 'N').trim().charAt(0).toUpperCase());
-    return `<span class="fr-av" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px">${pic ? `<img src="${esc(pic)}" alt="">` : letter}</span>`;
+  /** Аватар в выбранной форме; для себя форма и цвет — из своего профиля */
+  function avatar(u, size = 44, opts) {
+    const me = s.profile && u && (u.id === (state.cloud.user && state.cloud.user.id) || u.self);
+    const v = me ? { ...u, shape: s.profile.avatarShape, color: s.profile.color } : u;
+    return avatarSvg(v, size, esc, opts);
   }
+  const myCard = () => (state.cloud.user ? { ...state.cloud.user, self: true, nick: s.profile && s.profile.nick } : { self: true });
 
   async function load() {
     if (!state.cloud.loggedIn) return;
@@ -68,48 +71,75 @@ export function createFriends(ctx) {
     }
     const sr = s.search;
     const inv = s.invite;
-    view.innerHTML = `<div class="scroll friends">${ctx.profileTabs ? ctx.profileTabs('friends') : ''}
-      <div class="fr-head"><h1 class="page">Друзья</h1>
-        <button class="btn" data-action="fr-me">${avatar(state.cloud.user ? { name: state.cloud.user.name, picture: state.cloud.user.picture } : null, 24)}<span>@${esc(s.profile ? s.profile.nick : '…')}</span></button></div>
-      ${s.incoming.length ? `<section class="fr-sec"><div class="eyebrow">Заявки · ${s.incoming.length}</div>${s.incoming.map((u) => `
-        <div class="fr-req">${avatar(u)}<button class="fr-name link-plain" data-action="fr-open" data-id="${esc(u.id)}"><b>${esc(display(u))}</b><span>@${esc(u.nick)} хочет дружить</span></button>
-          <button class="btn" data-action="fr-decline" data-id="${esc(u.id)}">Нет</button><button class="btn primary" data-action="fr-accept" data-id="${esc(u.id)}">Принять</button></div>`).join('')}</section>` : ''}
-      <section class="fr-sec"><div class="eyebrow">Сейчас слушают</div>
-        ${s.friends.length ? `<div class="fr-grid">${s.friends.map(friendCard).join('')}</div>`
-          : `<div class="card"><b>Пока никого</b><span class="hint">Найди друга по нику ниже или отправь ему свою ссылку — увидишь, что он слушает, и сможешь звать в комнату.</span></div>`}
-      </section>
-      ${s.inbox.length ? `<section class="fr-sec"><div class="fr-row-head"><div class="eyebrow">Входящие</div>${s.inbox.some((i) => !i.read) ? '<button class="link-plain" data-action="fr-read">Отметить прочитанным</button>' : ''}</div>
-        ${s.inbox.slice(0, 8).map(inboxRow).join('')}</section>` : ''}
-      <div class="fr-cols">
-        <section class="card"><div class="eyebrow">Найти по нику</div>
-          <form data-form="fr-search" class="fr-search"><input name="q" value="${esc(sr.q)}" placeholder="@ник друга" autocomplete="off" spellcheck="false"><button class="btn primary">Найти</button></form>
-          ${sr.loading ? '<div class="skeleton" style="height:44px"></div>' : sr.q && !sr.res.length ? '<span class="hint">Никого не нашлось — проверь ник</span>' : ''}
-          ${sr.res.map((r) => `<div class="fr-req">${avatar(r)}<button class="fr-name link-plain" data-action="fr-open" data-id="${esc(r.id)}"><b>${esc(display(r))}</b><span>@${esc(r.nick)}</span></button>${relationBtn(r.id, r.relation)}</div>`).join('')}
+    const me = myCard();
+    const listening = s.friends.filter((f) => f.now);
+    const groups = groupInbox(s.inbox).slice(0, 8);
+    const onlineFirst = s.friends.slice().sort((a, b) => (b.now ? 2 : b.online ? 1 : 0) - (a.now ? 2 : a.online ? 1 : 0) || display(a).localeCompare(display(b)));
+    view.innerHTML = `<div class="scroll friends fr2">${ctx.profileTabs ? ctx.profileTabs('friends') : ''}
+      <div class="fr2-head">
+        <h1 class="page">Друзья</h1>
+        <button class="fr2-me" data-action="fr-me">${avatar(me, 44)}<span><b>${esc(display(me))}</b><span>@${esc(s.profile ? s.profile.nick : '…')} · мой профиль</span></span></button>
+      </div>
+      ${s.incoming.length ? `<section class="fr-sec"><div class="eyebrow">Заявки · ${s.incoming.length}</div><div class="fr2-reqs">${s.incoming.map((u) => `
+        <div class="fr2-req">${avatar(u, 44)}<button class="fr-name link-plain" data-action="fr-open" data-id="${esc(u.id)}"><b>${esc(display(u))}</b><span>@${esc(u.nick)} хочет дружить</span></button>
+          <button class="btn" data-action="fr-decline" data-id="${esc(u.id)}">Нет</button><button class="btn primary" data-action="fr-accept" data-id="${esc(u.id)}">Принять</button></div>`).join('')}</div></section>` : ''}
+      ${listening.length ? `<section class="fr-sec"><div class="eyebrow">Сейчас слушают · ${listening.length}</div><div class="fr2-live">${listening.map(liveCard).join('')}</div></section>` : ''}
+      <div class="fr2-cols">
+        <section class="fr2-list">
+          <div class="fr-row-head"><div class="eyebrow">Все друзья · ${s.friends.length}</div></div>
+          ${s.friends.length ? onlineFirst.map(friendRow).join('')
+            : `<div class="card"><b>Пока никого</b><span class="hint">Найди друга по нику или отправь ему свою ссылку — увидишь, что он слушает, и сможешь звать в комнату.</span></div>`}
         </section>
-        <section class="card"><div class="eyebrow">Пригласить</div>
-          <span class="hint">Ссылка живёт неделю. Друг открывает её — и вы сразу друзья. На телефоне можно показать QR-код или приложить телефоны.</span>
-          ${inv ? `<div class="fr-link"><code>${esc(inv.url)}</code><button class="btn" data-action="fr-copy">Скопировать</button></div>` : '<div><button class="btn primary" data-action="fr-invite">Получить ссылку</button></div>'}
-          <form data-form="fr-use" class="fr-search"><input name="code" placeholder="Вставь ссылку друга" autocomplete="off" spellcheck="false"><button class="btn">Добавить</button></form>
-        </section>
+        <aside class="fr2-side">
+          ${groups.length ? `<section class="card"><div class="fr-row-head"><div class="eyebrow">Входящие</div>${s.inbox.some((i) => !i.read) ? '<button class="link-plain" data-action="fr-read">Прочитано</button>' : ''}</div>
+            ${groups.map(inboxRow).join('')}</section>` : ''}
+          <section class="card"><div class="eyebrow">Найти по нику</div>
+            <form data-form="fr-search" class="fr-search"><input name="q" value="${esc(sr.q)}" placeholder="@ник друга" autocomplete="off" spellcheck="false"><button class="btn primary">Найти</button></form>
+            ${sr.loading ? '<div class="skeleton" style="height:44px"></div>' : sr.q && !sr.res.length ? '<span class="hint">Никого не нашлось — проверь ник</span>' : ''}
+            ${sr.res.map((r) => `<div class="fr-req">${avatar(r, 36)}<button class="fr-name link-plain" data-action="fr-open" data-id="${esc(r.id)}"><b>${esc(display(r))}</b><span>@${esc(r.nick)}</span></button>${relationBtn(r.id, r.relation)}</div>`).join('')}
+          </section>
+          <section class="card"><div class="eyebrow">Пригласить</div>
+            <span class="hint">Ссылка живёт неделю. Друг открывает её — и вы сразу друзья.</span>
+            ${inv ? `<div class="fr-link"><code>${esc(inv.url)}</code><button class="btn" data-action="fr-copy">Скопировать</button></div>` : '<div><button class="btn primary" data-action="fr-invite">Получить ссылку</button></div>'}
+            <form data-form="fr-use" class="fr-search"><input name="code" placeholder="Вставь ссылку друга" autocomplete="off" spellcheck="false"><button class="btn">Добавить</button></form>
+          </section>
+        </aside>
       </div>
     </div>`;
   }
 
-  function friendCard(f) {
+  /** «Сейчас слушают»: обложка крупно, аватар друга, кнопка «Включить себе» */
+  function liveCard(f) {
     const n = f.now;
-    return `<button class="fr-card" data-action="fr-open" data-id="${esc(f.id)}">
-      <div class="fr-card-top">${avatar(f, 46)}${n && n.playing ? '<span class="fr-live"></span>' : ''}<div class="fr-name"><b>${esc(display(f))}</b><span>@${esc(f.nick)}</span></div></div>
-      ${n ? `<div class="fr-now">${coverHtml(n.track, 'xs')}<div class="meta"><div class="t">${esc(n.track.title)}</div><div class="s">${esc(n.track.artist)}</div></div></div>`
-        : `<div class="fr-now muted">${f.online ? 'в сети' : 'сейчас не слушает'}</div>`}
+    const color = cleanColor(f.color);
+    return `<div class="fr2-livecard" style="--fc:${color};--ft:${tintOf(color)}">
+      <button class="fr2-live-cover" data-action="fr-open" data-id="${esc(f.id)}">${coverHtml(n.track)}${n.playing ? '<span class="fr2-eq"><i></i><i></i><i></i></span>' : ''}</button>
+      <div class="fr2-live-meta">
+        <button class="fr2-live-who link-plain" data-action="fr-open" data-id="${esc(f.id)}">${avatar(f, 28)}<span>${esc(display(f))}</span></button>
+        <div class="t">${esc(n.track.title)}</div><div class="s">${badge(n.track.source)}${esc(n.track.artist)}</div>
+        <div class="fr2-live-acts"><span class="muted">${n.playing ? 'слушает сейчас' : 'слушал ' + ago(n.updatedAt)}</span><button class="btn" data-action="fr-play-friend" data-id="${esc(f.id)}">Включить себе</button></div>
+      </div>
+    </div>`;
+  }
+
+  function friendRow(f) {
+    const n = f.now;
+    const status = n ? `${n.playing ? '▶ ' : ''}${n.track.artist} — ${n.track.title}` : f.online ? 'в сети' : 'не в сети';
+    return `<button class="fr2-row" data-action="fr-open" data-id="${esc(f.id)}">
+      <span class="fr2-row-av">${avatar(f, 40)}${f.online || (n && n.playing) ? '<i class="fr2-dot"></i>' : ''}</span>
+      <span class="fr-name"><b>${esc(display(f))}</b><span>@${esc(f.nick)}</span></span>
+      <span class="fr2-row-status ${n ? '' : 'muted'}">${esc(status)}</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
     </button>`;
   }
 
   function inboxRow(i) {
     const t = i.track;
-    const title = i.kind === 'track' ? `${display(i.from)} прислал трек ${i.emoji || ''}` : i.kind === 'room' ? `${display(i.from)} зовёт слушать вместе` : `${display(i.from)}: ${i.emoji || ''}`;
+    const times = i.count > 1 ? ` ×${i.count}` : '';
+    const title = i.kind === 'track' ? `${display(i.from)} прислал трек ${i.emoji || ''}` : i.kind === 'room' ? `${display(i.from)} зовёт слушать вместе` : `${display(i.from)}: ${i.emoji || ''}${times}`;
     const sub = i.kind === 'room' ? `Нажми, чтобы войти · ${ago(i.createdAt)}` : t ? (i.kind === 'track' ? `${t.artist} — ${t.title}` : `на «${t.title}» · ${ago(i.createdAt)}`) : ago(i.createdAt);
     return `<button class="fr-inbox ${i.read ? '' : 'unread'}" data-action="fr-inbox" data-id="${esc(i.id)}">
-      ${t && i.kind === 'track' ? coverHtml(t, 'xs') : avatar(i.from, 40)}<div class="meta"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>${t && i.kind === 'track' ? badge(t.source) : ''}</button>`;
+      ${t && i.kind === 'track' ? coverHtml(t, 'xs') : avatar(i.from, 36)}<div class="meta"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>${t && i.kind === 'track' ? badge(t.source) : ''}</button>`;
   }
 
   function relationBtn(id, rel) {
@@ -147,6 +177,27 @@ export function createFriends(ctx) {
     if (state.route === 'user') renderUser();
   }
 
+  /** Шапка профиля: баннер (или цвет профиля с печеньками) */
+  function bannerHtml(d, color, extra = '') {
+    const style = d.banner ? `background-image:url('${esc(d.banner)}')` : `background:${tintOf(color)}`;
+    return `<div class="pf-banner ${d.banner ? 'has-img' : ''}" style="${style}">
+      ${d.banner ? '' : `<svg class="pf-decor a" viewBox="0 0 100 100" aria-hidden="true"><path d="${cookiePath()}" fill="none" stroke="${color}" stroke-width=".8" opacity=".5"/></svg><svg class="pf-decor b" viewBox="0 0 100 100" aria-hidden="true"><path d="${cookiePath()}" fill="none" stroke="${color}" stroke-width="1.2" opacity=".3"/></svg>`}
+      ${extra}</div>`;
+  }
+
+  function linksHtml(links) {
+    if (!links || !links.length) return '';
+    return `<div class="pf-links">${links.map((l) => {
+      const { name, short } = linkLabel(l);
+      return `<button class="pf-link" data-action="fr-link" data-url="${esc(l.url)}" title="${esc(l.url)}">${linkIcon(l.kind)}<span>${esc(name === 'Сайт' ? short : name)}</span></button>`;
+    }).join('')}</div>`;
+  }
+
+  function trackCard(t, label, act, color) {
+    return `<div class="pf-track" style="--fc:${color}">${coverHtml(t, 'sm')}<div class="meta"><div class="pf-eyebrow">${label}</div><div class="t">${esc(t.title)}</div><div class="s">${badge(t.source)}${esc(t.artist)}</div></div>
+      <button class="pf-play" data-action="${act}" aria-label="Слушать «${esc(t.title)}»"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg></button></div>`;
+  }
+
   function renderUser() {
     const view = ctx.view;
     const want = String((state.params && state.params.key) || '');
@@ -160,42 +211,58 @@ export function createFriends(ctx) {
       return;
     }
     if (!d) {
-      view.innerHTML = '<div class="scroll friends"><div class="skeleton" style="height:180px;border-radius:28px"></div></div>';
+      view.innerHTML = '<div class="scroll friends"><div class="skeleton" style="height:220px;border-radius:28px"></div></div>';
       return;
     }
+    const self = d.relation === 'self';
+    const dd = self && s.profile ? { ...d, color: s.profile.color, avatarShape: s.profile.avatarShape, banner: s.profile.banner, links: s.profile.links, statusTrack: s.profile.statusTrack } : d;
+    const color = cleanColor(dd.color);
     const live = s.friends.find((f) => f.id === d.id);
     const now = (live && live.now) || d.now;
+    const online = live ? live.online || (now && now.playing) : false;
     const m = u.match;
     const st = d.stats;
-    view.innerHTML = `<div class="scroll friends user-page">
-      <div class="fr-row-head"><button class="btn" data-action="back">← Назад</button>
-        ${d.relation === 'self' ? '<button class="btn" data-action="go" data-route="profile">Изменить профиль</button>'
-          : d.relation === 'friends' ? `<button class="link-plain" data-action="fr-remove" data-id="${esc(d.id)}">Удалить из друзей</button>` : ''}
-        ${d.relation !== 'self' && d.relation !== 'blocked' ? `<button class="link-plain" data-action="fr-block" data-id="${esc(d.id)}">Заблокировать</button>` : ''}</div>
-      <section class="up-head">${avatar(d, 112)}<div><h1 class="page">${esc(display(d))}</h1><div class="up-nick">@${esc(d.nick)}</div>
-        ${!d.private && d.bio ? `<p class="muted">${esc(d.bio)}</p>` : ''}
-        ${!d.private ? `<div class="hint">${d.friends} ${plural(d.friends, 'друг', 'друга', 'друзей')}</div>` : ''}
-        <div class="up-acts">${d.relation === 'self' ? '' : relationBtn(d.id, d.relation)}</div></div></section>
-      ${d.private ? `<div class="card"><b>Профиль скрыт</b><span class="hint">${d.relation === 'blocked' ? 'Ты заблокировал этого пользователя' : 'Его музыку видят только друзья'}</span></div>` : ''}
-      ${!d.private && now ? `<section class="card up-now"><div class="eyebrow">${now.playing ? 'Сейчас слушает' : 'Слушал ' + ago(now.updatedAt)}</div>
-        <div class="fr-now big">${coverHtml(now.track)}<div class="meta"><div class="t">${esc(now.track.title)}</div><div class="s">${badge(now.track.source)}${esc(now.track.artist)}</div></div>
-          <button class="btn" data-action="fr-play-now">Включить себе</button></div>
-        ${d.relation === 'friends' ? `<div class="tg-reacts">${REACTIONS.map((e) => `<button data-action="fr-react" data-e="${e}" aria-label="Реакция ${e}">${e}</button>`).join('')}</div>
-          <div><button class="btn primary" data-action="fr-room">${state.room ? 'Позвать в мою комнату' : 'Создать комнату и позвать'}</button></div>` : ''}</section>` : ''}
-      ${d.relation === 'friends' && d.duo === false ? `<span class="hint">${esc(display(d))} не открывал совпадение вкусов и «Микс на двоих»</span>` : ''}
-      ${d.relation === 'friends' && m ? `<section class="card up-match"><div class="ring" style="--p:${m.percent}"><b>${m.percent}%</b></div>
-        <div class="meta"><b>Совпадение вкусов</b><span class="hint">${!m.enough ? 'Пока мало прослушиваний — точнее будет через пару дней' : m.commonArtists.length ? 'Общие: ' + esc(m.commonArtists.slice(0, 5).join(', ')) : 'Общих исполнителей пока нет'}</span></div>
-        <button class="btn primary" data-action="fr-mix">Микс на двоих</button></section>` : ''}
-      ${!d.private && d.badges && d.badges.length ? `<section class="fr-sec"><div class="eyebrow">Значки</div><div class="up-badges">${d.badges.map((b) => `<div class="up-badge"><span>${esc(b.emoji)}</span><b>${esc(b.title)}</b></div>`).join('')}</div></section>` : ''}
-      ${!d.private && st && st.plays ? `<div class="fr-cols">
-        <section class="card"><div class="eyebrow">За месяц</div><div class="up-stats"><div><b>${st.minutes}</b><span>минут</span></div><div><b>${st.plays}</b><span>прослушиваний</span></div></div>
-          ${st.topArtists.map((a, i) => `<div class="up-artist"><span class="n">${i + 1}</span><b>${esc(a.name)}</b><span class="muted">${a.plays}</span></div>`).join('')}</section>
-        <section class="card"><div class="eyebrow">Чаще всего слушает</div>
-          ${st.topTracks.map((t, i) => `<button class="fr-inbox" data-action="fr-top" data-i="${i}">${coverHtml(t, 'xs')}<div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div><span class="muted">${t.plays}×</span></button>`).join('')}</section></div>` : ''}
+    const nowChip = !d.private && now && now.playing ? `<div class="pf-nowchip"><span class="fr2-eq small"><i></i><i></i><i></i></span>Сейчас: ${esc(now.track.title)} — ${esc(now.track.artist)}</div>` : '';
+    const topBtns = `<div class="pf-top"><button class="pf-round" data-action="back" aria-label="Назад"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+      ${self ? '<button class="pf-round wide" data-action="go" data-route="profile">Изменить профиль</button>' : d.relation !== 'blocked' ? `<button class="pf-round" data-action="fr-user-menu" data-id="${esc(d.id)}" aria-label="Ещё"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>` : ''}</div>`;
+    const acts = self ? '' : `${d.relation === 'friends' && !d.private ? `<button class="btn primary pf-main" style="--fc:${color};--fi:${inkOn(color)}" data-action="fr-room">${state.room ? 'Позвать в комнату' : 'Слушать вместе'}</button>` : ''}${relationBtn(d.id, d.relation)}`;
+    view.innerHTML = `<div class="scroll friends pf" style="--fc:${color}">
+      ${bannerHtml(dd, color, topBtns + nowChip)}
+      <section class="pf-head">
+        <div class="pf-avwrap">${avatarSvg({ ...dd, shape: dd.avatarShape }, 148, esc, { ring: 6 })}</div>
+        <div class="pf-id"><h1>${esc(display(d))}</h1><div class="pf-sub">@${esc(d.nick)}${!d.private ? ` · ${d.friends} ${plural(d.friends, 'друг', 'друга', 'друзей')}` : ''}${online ? ' · <span class="pf-online">в сети</span>' : ''}</div></div>
+        <div class="pf-acts">${acts}</div>
+      </section>
+      ${!d.private && d.bio ? `<p class="pf-bio">${esc(d.bio)}</p>` : ''}
+      ${!d.private ? linksHtml(dd.links) : ''}
+      ${d.private ? `<div class="card"><b>Профиль скрыт</b><span class="hint">${d.relation === 'blocked' ? 'Ты заблокировал этого пользователя' : 'Его музыку видят только друзья'}</span></div>` : `
+      <div class="pf-cols">
+        <div class="pf-main-col">
+          ${dd.statusTrack ? trackCard(dd.statusTrack, 'Профильный трек', 'fr-play-status', color) : ''}
+          ${now ? `<section class="card pf-now"><div class="eyebrow">${now.playing ? 'Сейчас слушает' : 'Слушал ' + ago(now.updatedAt)}</div>
+            <div class="fr-now big">${coverHtml(now.track)}<div class="meta"><div class="t">${esc(now.track.title)}</div><div class="s">${badge(now.track.source)}${esc(now.track.artist)}</div></div>
+              <button class="btn" data-action="fr-play-now">Включить себе</button></div>
+            ${d.relation === 'friends' ? `<div class="tg-reacts">${REACTIONS.map((e) => `<button data-action="fr-react" data-e="${e}" aria-label="Реакция ${e}">${e}</button>`).join('')}</div>` : ''}</section>` : ''}
+          ${st && st.topArtists && st.topArtists.length ? `<section class="pf-sec"><div class="fr-row-head"><h2>Чаще всего за месяц</h2><span class="muted">${st.minutes} мин · ${st.plays} прослуш.</span></div>
+            <div class="pf-artists">${st.topArtists.slice(0, 5).map((a, i) => `<div class="pf-artist"><span class="pf-artist-av" style="background:${ARTIST_TONES[i % ARTIST_TONES.length][0]};color:${ARTIST_TONES[i % ARTIST_TONES.length][1]}">${esc(String(a.name).trim().charAt(0).toUpperCase())}</span><b>${esc(a.name)}</b><span class="muted">${a.plays}</span></div>`).join('')}</div></section>` : ''}
+          ${st && st.topTracks && st.topTracks.length ? `<section class="pf-sec"><h2>Любимые треки</h2>
+            ${st.topTracks.map((t, i) => `<button class="fr-inbox" data-action="fr-top" data-i="${i}">${coverHtml(t, 'xs')}<div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div><span class="muted">${t.plays}×</span></button>`).join('')}</section>` : ''}
+        </div>
+        <aside class="pf-side">
+          ${d.relation === 'friends' && m ? `<section class="card pf-match"><div class="ring" style="--p:${m.percent};--fc:${color}"><b>${m.percent}%</b></div>
+            <div class="meta"><b>Совпадение вкусов</b><span class="hint">${!m.enough ? 'Пока мало прослушиваний — точнее будет через пару дней' : m.commonArtists.length ? 'Общие: ' + esc(m.commonArtists.slice(0, 5).join(', ')) : 'Общих исполнителей пока нет'}</span></div>
+            <button class="btn" data-action="fr-mix">Микс на двоих</button></section>` : ''}
+          ${d.relation === 'friends' && d.duo === false ? `<span class="hint">${esc(display(d))} не открывал совпадение вкусов и «Микс на двоих»</span>` : ''}
+          ${d.badges && d.badges.length ? `<section class="card"><div class="fr-row-head"><div class="eyebrow">Значки</div><span class="muted">${d.badges.length}</span></div>
+            <div class="pf-badges">${d.badges.map((b) => `<div class="pf-badge-item">${badgeSvg(b, 64, esc, color)}<span>${esc(b.title)}</span></div>`).join('')}</div></section>` : ''}
+        </aside>
+      </div>`}
     </div>`;
   }
 
-  // ---------- Мой профиль и приватность ----------
+  const ARTIST_TONES = [['#2A1408', '#FF8A3D'], ['#2A2208', '#FFD60A'], ['#2A0E0C', '#FF6A5C'], ['#141220', '#C6B8FF'], ['#0E1A16', '#7CE0C3']];
+
+  // ---------- Мой профиль: вид, ссылки, профильный трек и приватность ----------
   function renderProfile() {
     const view = ctx.view;
     const p = s.profile;
@@ -204,20 +271,47 @@ export function createFriends(ctx) {
       call('GET', '/profile').then((x) => { s.profile = x; renderProfile(); }).catch((e) => toast(e.message, true));
       return;
     }
+    const color = cleanColor(p.color);
     const chip = (id, label) => `<button class="chip ${p.visibility === id ? 'on' : ''}" data-action="fr-vis" data-v="${id}">${label}</button>`;
     const sw = (key, title, hint) => `<label class="fr-switch"><span><b>${title}</b><span class="hint">${hint}</span></span><input type="checkbox" data-action="fr-toggle" data-k="${key}" ${p[key] ? 'checked' : ''}></label>`;
-    view.innerHTML = `<div class="scroll friends">
-      <div class="fr-row-head"><button class="btn" data-action="back">← Назад</button></div>
+    const me = { ...myCard(), shape: p.avatarShape, color: p.color };
+    const links = s.linkDraft || (p.links || []).map((l) => l.url);
+    const cur = player.current;
+    view.innerHTML = `<div class="scroll friends pf pf-edit" style="--fc:${color}">
+      <div class="fr-row-head"><button class="btn" data-action="back">← Назад</button><button class="btn" data-action="fr-me">Как видят другие</button></div>
       <h1 class="page">Мой профиль</h1>
+      <section class="pf-preview">${bannerHtml(p, color)}<div class="pf-preview-row">${avatarSvg(me, 96, esc, { ring: 6 })}<div><b>${esc(display(me))}</b><span>@${esc(p.nick)}</span></div></div></section>
+
+      <section class="card"><div class="eyebrow">Баннер</div>
+        <span class="hint">Картинка 3:1 над профилем — обрежем по центру. Видна сразу, модераторы Nyao могут её снять.</span>
+        <div class="pf-row"><button class="btn primary" data-action="fr-banner-pick">${p.banner ? 'Заменить' : 'Загрузить'}</button>${p.banner ? '<button class="btn" data-action="fr-banner-remove">Убрать</button>' : ''}<input type="file" accept="image/png,image/jpeg,image/webp" hidden data-banner-file></div></section>
+
+      <section class="card"><div class="eyebrow">Цвет профиля</div>
+        <span class="hint">Красит шапку, аватар и кнопки у тех, кто открывает твой профиль.</span>
+        <div class="pf-swatches">${PROFILE_COLORS.map((c) => `<button class="pf-swatch ${c === color ? 'on' : ''}" style="background:${c}" data-action="fr-color" data-v="${c}" aria-label="Цвет ${c}"></button>`).join('')}
+          <label class="pf-swatch custom ${PROFILE_COLORS.includes(color) ? '' : 'on'}" title="Свой цвет"><input type="color" value="${color.toLowerCase()}" data-color-custom><span>+</span></label></div></section>
+
+      <section class="card"><div class="eyebrow">Форма аватара</div>
+        <div class="pf-shapes">${AVATAR_SHAPES.map(([id, label]) => `<button class="pf-shape ${(p.avatarShape || 'cookie') === id ? 'on' : ''}" data-action="fr-shape" data-v="${id}">${avatarSvg({ ...me, shape: id }, 72, esc)}<span>${label}</span></button>`).join('')}</div></section>
+
       <section class="card"><form data-form="fr-profile" class="fr-form">
         <label>Ник<div class="fr-nick"><span>@</span><input name="nick" value="${esc(p.nick)}" maxlength="24" autocomplete="off" spellcheck="false"></div><span class="hint">Латиница, цифры, точка и _ · по нему тебя найдут</span></label>
         <label>О себе<textarea name="bio" maxlength="160" rows="2">${esc(p.bio)}</textarea></label>
+        <div class="fr-form-links"><span class="lbl">Ссылки · до 6</span>
+          ${links.map((u, i) => `<div class="pf-linkrow"><input name="link" value="${esc(u)}" placeholder="t.me/ник, vk.com/…, soundcloud.com/…" autocomplete="off" spellcheck="false"><button type="button" class="btn" data-action="fr-link-del" data-i="${i}" aria-label="Убрать ссылку">✕</button></div>`).join('')}
+          ${links.length < 6 ? '<button type="button" class="btn" data-action="fr-link-add">+ Ссылка</button>' : ''}
+          <span class="hint">Telegram, ВК, YouTube, SoundCloud, Spotify, Instagram, TikTok, X, Twitch, GitHub, Discord или свой сайт.</span></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary">Сохранить</button>${p.nickSet ? '<button class="btn" type="button" data-action="fr-share-profile">Поделиться профилем</button>' : ''}</div></form></section>
+
+      <section class="card"><div class="eyebrow">Профильный трек</div>
+        ${p.statusTrack ? trackCard(p.statusTrack, 'Сейчас на профиле', 'fr-play-mystatus', color) : '<span class="hint">Трек, который видят на твоём профиле — как песня на странице.</span>'}
+        <div class="pf-row">${cur ? `<button class="btn primary" data-action="fr-status-set">Поставить «${esc(cur.title)}»</button>` : '<span class="hint">Включи трек — и его можно будет поставить сюда.</span>'}${p.statusTrack ? '<button class="btn" data-action="fr-status-clear">Убрать</button>' : ''}</div></section>
+
       <section class="card"><div class="eyebrow">Кто видит профиль</div>
         <div class="chips">${chip('all', 'Все')}${chip('friends', 'Друзья')}${chip('nobody', 'Никто')}</div>
         <span class="hint">${p.visibility === 'all' ? 'Профиль и статистику видят все, кто тебя найдёт. Что ты слушаешь сейчас — только друзья.' : p.visibility === 'nobody' ? 'Тебя находят только по точному нику, профиль закрыт даже для друзей.' : 'Профиль открыт только друзьям. Остальные видят ник и аватар.'}</span>
         ${sw('showNow', 'Показывать, что слушаю сейчас', 'Друзья видят трек в реальном времени')}
-        ${sw('showStats', 'Показывать статистику', 'Минуты, любимые исполнители и треки за месяц')}
+        ${sw('showStats', 'Показывать статистику и значки', 'Минуты, любимые исполнители и треки за месяц')}
         ${sw('allowDuo', 'Микс на двоих', 'Друзья видят совпадение вкусов и могут включить общий микс из твоей истории')}
         ${sw('invisible', 'Невидимка', 'Пока включено, никто не видит, что ты слушаешь')}
         ${sw('friendPopups', 'Окошки от друзей', 'Всплывают в углу экрана, когда Nyao свёрнут')}
@@ -227,7 +321,39 @@ export function createFriends(ctx) {
     // окошки — локальная настройка компьютера, не сервера
     const pop = view.querySelector('[data-k="friendPopups"]');
     if (pop) pop.checked = !state.settings || state.settings.friendPopups !== false;
+    const file = view.querySelector('[data-banner-file]');
+    if (file) file.onchange = () => file.files[0] && uploadBanner(file.files[0]);
+    const custom = view.querySelector('[data-color-custom]');
+    if (custom) custom.onchange = () => saveProfile({ color: custom.value.toUpperCase() });
     if (!s.blocked) call('GET', '/blocks').then((r) => { s.blocked = r.users || []; if (s.blocked.length && state.route === 'profile') renderProfile(); }).catch(() => {});
+  }
+
+  async function saveProfile(patch, msg) {
+    try {
+      s.profile = await call('PUT', '/profile', patch);
+      if (msg) toast(msg);
+    } catch (e) {
+      toast(e.message, true);
+    }
+    rerender();
+  }
+
+  async function uploadBanner(f) {
+    if (f.size > 20 * 1024 * 1024) return toast('Слишком большой файл — до 20 МБ', true);
+    toast('Загружаем баннер…');
+    try {
+      const image = await prepareBanner(f);
+      s.profile = await call('POST', '/profile/banner', { image });
+      toast('Баннер обновлён');
+    } catch (e) {
+      toast(e.message, true);
+    }
+    rerender();
+  }
+
+  /** Ссылки из формы — без пустых строк */
+  function formLinks(form) {
+    return [...form.querySelectorAll('input[name="link"]')].map((i) => i.value.trim()).filter(Boolean);
   }
 
   // ---------- Действия ----------
@@ -347,6 +473,83 @@ export function createFriends(ctx) {
         if (k === 'invisible' && el.checked) toast('Невидимка включена');
         return true;
       }
+      case 'fr-play-friend': {
+        const f = s.friends.find((x) => x.id === id);
+        if (f && f.now) player.playList([f.now.track], 0, `Как у @${f.nick}`);
+        return true;
+      }
+      case 'fr-play-status': {
+        const d = s.user && s.user.data;
+        const t = d && (d.relation === 'self' && s.profile ? s.profile.statusTrack : d.statusTrack);
+        if (t) player.playList([t], 0, `Профильный трек @${d.nick}`);
+        return true;
+      }
+      case 'fr-play-mystatus':
+        if (s.profile && s.profile.statusTrack) player.playList([s.profile.statusTrack], 0, 'Мой профильный трек');
+        return true;
+      case 'fr-link':
+        api.openExternal ? api.openExternal(el.dataset.url) : window.open(el.dataset.url, '_blank');
+        return true;
+      case 'fr-user-menu': {
+        const d = s.user && s.user.data;
+        if (!d) return true;
+        const items = [];
+        if (d.relation === 'friends') items.push(['Удалить из друзей', 'fr-remove']);
+        items.push(['Заблокировать', 'fr-block']);
+        const r = el.getBoundingClientRect();
+        const menu = document.getElementById('menu');
+        menu.innerHTML = items.map(([label, act]) => `<button data-act="${act}">${label}</button>`).join('');
+        menu.hidden = false;
+        menu.style.left = `${Math.max(8, r.right - 200)}px`;
+        menu.style.top = `${r.bottom + 6}px`;
+        menu.onclick = async (e) => {
+          const b = e.target.closest('[data-act]');
+          if (!b) return;
+          menu.hidden = true;
+          try {
+            await action({ dataset: { action: b.dataset.act, id: d.id } });
+          } catch (err) {
+            toast(err.message, true);
+          }
+        };
+        return true;
+      }
+      case 'fr-color':
+        await saveProfile({ color: el.dataset.v });
+        return true;
+      case 'fr-shape':
+        await saveProfile({ avatarShape: el.dataset.v });
+        return true;
+      case 'fr-banner-pick': {
+        const f = ctx.view.querySelector('[data-banner-file]');
+        if (f) f.click();
+        return true;
+      }
+      case 'fr-banner-remove':
+        await saveProfile({ banner: null }, 'Баннер убран');
+        return true;
+      case 'fr-link-add': {
+        const form = ctx.view.querySelector('[data-form="fr-profile"]');
+        s.linkDraft = [...(form ? formLinks(form) : (s.profile.links || []).map((l) => l.url)), ''].slice(0, 6);
+        renderProfile();
+        const inputs = ctx.view.querySelectorAll('input[name="link"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+        return true;
+      }
+      case 'fr-link-del': {
+        const form = ctx.view.querySelector('[data-form="fr-profile"]');
+        const all = form ? [...form.querySelectorAll('input[name="link"]')].map((i) => i.value) : [];
+        all.splice(Number(el.dataset.i), 1);
+        s.linkDraft = all;
+        renderProfile();
+        return true;
+      }
+      case 'fr-status-set':
+        if (player.current) await saveProfile({ statusTrack: player.current }, 'Профильный трек обновлён');
+        return true;
+      case 'fr-status-clear':
+        await saveProfile({ statusTrack: null });
+        return true;
       case 'fr-share-profile': {
         const nick = s.profile && s.profile.nick;
         if (!nick) return true;
@@ -385,7 +588,8 @@ export function createFriends(ctx) {
         const nick = String(f.get('nick') || '').trim().replace(/^@/, '');
         const bad = nick.toLowerCase() !== (s.profile.nick || '').toLowerCase() && nickHint(nick);
         if (bad) throw new Error(bad);
-        s.profile = await call('PUT', '/profile', { nick, bio: String(f.get('bio') || '') });
+        s.profile = await call('PUT', '/profile', { nick, bio: String(f.get('bio') || ''), links: formLinks(form) });
+        s.linkDraft = null;
         toast('Профиль сохранён');
         renderProfile();
         return true;
