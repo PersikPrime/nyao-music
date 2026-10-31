@@ -3,7 +3,16 @@ package org.nyao.music.data
 /** Мини-соцсеть Nyao: модели ответа сервера */
 
 /** Пользователь в списках: друзья, заявки, поиск */
-data class UserCard(val id: String, val nick: String, val name: String, val picture: String?) {
+data class UserCard(
+    val id: String,
+    val nick: String,
+    val name: String,
+    val picture: String?,
+    /** форма аватара: cookie | circle | squircle */
+    val shape: String? = null,
+    /** цвет профиля #RRGGBB */
+    val color: String? = null,
+) {
     val display: String get() = name.ifBlank { "@$nick" }
 }
 
@@ -27,7 +36,17 @@ data class MyProfile(
     val invisible: Boolean,
     /** Друзья могут смотреть совпадение вкусов и включать «Микс на двоих» */
     val allowDuo: Boolean = true,
+    val color: String? = null,
+    val avatarShape: String = "cookie",
+    /** адрес баннера (https) или null */
+    val banner: String? = null,
+    val links: List<ProfileLink> = emptyList(),
+    /** профильный трек */
+    val statusTrack: Track? = null,
 )
+
+/** Ссылка на соцсеть в профиле: kind — telegram, vk, youtube, soundcloud, … или site */
+data class ProfileLink(val kind: String, val url: String)
 
 data class TopArtist(val name: String, val plays: Int)
 
@@ -45,9 +64,13 @@ data class PublicProfile(
     val badges: List<Badge> = emptyList(),
     /** Он разрешил друзьям совпадение вкусов и «Микс на двоих» */
     val duo: Boolean = true,
+    val banner: String? = null,
+    val links: List<ProfileLink> = emptyList(),
+    val statusTrack: Track? = null,
 )
 
-data class Badge(val id: String, val emoji: String, val title: String)
+/** Значок: emoji — для старых версий, mark и tone — для значка-печеньки */
+data class Badge(val id: String, val emoji: String, val title: String, val mark: String = "", val tone: String = "")
 
 /** Совпадение вкусов с другом */
 data class TasteMatch(val percent: Int, val commonArtists: List<String>, val enough: Boolean)

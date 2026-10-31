@@ -33,6 +33,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -109,17 +116,16 @@ import org.nyao.music.ui.theme.NyaoColors
 
 private val REACTIONS = listOf("🔥", "❤️", "😂", "😮", "👏", "🎶")
 
-/** Аватар любого пользователя: фото из Telegram или первая буква на градиенте акцента */
+/** Аватар любого пользователя: в форме и цвете его профиля (см. ProfileParts.kt) */
 @Composable
-fun UserAvatar(user: UserCard?, size: Int, modifier: Modifier = Modifier) {
-    Box(
-        modifier.size(size.dp).clip(CircleShape).background(Brush.linearGradient(listOf(NyaoColors.Lavender, Color(0xFF7F6BFF)))),
-        contentAlignment = Alignment.Center,
-    ) {
-        val pic = user?.picture
-        if (pic != null) AsyncImage(model = pic, contentDescription = user?.display, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        else Text(((user?.name?.firstOrNull() ?: user?.nick?.firstOrNull()) ?: 'N').uppercase(), color = NyaoColors.OnLavender, fontWeight = FontWeight.Bold, fontSize = (size * 0.42f).sp)
-    }
+fun UserAvatar(user: UserCard?, size: Int, modifier: Modifier = Modifier) = ShapedAvatar(user, size, modifier = modifier)
+
+/** Моя карточка для своих аватаров: имя и фото из Telegram, форма и цвет — из профиля */
+@Composable
+fun myCard(): UserCard {
+    val u by Repo.cloud.user.collectAsState()
+    val p by Friends.profile.collectAsState()
+    return UserCard("me", p?.nick ?: "", u?.name ?: "", u?.picture, p?.avatarShape, p?.color)
 }
 
 private fun ago(at: Long): String {
@@ -220,9 +226,13 @@ fun FriendsHub(model: AppModel) {
     val inbox by Friends.inbox.collectAsState()
     var adding by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { runCatching { Friends.refresh() } }
+    val me = myCard()
+    val listening = friends.filter { it.now != null }
+    val sorted = friends.sortedWith(compareByDescending<Friend> { if (it.now?.playing == true) 2 else if (it.online) 1 else 0 }.thenBy { it.user.display.lowercase() })
     Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Друзья", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            Box(Modifier.bouncy().clip(CircleShape).clickable { model.go(Route.UserPage("")) }) { ShapedAvatar(me, 40) }
             FilledTonalButton(onClick = { adding = true }, modifier = Modifier.bouncy()) {
                 Icon(NyaoIcons.PersonAdd, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
@@ -246,7 +256,13 @@ fun FriendsHub(model: AppModel) {
                 Button(onClick = { model.launch { runCatching { Repo.cloud.acceptFriend(u.id) }.onFailure { model.message(it.message ?: "Не получилось") }; Friends.refresh() } }) { Text("Принять") }
             }
         }
-        // друзья: кто что слушает
+        // сейчас слушают: обложка крупно
+        if (listening.isNotEmpty()) {
+            Text("Сейчас слушают", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 20.dp, top = 4.dp))
+            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(listening, key = { it.user.id }) { f -> LiveTile(model, f) }
+            }
+        }
         if (friends.isEmpty()) {
             Column(
                 Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(NyaoColors.S2).padding(20.dp),
@@ -256,51 +272,77 @@ fun FriendsHub(model: AppModel) {
                 Text("Добавь друзей по нику, QR-коду или приложи телефоны — увидишь, что они слушают, и сможешь звать их в комнату.", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
             }
         } else {
-            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(friends, key = { it.user.id }) { f -> FriendTile(model, f) }
-            }
+            Text("Все друзья · ${friends.size}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 20.dp, top = 4.dp))
+            Column(Modifier.padding(horizontal = 8.dp)) { sorted.forEach { f -> FriendRow(model, f) } }
         }
-        // входящие: треки, приглашения, реакции
+        // входящие: треки, приглашения, реакции (одинаковые реакции подряд — одной строкой)
         if (inbox.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Входящие", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 if (inbox.any { !it.read }) TextButton(onClick = { Friends.markInboxRead() }) { Text("Прочитано") }
             }
-            inbox.take(6).forEach { item -> InboxRow(model, item) }
+            groupInbox(inbox).take(6).forEach { (item, n) -> InboxRow(model, item, n) }
         }
     }
     if (adding) AddFriendSheet(model) { adding = false }
 }
 
 @Composable
-private fun FriendTile(model: AppModel, f: Friend) {
-    val now = f.now
-    Column(
-        Modifier.width(150.dp).bouncy().clip(RoundedCornerShape(26.dp)).background(NyaoColors.S2).clickable { model.go(Route.UserPage(f.user.id)) }.padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+private fun LiveTile(model: AppModel, f: Friend) {
+    val now = f.now ?: return
+    val accent = profileColor(f.user.color)
+    Row(
+        Modifier.width(280.dp).bouncy().clip(RoundedCornerShape(26.dp)).background(profileTint(accent))
+            .border(1.dp, accent.copy(alpha = 0.3f), RoundedCornerShape(26.dp)).clickable { model.go(Route.UserPage(f.user.id)) }.padding(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box {
-            UserAvatar(f.user, 48)
-            if (now?.playing == true) Box(Modifier.align(Alignment.BottomEnd).size(14.dp).clip(CircleShape).background(NyaoColors.S2).padding(2.dp).clip(CircleShape).background(Color(0xFF4ADE80)))
-        }
-        Text(f.user.display, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (now != null) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Cover(now.track.cover, Modifier.size(28.dp), RoundedCornerShape(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(now.track.title, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(now.track.artist, style = MaterialTheme.typography.labelSmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+        Cover(now.track.cover, Modifier.size(76.dp), RoundedCornerShape(16.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                UserAvatar(f.user, 22)
+                Text(f.user.display, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-        } else {
-            Text("@${f.user.nick}", style = MaterialTheme.typography.labelSmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(if (f.online) "в сети" else "не слушает", style = MaterialTheme.typography.labelSmall, color = NyaoColors.Muted)
+            Text(now.track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(now.track.artist, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                if (now.playing) "▶ Включить себе" else "слушал ${ago(now.updatedAt)}",
+                style = MaterialTheme.typography.labelMedium, color = accent,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = now.playing) { PlayerConnection.playList(listOf(now.track), 0, "Как у @${f.user.nick}") }.padding(vertical = 2.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun InboxRow(model: AppModel, item: InboxItem) {
+private fun FriendRow(model: AppModel, f: Friend) {
+    val now = f.now
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).clickable { model.go(Route.UserPage(f.user.id)) }.padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box {
+            UserAvatar(f.user, 44)
+            if (f.online || now?.playing == true) Box(Modifier.align(Alignment.BottomEnd).size(13.dp).clip(CircleShape).background(MaterialTheme.colorScheme.background).padding(2.dp).clip(CircleShape).background(Color(0xFF4ADE80)))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(f.user.display, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                when {
+                    now != null -> (if (now.playing) "▶ " else "") + "${now.track.artist} — ${now.track.title}"
+                    f.online -> "в сети"
+                    else -> "@${f.user.nick}"
+                },
+                style = MaterialTheme.typography.bodySmall, color = if (now != null) NyaoColors.Lavender else NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(NyaoIcons.ChevronRight, null, tint = NyaoColors.Muted, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+private fun InboxRow(model: AppModel, item: InboxItem, count: Int = 1) {
     val t = item.track
     Row(
         Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(if (item.read) NyaoColors.S2 else NyaoColors.Tonal)
@@ -323,7 +365,7 @@ private fun InboxRow(model: AppModel, item: InboxItem) {
                 when (item.kind) {
                     "track" -> "${item.from.display} прислал трек ${item.emoji ?: ""}"
                     "room" -> "${item.from.display} зовёт слушать вместе"
-                    else -> "${item.from.display}: ${item.emoji ?: ""}"
+                    else -> "${item.from.display}: ${item.emoji ?: ""}" + if (count > 1) " ×$count" else ""
                 },
                 style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
@@ -574,14 +616,28 @@ fun UserScreen(model: AppModel, key: String) {
     val friends by Friends.friends.collectAsState()
     val live = p?.let { pp -> friends.firstOrNull { it.user.id == pp.user.id }?.now } ?: p?.now
 
+    val pp0 = p
+    val accent = profileColor(pp0?.user?.color)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
         item {
-            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { model.back() }) { Icon(NyaoIcons.ArrowBack, "Назад") }
-                Spacer(Modifier.weight(1f))
-                val pp = p
-                if (pp != null && pp.relation == "self") IconButton(onClick = { model.go(Route.SettingsPage("profile")) }) { Icon(NyaoIcons.Edit, "Изменить профиль") }
-                if (pp != null && pp.relation != "self") UserMenu(model, pp) { tick++ }
+            Box(Modifier.fillMaxWidth()) {
+                ProfileBanner(pp0?.banner, accent, 200)
+                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { model.back() }, modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.35f))) { Icon(NyaoIcons.ArrowBack, "Назад", tint = Color.White) }
+                    Spacer(Modifier.weight(1f))
+                    if (pp0 != null && pp0.relation == "self") IconButton(onClick = { model.go(Route.SettingsPage("profile")) }, modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.35f))) { Icon(NyaoIcons.Edit, "Изменить профиль", tint = Color.White) }
+                    if (pp0 != null && pp0.relation != "self") Box(Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.35f))) { UserMenu(model, pp0) { tick++ } }
+                }
+                if (pp0 != null && !pp0.private && live?.playing == true) {
+                    Row(
+                        Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 14.dp).widthIn(max = 230.dp).clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(NyaoIcons.Equalizer, null, tint = accent, modifier = Modifier.size(14.dp))
+                        Text("${live.track.title} — ${live.track.artist}", style = MaterialTheme.typography.labelMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
             }
         }
         val pp = p
@@ -590,18 +646,23 @@ fun UserScreen(model: AppModel, key: String) {
             pp == null -> item { Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = NyaoColors.Lavender) } }
             else -> {
                 item {
-                    Column(Modifier.fillMaxWidth().appear(0).padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        UserAvatar(pp.user, 112)
-                        Spacer(Modifier.height(6.dp))
-                        Text(pp.user.display, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
-                        Text("@${pp.user.nick}", style = MaterialTheme.typography.bodyLarge, color = NyaoColors.Lavender)
-                        if (!pp.private && pp.bio.isNotBlank()) Text(pp.bio, style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted, textAlign = TextAlign.Center)
-                        if (!pp.private) Text("${pp.friends} ${org.nyao.music.playback.plural(pp.friends, "друг", "друга", "друзей")}", style = MaterialTheme.typography.labelLarge, color = NyaoColors.Muted)
+                    Column(Modifier.fillMaxWidth().appear(0).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(Modifier.offset(y = (-56).dp).height(64.dp)) {
+                            ShapedAvatar(pp.user, 120, ring = 5)
+                        }
+                        Text(pp.user.display, style = MaterialTheme.typography.headlineMedium)
+                        val online = friends.firstOrNull { it.user.id == pp.user.id }?.let { it.online || it.now?.playing == true } == true
+                        Text(
+                            "@${pp.user.nick}" + (if (!pp.private) " · ${pp.friends} ${org.nyao.music.playback.plural(pp.friends, "друг", "друга", "друзей")}" else "") + if (online) " · в сети" else "",
+                            style = MaterialTheme.typography.bodyMedium, color = NyaoColors.Muted,
+                        )
+                        if (!pp.private && pp.bio.isNotBlank()) Text(pp.bio, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+                        if (!pp.private) LinkChips(pp.links, accent, Modifier.padding(top = 6.dp))
                         Spacer(Modifier.height(6.dp))
                         when (pp.relation) {
                             "self" -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 FilledTonalButton(onClick = { model.go(Route.SettingsPage("profile")) }) { Text("Изменить") }
-                                Button(onClick = { share = true }) {
+                                Button(onClick = { share = true }, colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = inkOn(accent))) {
                                     Icon(NyaoIcons.QrCode, null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text("Поделиться")
@@ -609,6 +670,26 @@ fun UserScreen(model: AppModel, key: String) {
                             }
                             else -> RelationButton(model, pp.user, pp.relation) { p = pp.copy(relation = it); tick++ }
                         }
+                    }
+                }
+                val st0 = pp.statusTrack
+                if (!pp.private && st0 != null) item {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(profileTint(accent, 0.1f))
+                            .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(24.dp)).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Cover(st0.cover, Modifier.size(60.dp), RoundedCornerShape(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            ProfileEyebrow("Профильный трек", accent)
+                            Text(st0.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(st0.artist, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(
+                            onClick = { PlayerConnection.playList(listOf(st0), 0, "Профильный трек @${pp.user.nick}") },
+                            modifier = Modifier.clip(CircleShape).background(Color.White),
+                        ) { Icon(NyaoIcons.PlayArrow, "Слушать", tint = Color.Black) }
                     }
                 }
                 if (pp.private) item {
@@ -634,14 +715,10 @@ fun UserScreen(model: AppModel, key: String) {
                 if (!pp.private && pp.badges.isNotEmpty()) item {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Значки", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             items(pp.badges, key = { it.id }) { b ->
-                                Column(
-                                    Modifier.width(108.dp).clip(RoundedCornerShape(22.dp)).background(NyaoColors.S2).padding(12.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                                ) {
-                                    Text(b.emoji, fontSize = 30.sp)
+                                Column(Modifier.width(88.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    BadgeCookie(b, 64, accent)
                                     Text(b.title, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 3, color = NyaoColors.Muted)
                                 }
                             }
@@ -657,14 +734,10 @@ fun UserScreen(model: AppModel, key: String) {
                         }
                     }
                     if (st.topArtists.isNotEmpty()) item {
-                        Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(NyaoColors.S2).padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Любимые исполнители", style = MaterialTheme.typography.titleSmall)
-                            st.topArtists.forEachIndexed { i, a ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("${i + 1}", style = MaterialTheme.typography.titleMedium, color = NyaoColors.Lavender, modifier = Modifier.width(28.dp))
-                                    Text(a.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text("${a.plays}", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
-                                }
+                        Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Чаще всего за месяц", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 20.dp))
+                            LazyRow(contentPadding = PaddingValues(horizontal = 12.dp)) {
+                                itemsIndexed(st.topArtists.take(8)) { i, a -> ArtistCircle(a.name, a.plays, i) }
                             }
                         }
                     }
@@ -895,6 +968,7 @@ fun EditProfileCard(model: AppModel) {
             }
         }
     }
+    ProfileLookCards(model, p) { changes, ok -> save(changes, ok) }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1118,6 +1192,132 @@ fun SocialBannerHost(model: AppModel, modifier: Modifier = Modifier) {
                 },
                 style = MaterialTheme.typography.labelLarge, color = NyaoColors.Lavender, modifier = Modifier.padding(end = 6.dp),
             )
+        }
+    }
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Вид профиля: баннер, цвет, форма аватара, ссылки и профильный трек
+// ---------------------------------------------------------------------------------------------
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProfileLookCards(model: AppModel, p: org.nyao.music.data.MyProfile, save: (JSONObject, String?) -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val accent = profileColor(p.color)
+    val me = myCard()
+    var uploading by remember { mutableStateOf(false) }
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        uploading = true
+        model.launch {
+            runCatching {
+                val b64 = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { prepareBanner(ctx, uri) }
+                Repo.cloud.uploadBanner(b64)
+            }.onSuccess { Friends.setProfile(it); model.message("Баннер обновлён") }
+                .onFailure { model.message(it.message ?: "Не получилось загрузить") }
+            uploading = false
+        }
+    }
+    val card = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
+    // превью + баннер
+    Column(card, verticalArrangement = Arrangement.spacedBy(0.dp)) {
+        Box(Modifier.fillMaxWidth().height(170.dp)) {
+            ProfileBanner(p.banner, accent, 130, Modifier.clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)))
+            Row(Modifier.align(Alignment.BottomStart).padding(start = 18.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ShapedAvatar(me, 84, ring = 4)
+                Column(Modifier.padding(bottom = 6.dp)) {
+                    Text(me.display, style = MaterialTheme.typography.titleMedium)
+                    Text("@${p.nick}", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+                }
+            }
+        }
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Баннер", style = MaterialTheme.typography.titleSmall)
+            Text("Картинка 3:1 над профилем — обрежем по центру. Видна сразу, модераторы Nyao могут её снять.", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = !uploading) {
+                    Text(if (uploading) "Загружаем…" else if (p.banner != null) "Заменить" else "Загрузить")
+                }
+                if (p.banner != null) androidx.compose.material3.OutlinedButton(onClick = { save(JSONObject().put("banner", JSONObject.NULL), "Баннер убран") }) { Text("Убрать") }
+            }
+        }
+    }
+    // цвет и форма
+    Column(card.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Цвет профиля", style = MaterialTheme.typography.titleSmall)
+        Text("Красит шапку, аватар и кнопки у тех, кто открывает твой профиль.", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PROFILE_COLORS.forEach { hex ->
+                val on = hex.equals(p.color ?: DEFAULT_PROFILE_COLOR, ignoreCase = true)
+                Box(
+                    Modifier.size(42.dp).bouncy().clip(CircleShape).background(profileColor(hex))
+                        .then(if (on) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
+                        .clickable { save(JSONObject().put("color", hex), null) }
+                        .semantics { contentDescription = "Цвет $hex" },
+                )
+            }
+        }
+        Text("Форма аватара", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            AVATAR_SHAPES.forEach { (id, label) ->
+                val on = (p.avatarShape) == id
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(20.dp)).background(if (on) profileTint(accent, 0.2f) else NyaoColors.S2)
+                        .then(if (on) Modifier.border(1.5.dp, accent, RoundedCornerShape(20.dp)) else Modifier)
+                        .clickable { save(JSONObject().put("avatarShape", id), null) }.padding(vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ShapedAvatar(me, 56, shape = id)
+                    Text(label, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center, maxLines = 2)
+                }
+            }
+        }
+    }
+    // ссылки
+    var links by remember(p.links) { mutableStateOf(p.links.map { it.url }) }
+    Column(card.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Ссылки · до 6", style = MaterialTheme.typography.titleSmall)
+        links.forEachIndexed { i, url ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    value = url, onValueChange = { v -> links = links.toMutableList().also { it[i] = v.take(200) } },
+                    placeholder = { Text("t.me/ник, vk.com/…, soundcloud.com/…") }, singleLine = true, modifier = Modifier.weight(1f),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri),
+                    shape = RoundedCornerShape(18.dp),
+                )
+                IconButton(onClick = { links = links.toMutableList().also { it.removeAt(i) } }) { Icon(NyaoIcons.Close, "Убрать ссылку") }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (links.size < 6) androidx.compose.material3.OutlinedButton(onClick = { links = links + "" }) { Text("+ Ссылка") }
+            Button(
+                onClick = { save(JSONObject().put("links", org.json.JSONArray(links.map { it.trim() }.filter { it.isNotEmpty() })), "Ссылки сохранены") },
+                enabled = links.map { it.trim() }.filter { it.isNotEmpty() } != p.links.map { it.url },
+            ) { Text("Сохранить") }
+        }
+        Text("Telegram, ВК, YouTube, SoundCloud, Spotify, Instagram, TikTok, X, Twitch, GitHub, Discord или свой сайт.", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+    }
+    // профильный трек
+    val cur by PlayerConnection.current.collectAsState()
+    Column(card.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Профильный трек", style = MaterialTheme.typography.titleSmall)
+        val st = p.statusTrack
+        if (st != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Cover(st.cover, Modifier.size(48.dp), RoundedCornerShape(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(st.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(st.artist, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        } else Text("Трек, который видят на твоём профиле — как песня на странице.", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val c = cur
+            if (c != null) Button(onClick = { save(JSONObject().put("statusTrack", Repo.cloud.trackJson(c)), "Профильный трек обновлён") }) {
+                Text("Поставить «${c.title}»", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (st != null) androidx.compose.material3.OutlinedButton(onClick = { save(JSONObject().put("statusTrack", JSONObject.NULL), null) }) { Text("Убрать") }
         }
     }
 }

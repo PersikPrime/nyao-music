@@ -459,7 +459,7 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         o ?: return null
         val id = o.optString("id")
         if (id.isEmpty()) return null
-        return UserCard(id, o.optString("nick"), o.optString("name"), o.str("picture"))
+        return UserCard(id, o.optString("nick"), o.optString("name"), o.str("picture"), o.str("shape") ?: o.str("avatarShape"), o.str("color"))
     }
 
     private fun parseNow(o: JSONObject?): FriendNow? {
@@ -475,7 +475,15 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         visibility = o.optString("visibility", "friends"), showNow = o.optBoolean("showNow", true),
         showStats = o.optBoolean("showStats", true), showLikes = o.optBoolean("showLikes"), invisible = o.optBoolean("invisible"),
         allowDuo = o.optBoolean("allowDuo", true),
+        color = o.str("color"), avatarShape = o.optString("avatarShape", "cookie"), banner = o.str("banner"),
+        links = parseLinks(o), statusTrack = o.obj("statusTrack")?.let { parseTrack(it) },
     )
+
+    private fun parseLinks(o: JSONObject): List<ProfileLink> =
+        o.arr("links").objects().mapNotNull { l -> l.str("url")?.let { ProfileLink(l.optString("kind", "site"), it) } }
+
+    /** Баннер профиля: JPEG в base64 (уже обрезан до 3:1 и сжат) */
+    suspend fun uploadBanner(base64: String): MyProfile = parseProfile(request("POST", "/profile/banner", JSONObject().put("image", base64)))
 
     suspend fun profile(): MyProfile = parseProfile(request("GET", "/profile"))
 
@@ -502,7 +510,10 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
             bio = o.optString("bio"),
             friends = o.optInt("friends"),
             now = parseNow(o.obj("now")),
-            badges = o.arr("badges").objects().map { Badge(it.optString("id"), it.optString("emoji"), it.optString("title")) },
+            badges = o.arr("badges").objects().map { Badge(it.optString("id"), it.optString("emoji"), it.optString("title"), it.optString("mark"), it.optString("tone")) },
+            banner = o.str("banner"),
+            links = parseLinks(o),
+            statusTrack = o.obj("statusTrack")?.let { parseTrack(it) },
             duo = o.optBoolean("duo", true),
             stats = st?.let { s ->
                 UserStats(
