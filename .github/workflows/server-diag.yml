@@ -1,0 +1,50 @@
+# Диагностика сервера: достаёт ли он до Telegram и до ретранслятора. Только чтение, ничего не меняет.
+name: Server diag
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      REMOTE_DIR: /opt/nyao/server
+    steps:
+      - name: SSH
+        env:
+          KEY: ${{ secrets.NYAO_SSH_KEY }}
+          HOST: ${{ secrets.NYAO_SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" | tr -d '\r' > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -T 15 -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+      - name: Проверка из контейнера
+        env:
+          HOST: ${{ secrets.NYAO_SSH_HOST }}
+          USER_: ${{ secrets.NYAO_SSH_USER }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
+          cat > probe.mjs <<'JS'
+          const relay = (process.env.TG_RELAY || '').replace(/\/$/, '');
+          const host = (u) => { try { return new URL(u).host.replace(/^[^.]+/, (s) => s.slice(0, 3) + '…'); } catch { return '?'; } };
+          const targets = [
+            ['relay jwks', relay ? relay + '/.well-known/jwks.json' : ''],
+            ['oauth.telegram.org jwks', 'https://oauth.telegram.org/.well-known/jwks.json'],
+            ['api.telegram.org', 'https://api.telegram.org/'],
+            ['cloudflare.com', 'https://www.cloudflare.com/cdn-cgi/trace'],
+            ['github.com', 'https://github.com/'],
+          ];
+          for (const [name, url] of targets) {
+            if (!url) { console.log(`::warning::${name}: TG_RELAY не задан`); continue; }
+            const t = Date.now();
+            try {
+              const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
+              console.log(`::notice::${name} (${host(url)}): HTTP ${r.status} за ${Date.now() - t} мс`);
+            } catch (e) {
+              console.log(`::error::${name} (${host(url)}): ${e.name} ${e.cause?.code || e.message} за ${Date.now() - t} мс`);
+            }
+          }
+          JS
+          $SSH "cd $REMOTE_DIR && docker compose exec -T api node --input-type=module -" < probe.mjs
+          $SSH "cd $REMOTE_DIR && docker compose logs --since 3h api 2>&1 | grep -iE 'auth|telegram' | tail -15" | sed 's/^/::warning::log /' || true
