@@ -36,6 +36,7 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             MARKETING_VERSION="$N.$B" CURRENT_PROJECT_VERSION="$B" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tee xcodebuild.log | grep -E "error:|warning: unre|BUILD" || true
+          grep -E "error:" xcodebuild.log | sort -u | head -40 | while read -r l; do echo "::error::$l"; done
           test -d "build/Build/Products/Release-iphoneos/Nyao Music.app"
       - name: IPA
         run: |
@@ -44,6 +45,8 @@ jobs:
           cp -R "ios/build/Build/Products/Release-iphoneos/Nyao Music.app" dist/Payload/
           (cd dist && zip -qry "NyaoMusic-$N-$B.ipa" Payload)
           ls -la dist
+          echo "::notice::IPA $(stat -f%z dist/NyaoMusic-$N-$B.ipa) байт; в .app: $(ls "dist/Payload/Nyao Music.app" | tr '\n' ' ')"
+          echo "::notice::Xcode $(xcodebuild -version | head -1); бинарник $(stat -f%z "dist/Payload/Nyao Music.app/Nyao Music" 2>/dev/null || echo нет)"
       - name: Источник для SideStore
         run: |
           N=$(jq -r '.name' version.json); B=$(jq -r '.build' version.json); CH=$(jq -r '.channel // empty' version.json)
