@@ -128,6 +128,20 @@ test('ретранслятор: /token и ключи идут через Cloudfl
   assert.match(tg.authUrl({ state: 's', challenge: 'c' }), /^https:\/\/oauth\.telegram\.org\/auth\?/, 'браузер идёт к Telegram напрямую');
 });
 
+test('ретранслятор: если его IP режут — запасные адреса Cloudflare, потом запоминаем рабочий', async () => {
+  const tried = [];
+  const tg = new TelegramOIDC({
+    clientId: '1', clientSecret: 's', redirectUri: 'https://x/cb', relay: 'https://tg.example.com', relayIps: ['1.1.1.1', '2.2.2.2'],
+    fetch: async () => { throw new TypeError('fetch failed'); },
+    pinned: async (url, { ip }) => { tried.push(ip); if (ip === '1.1.1.1') throw new Error('timeout'); return new Response('{"error":"x"}', { status: 400 }); },
+    keys: () => {}
+  });
+  await assert.rejects(tg.exchange('c', 'v'), /400/);
+  assert.deepEqual(tried, ['1.1.1.1', '2.2.2.2']);
+  await assert.rejects(tg.exchange('c', 'v'), /400/);
+  assert.deepEqual(tried.slice(2), ['2.2.2.2'], 'второй раз сразу рабочий IP');
+});
+
 test('minBuild: старые сборки просят обновиться', async () => {
   const { newDb } = await import('pg-mem');
   const { Pool } = newDb().adapters.createPg();

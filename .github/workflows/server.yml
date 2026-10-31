@@ -90,6 +90,8 @@ jobs:
             echo "TG_CLIENT_SECRET=$(q "$TG_SECRET")"
             echo "POSTGRES_PASSWORD=$(q "$DB_PASSWORD")"
             echo "TG_RELAY=$(q "$TG_RELAY")"
+            # запасные IP Cloudflare для ретранслятора, если провайдер режет его адреса (Variables → NYAO_TG_RELAY_IPS)
+            echo "TG_RELAY_IPS=${{ vars.NYAO_TG_RELAY_IPS }}"
             # ключ Firebase многострочный — кладём одной строкой base64
             echo "FCM_SERVICE_ACCOUNT=$(printf '%s' "$FCM" | base64 -w0)"
             # минимальная сборка: Settings → Secrets and variables → Actions → Variables → NYAO_MIN_BUILD
