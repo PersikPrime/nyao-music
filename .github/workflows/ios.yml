@@ -1,0 +1,80 @@
+# iOS / iPadOS: неподписанный IPA для установки через SideStore (без App Store).
+# Подписывает уже SideStore на устройстве — своим Apple ID пользователя, раз в 7 дней.
+name: iOS IPA
+
+on:
+  push:
+    branches: ['**']
+    paths: ['ios/**', 'version.json', '.github/workflows/ios.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Свежий Xcode
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          [ -z "$X" ] && X=$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)
+          echo "Xcode: $X"
+          sudo xcode-select -s "$X"
+          xcodebuild -version
+      - name: Проект
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+      - name: Сборка
+        run: |
+          N=$(jq -r '.name' version.json); B=$(jq -r '.build' version.json)
+          cd ios
+          set -o pipefail
+          xcodebuild -project NyaoMusic.xcodeproj -scheme NyaoMusic -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            MARKETING_VERSION="$N.$B" CURRENT_PROJECT_VERSION="$B" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tee xcodebuild.log | grep -E "error:|warning: unre|BUILD" || true
+          test -d "build/Build/Products/Release-iphoneos/Nyao Music.app"
+      - name: IPA
+        run: |
+          N=$(jq -r '.name' version.json); B=$(jq -r '.build' version.json)
+          mkdir -p dist/Payload
+          cp -R "ios/build/Build/Products/Release-iphoneos/Nyao Music.app" dist/Payload/
+          (cd dist && zip -qry "NyaoMusic-$N-$B.ipa" Payload)
+          ls -la dist
+      - name: Источник для SideStore
+        run: |
+          N=$(jq -r '.name' version.json); B=$(jq -r '.build' version.json); CH=$(jq -r '.channel // empty' version.json)
+          TAG="v$N.$B${CH:+-$CH}"
+          SIZE=$(stat -f%z "dist/NyaoMusic-$N-$B.ipa")
+          jq -n --arg v "$N.$B" --arg b "$B" --arg tag "$TAG" --arg size "$SIZE" --arg date "$(date -u +%Y-%m-%d)" \
+            --arg url "https://github.com/${{ github.repository }}/releases/download/$TAG/NyaoMusic-$N-$B.ipa" '{
+            name: "Nyao Music", identifier: "app.withnyao.source", subtitle: "Яндекс, VK и SoundCloud в одном плеере",
+            iconURL: "https://raw.githubusercontent.com/${{ github.repository }}/main/build/icon.png",
+            website: "https://music.withnyao.app", tintColor: "#C6B8FF",
+            apps: [{ name: "Nyao Music", bundleIdentifier: "app.withnyao.music", developerName: "Nyao",
+              subtitle: "Один плеер для Яндекса, VK и SoundCloud",
+              localizedDescription: "Неофициальный клиент: Моя волна из нескольких сервисов, тексты песен, друзья и «сейчас играет».",
+              iconURL: "https://raw.githubusercontent.com/${{ github.repository }}/main/build/icon.png", tintColor: "#C6B8FF",
+              category: "entertainment",
+              versions: [{ version: $v, buildVersion: $b, date: $date, downloadURL: $url, size: ($size|tonumber), minOSVersion: "17.0" }],
+              appPermissions: { entitlements: [], privacy: {} } }],
+            news: [] }' > dist/sidestore.json
+          cat dist/sidestore.json
+      - name: Артефакт
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: |
+            dist/*.ipa
+            dist/sidestore.json
+            ios/xcodebuild.log
+          if-no-files-found: warn
+      - name: Релиз
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/release-upload.sh dist/*.ipa dist/sidestore.json
