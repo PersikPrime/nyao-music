@@ -26,25 +26,22 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
           cat > probe.mjs <<'JS'
+          import dns from 'node:dns/promises';
+          import tls from 'node:tls';
           const relay = (process.env.TG_RELAY || '').replace(/\/$/, '');
-          const host = (u) => { try { return new URL(u).host.replace(/^[^.]+/, (s) => s.slice(0, 3) + '…'); } catch { return '?'; } };
-          const targets = [
-            ['relay jwks', relay ? relay + '/.well-known/jwks.json' : ''],
-            ['oauth.telegram.org jwks', 'https://oauth.telegram.org/.well-known/jwks.json'],
-            ['api.telegram.org', 'https://api.telegram.org/'],
-            ['cloudflare.com', 'https://www.cloudflare.com/cdn-cgi/trace'],
-            ['github.com', 'https://github.com/'],
-          ];
-          for (const [name, url] of targets) {
-            if (!url) { console.log(`::warning::${name}: TG_RELAY не задан`); continue; }
+          const rh = relay ? new URL(relay).host : '';
+          const short = (h) => h.replace(/^[^.]+/, (s) => s.slice(0, 3) + '…');
+          const v4 = await dns.resolve4(rh).catch((e) => { console.log(`::error::DNS ${short(rh)}: ${e.code}`); return []; });
+          const v6 = await dns.resolve6(rh).catch(() => []);
+          console.log(`::notice::DNS ${short(rh)}: ${v4.join(', ')} | v6 ${v6.length}`);
+          const tryTls = (ip, sni) => new Promise((res) => {
             const t = Date.now();
-            try {
-              const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
-              console.log(`::notice::${name} (${host(url)}): HTTP ${r.status} за ${Date.now() - t} мс`);
-            } catch (e) {
-              console.log(`::error::${name} (${host(url)}): ${e.name} ${e.cause?.code || e.message} за ${Date.now() - t} мс`);
-            }
-          }
+            const s = tls.connect({ host: ip, port: 443, servername: sni, timeout: 8000 }, () => { res(`ok ${Date.now() - t} мс`); s.destroy(); });
+            s.on('timeout', () => { res('timeout'); s.destroy(); });
+            s.on('error', (e) => res(e.code || e.message));
+          });
+          const cands = [...v4, '104.16.132.229', '104.16.123.96', '172.66.0.227', '162.159.140.229', '104.18.32.47', '188.114.96.3', '188.114.97.3'];
+          for (const ip of cands) console.log(`::notice::TLS ${ip} sni=${short(rh)}: ${await tryTls(ip, rh)}`);
           JS
           $SSH "cd $REMOTE_DIR && docker compose exec -T api node --input-type=module -" < probe.mjs
           $SSH "cd $REMOTE_DIR && docker compose logs --since 3h api 2>&1 | grep -iE 'auth|telegram' | tail -15" | sed 's/^/::warning::log /' || true
