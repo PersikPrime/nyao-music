@@ -155,29 +155,41 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
   }
 
   /** Значки: считаются на лету из истории, ничего лишнего не храним */
+  // значки профиля: emoji — для старых версий приложения, mark и tone — для новых значков-печенек
   async function badgesOf(uid, rows) {
     const out = [];
+    const b = (id, emoji, title, mark, tone) => out.push({ id, emoji, title, mark, tone });
+    // «До сотни» — всем, кто пришёл до 0.100 (дату релиза ставят в app_settings: badge100Before; пока не задана — всем)
+    try {
+      const [u, cut] = await Promise.all([
+        q('SELECT created_at FROM users WHERE id = $1', [uid]),
+        q("SELECT value FROM app_settings WHERE key = 'badge100Before'").catch(() => ({ rows: [] }))
+      ]);
+      const raw = cut.rows.length ? cut.rows[0].value : null;
+      const before = raw ? new Date(typeof raw === 'string' ? raw.replace(/^"|"$/g, '') : raw).getTime() : NaN;
+      if (u.rows.length && (!Number.isFinite(before) || new Date(u.rows[0].created_at).getTime() < before)) b('v100', '💯', 'До сотни — с Nyao до версии 0.100', '100', 'accent');
+    } catch {}
     const hours = rows.reduce((s, r) => s + (Number(r.listened) || 0), 0) / 3600;
-    if (hours >= 100) out.push({ id: 'h100', emoji: '🎧', title: '100 часов музыки' });
-    else if (hours >= 10) out.push({ id: 'h10', emoji: '🎵', title: '10 часов музыки' });
+    if (hours >= 100) b('h100', '🎧', '100 часов музыки', '100ч', 'yellow');
+    else if (hours >= 10) b('h10', '🎵', '10 часов музыки', '10ч', 'yellow');
     const night = rows.filter((r) => {
       const h = new Date(r.played_at).getUTCHours();
       return h >= 20 || h < 2; // примерно 00:00–05:00 по Москве/Баку — без точного пояса
     }).length;
-    if (night >= 50) out.push({ id: 'night', emoji: '🌙', title: 'Ночной слушатель' });
+    if (night >= 50) b('night', '🌙', 'Ночной слушатель', '☾', 'blue');
     const artists = new Set(rows.map((r) => mainArtist(r.artist)).filter(Boolean));
-    if (artists.size >= 100) out.push({ id: 'explorer', emoji: '🧭', title: 'Исследователь — 100+ исполнителей' });
+    if (artists.size >= 100) b('explorer', '🧭', 'Исследователь — 100+ исполнителей', '100+', 'mint');
     const days = new Set(rows.map((r) => new Date(r.played_at).toISOString().slice(0, 10)));
     let streak = 0;
     for (let d = new Date(); ; d = new Date(d.getTime() - 86_400_000)) {
       if (!days.has(d.toISOString().slice(0, 10))) break;
       streak++;
     }
-    if (streak >= 7) out.push({ id: 'streak', emoji: '🔥', title: `${streak} дней подряд с музыкой` });
+    if (streak >= 7) b('streak', '🔥', `${streak} дней подряд с музыкой`, String(streak), 'coral');
     const sources = new Set(rows.map((r) => r.source).filter(Boolean));
-    if (sources.size >= 3) out.push({ id: 'multi', emoji: '🌈', title: 'Слушает в трёх сервисах' });
+    if (sources.size >= 3) b('multi', '🌈', 'Слушает в трёх сервисах', '3', 'mint');
     const friends = (await friendIds(uid)).length;
-    if (friends >= 5) out.push({ id: 'social', emoji: '🫂', title: 'Душа компании — 5+ друзей' });
+    if (friends >= 5) b('social', '🫂', 'Душа компании — 5+ друзей', '5+', 'pink');
     return out;
   }
 

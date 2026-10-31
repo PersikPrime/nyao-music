@@ -19,6 +19,16 @@ export function profileAdminRoutes({ q, HttpError, readJson, clip, guard, public
   });
 
   return [
+    // значок «До сотни»: выдаётся тем, кто зарегистрировался раньше этой даты (ставится в день релиза 0.100)
+    ['PUT', /^\/admin\/profiles\/badge100$/, guard('users.edit', async ({ req, a }) => {
+      const b = await readJson(req);
+      const at = b.before ? new Date(b.before) : null;
+      if (b.before && Number.isNaN(at.getTime())) throw new HttpError(400, 'Дата в формате ISO, например 2026-11-15T12:00:00Z');
+      if (at) await q(`INSERT INTO app_settings (key, value, updated_at) VALUES ('badge100Before', $1, now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [JSON.stringify(at.toISOString())]);
+      else await q("DELETE FROM app_settings WHERE key = 'badge100Before'");
+      await a.audit('profiles.badge100', { type: 'setting', id: 'badge100Before', params: { before: at ? at.toISOString() : null } });
+      return { ok: true, before: at ? at.toISOString() : null };
+    }, { write: true }), true],
     ['GET', /^\/admin\/profiles\/moderation$/, guard('profiles.read', async ({ url }) => {
       const status = ['new', 'ok', 'removed', 'all'].includes(url.searchParams.get('status')) ? url.searchParams.get('status') : 'new';
       const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 50));
