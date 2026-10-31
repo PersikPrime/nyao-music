@@ -167,7 +167,7 @@ export function socialRoutes({ q, hub, push, HttpError, readJson, clip, cleanTra
       ]);
       const raw = cut.rows.length ? cut.rows[0].value : null;
       const before = raw ? new Date(typeof raw === 'string' ? raw.replace(/^"|"$/g, '') : raw).getTime() : NaN;
-      if (u.rows.length && (!Number.isFinite(before) || new Date(u.rows[0].created_at).getTime() < before)) b('v100', '💯', 'До сотни — с Nyao до версии 0.100', '100', 'accent');
+      if (u.rows.length && (!Number.isFinite(before) || new Date(u.rows[0].created_at).getTime() < before)) b('v100', '💯', 'До сотни — с Nyao до 100-й сборки', '100', 'accent');
     } catch {}
     const hours = rows.reduce((s, r) => s + (Number(r.listened) || 0), 0) / 3600;
     if (hours >= 100) b('h100', '🎧', '100 часов музыки', '100ч', 'yellow');

@@ -729,8 +729,10 @@ fun UserScreen(model: AppModel, key: String) {
                 if (!pp.private && st != null && st.plays > 0) {
                     item {
                         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            StatTile("${st.minutes}", "минут за месяц", Modifier.weight(1f))
-                            StatTile("${st.plays}", "прослушиваний", Modifier.weight(1f))
+                            val hours = st.minutes / 60
+                            if (hours > 0) StatTile("$hours ч", "за месяц", Modifier.weight(1f))
+                            else StatTile("${st.minutes}", "минут за месяц", Modifier.weight(1f))
+                            StatTile("%,d".format(java.util.Locale("ru"), st.plays), "прослушиваний", Modifier.weight(1f))
                         }
                     }
                     if (st.topArtists.isNotEmpty()) item {

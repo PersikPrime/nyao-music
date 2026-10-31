@@ -1205,10 +1205,10 @@ body.fs-on .toast { z-index: 1000; }
 .pf-round.wide { padding: 0 18px; font-weight: 600; }
 .pf-round:hover { background: rgba(0,0,0,.65); }
 .pf-nowchip { position: absolute; right: 20px; bottom: 18px; z-index: 1; display: inline-flex; align-items: center; gap: 8px; max-width: 60%; height: 34px; padding: 0 14px; border-radius: 17px; background: rgba(0,0,0,.55); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; --fc: var(--accent); }
-.pf-head { display: flex; align-items: flex-end; gap: 22px; padding: 0 32px; margin-top: -92px; position: relative; flex-wrap: wrap; }
-.pf-avwrap { flex: none; }
-.pf-id { flex: 1; min-width: 200px; padding-bottom: 10px; }
-.pf-id h1 { margin: 0; font-family: Unbounded, sans-serif; font-size: 34px; font-weight: 700; }
+.pf-head { display: flex; align-items: flex-end; gap: 22px; padding: 0 32px; margin-top: -2px; position: relative; flex-wrap: wrap; }
+.pf-avwrap { flex: none; margin-top: -78px; line-height: 0; }
+.pf-id { flex: 1; min-width: 200px; padding-bottom: 6px; }
+.pf-id h1 { margin: 0; font-family: Unbounded, sans-serif; font-size: 32px; font-weight: 700; line-height: 1.15; overflow-wrap: anywhere; }
 .pf-sub { margin-top: 6px; color: var(--muted); font-size: 15px; }
 .pf-online { color: #4ADE80; }
 .pf-acts { display: flex; gap: 10px; padding-bottom: 12px; flex-wrap: wrap; }
@@ -1229,6 +1229,9 @@ body.fs-on .toast { z-index: 1000; }
 .pf-play { width: 44px; height: 44px; flex: none; border-radius: 50%; border: 0; background: var(--text); color: #000; display: grid; place-items: center; }
 .pf-sec { display: flex; flex-direction: column; gap: 10px; }
 .pf-sec h2 { margin: 0; font-size: 18px; }
+.pf-stats { display: flex; gap: 8px; flex-wrap: wrap; }
+.pf-stat { height: 30px; padding: 0 12px; border-radius: 15px; background: var(--s1); border: 1px solid var(--line2); display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.pf-stat b { color: var(--text); font-weight: 700; }
 .pf-artists { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
 .pf-artist { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; }
 .pf-artist b { font-size: 13px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1260,3 +1263,14 @@ body.fs-on .toast { z-index: 1000; }
 .pf-linkrow { display: flex; gap: 8px; }
 .fr2-live-acts .btn { white-space: nowrap; }
 .pf-acts .tag { align-self: center; }
+
+/* ---------- Пасхалка сотой сборки ---------- */
+.ver-tap { cursor: default; user-select: none; }
+.hundred { position: fixed; inset: 0; z-index: 9999; background: radial-gradient(120% 90% at 50% 30%, #17142A, #050507 70%); opacity: 0; transition: opacity .25s; display: flex; flex-direction: column; justify-content: flex-end; }
+.hundred.in { opacity: 1; }
+.hundred.out { opacity: 0; }
+.hundred canvas { position: absolute; inset: 0; }
+.hundred-cap { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0 24px 9vh; text-align: center; }
+.hundred-cap b { font-family: Unbounded, sans-serif; font-size: clamp(24px, 4vw, 40px); color: #fff; }
+.hundred-cap span { color: #c9c9ce; max-width: 520px; font-size: 15px; line-height: 1.5; }
+.hundred-cap .btn { margin-top: 8px; }

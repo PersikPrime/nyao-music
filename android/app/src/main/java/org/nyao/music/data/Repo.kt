@@ -101,6 +101,7 @@ object Repo {
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         prefs = Prefs(context.applicationContext)
+        org.nyao.music.ui.Hundred.init(context)
         Net.init(context)
         library = LibraryCache(context.applicationContext.filesDir)
         org.nyao.music.spotify.Spotify.init(context.applicationContext)

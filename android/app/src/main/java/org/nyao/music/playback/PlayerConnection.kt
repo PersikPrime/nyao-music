@@ -193,6 +193,7 @@ object PlayerConnection {
         // «пропущен» — переключили в первые полминуты (или до середины короткого трека)
         val skipped = listened < minOf(30, dur / 2)
         if (listened < 5 && !skipped) return
+        if (listened >= 30) org.nyao.music.ui.Hundred.countPlay()?.let { PlaybackEvents.emit(it) }
         ioScope.launch { runCatching { Repo.cloud.recordPlay(t, listened, skipped) } }
         ioScope.launch { runCatching { Repo.lastfm.scrobble(if (t.duration > 0) t else t.copy(duration = dur), listened) } }
     }

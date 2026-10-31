@@ -243,7 +243,7 @@ export function createFriends(ctx) {
             <div class="fr-now big">${coverHtml(now.track)}<div class="meta"><div class="t">${esc(now.track.title)}</div><div class="s">${badge(now.track.source)}${esc(now.track.artist)}</div></div>
               <button class="btn" data-action="fr-play-now">Включить себе</button></div>
             ${d.relation === 'friends' ? `<div class="tg-reacts">${REACTIONS.map((e) => `<button data-action="fr-react" data-e="${e}" aria-label="Реакция ${e}">${e}</button>`).join('')}</div>` : ''}</section>` : ''}
-          ${st && st.topArtists && st.topArtists.length ? `<section class="pf-sec"><div class="fr-row-head"><h2>Чаще всего за месяц</h2><span class="muted">${st.minutes} мин · ${st.plays} прослуш.</span></div>
+          ${st && st.topArtists && st.topArtists.length ? `<section class="pf-sec"><div class="fr-row-head"><h2>Чаще всего за месяц</h2><div class="pf-stats">${listenStats(st)}</div></div>
             <div class="pf-artists">${st.topArtists.slice(0, 5).map((a, i) => `<div class="pf-artist"><span class="pf-artist-av" style="background:${ARTIST_TONES[i % ARTIST_TONES.length][0]};color:${ARTIST_TONES[i % ARTIST_TONES.length][1]}">${esc(String(a.name).trim().charAt(0).toUpperCase())}</span><b>${esc(a.name)}</b><span class="muted">${a.plays}</span></div>`).join('')}</div></section>` : ''}
           ${st && st.topTracks && st.topTracks.length ? `<section class="pf-sec"><h2>Любимые треки</h2>
             ${st.topTracks.map((t, i) => `<button class="fr-inbox" data-action="fr-top" data-i="${i}">${coverHtml(t, 'xs')}<div class="meta"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}</div></div><span class="muted">${t.plays}×</span></button>`).join('')}</section>` : ''}
@@ -729,4 +729,14 @@ function plural(n, one, few, many) {
   if (b > 1 && b < 5) return few;
   if (b === 1) return one;
   return many;
+}
+
+const nf = (n) => Number(n || 0).toLocaleString('ru-RU');
+/** «45 ч 18 мин» и «1 946 прослушиваний» вместо «2718 мин · 1946 прослуш.» */
+function listenStats(st) {
+  const min = Math.max(0, Math.round(Number(st.minutes) || 0));
+  const h = Math.floor(min / 60);
+  const time = h ? `<b>${nf(h)}</b> ч${min % 60 ? ` <b>${min % 60}</b> мин` : ''}` : `<b>${min}</b> мин`;
+  const plays = Number(st.plays) || 0;
+  return `<span class="pf-stat" title="Время за месяц">${time}</span><span class="pf-stat"><b>${nf(plays)}</b> ${plural(plays, 'прослушивание', 'прослушивания', 'прослушиваний')}</span>`;
 }

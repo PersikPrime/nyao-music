@@ -266,7 +266,7 @@ private fun AboutCard() {
             }
             Column(Modifier.padding(start = 14.dp)) {
                 Text("Nyao Music", style = MaterialTheme.typography.titleLarge)
-                Text("версия ${BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("версия ${BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { org.nyao.music.ui.Hundred.tapVersion() })
             }
         }
         Text(

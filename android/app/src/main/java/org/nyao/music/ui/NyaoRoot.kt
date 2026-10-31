@@ -168,6 +168,7 @@ fun NyaoRoot() {
     var requiredUpdate by remember { mutableStateOf<org.nyao.music.data.UpdateInfo?>(null) }
     val outdated by Repo.cloud.outdated.collectAsState()
 
+    LaunchedEffect(settings.onboarded) { if (settings.onboarded) { delay(1200); Hundred.maybeFirstRun(org.nyao.music.BuildConfig.VERSION_CODE) } }
     LaunchedEffect(Unit) {
         Repo.refreshAccounts()
         // свежий профиль Nyao: в нём, например, отметка разработчика
@@ -376,6 +377,7 @@ fun NyaoRoot() {
         model.transferFor?.let { (p, t) -> org.nyao.music.ui.screens.TransferSheet(model, p, t) { model.transferFor = null } }
         if (settings.onboarded && settings.layout == null) org.nyao.music.ui.screens.LayoutAskDialog()
         if (requiredUpdate != null || outdated > 0) org.nyao.music.ui.screens.OutdatedDialog(requiredUpdate?.apkUrl)
+        if (settings.onboarded) HundredHost()
     }
     }
 }
