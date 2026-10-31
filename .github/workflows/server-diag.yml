@@ -26,16 +26,17 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
           cat > probe.mjs <<'JS'
-          import dns from 'node:dns/promises';
-          for (const sub of ['yurmos2009', 'persikprime', 'takko', 'bixtl', 'nyao', 'withnyao', 'jacobb', 'persik']) {
-            const h = `nyao-tg-relay.${sub}.workers.dev`;
-            const ips = await dns.resolve4(h).catch((e) => [e.code]);
-            let st = '';
-            try {
-              const r = await fetch(`https://${h}/.well-known/jwks.json`, { signal: AbortSignal.timeout(7000) });
-              st = `HTTP ${r.status} ${(await r.text()).slice(0, 40)}`;
-            } catch (e) { st = e.cause?.code || e.message; }
-            console.log(`::notice::${sub}: ${ips.join(',')} → ${st}`);
+          const { TelegramOIDC } = await import(process.cwd() + '/src/telegram.js');
+          const ips = String(process.env.TG_RELAY_IPS || '').split(',').filter(Boolean);
+          const relay = process.env.TG_RELAY || '';
+          const tg = new TelegramOIDC({ clientId: 'x', clientSecret: 'y', redirectUri: 'https://x/cb', relay, relayIps: ips });
+          const host = relay ? new URL(relay).host : 'oauth.telegram.org напрямую';
+          const t = Date.now();
+          try {
+            await tg.jwks();
+            console.log(`::notice::Telegram через ${host}: ок за ${Date.now() - t} мс`);
+          } catch (e) {
+            console.log(`::error::Telegram через ${host}: ${e.message}`);
           }
           JS
           $SSH "cd $REMOTE_DIR && docker compose exec -T api node --input-type=module -" < probe.mjs

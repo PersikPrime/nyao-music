@@ -9,11 +9,10 @@ export const ISSUER = 'https://oauth.telegram.org';
 const AUTH_URL = `${ISSUER}/auth`; // открывается в браузере пользователя — напрямую
 
 /**
- * Запасные адреса Cloudflare для ретранслятора. Провайдер в РФ режет часть IP Cloudflare (в том числе те,
- * на которые указывает DNS ретранслятора), но не все: любой IP Cloudflare отдаёт наш хост по SNI.
- * Свой список — TG_RELAY_IPS через запятую.
+ * Запасные IP ретранслятора (TG_RELAY_IPS через запятую), если провайдер режет адреса из DNS.
+ * Для Cloudflare не подходит: чужие IP Cloudflare отвечают ошибкой 1034, поэтому по умолчанию пусто.
  */
-export const RELAY_IPS = ['172.66.0.227', '104.16.123.96', '104.18.32.47'];
+export const RELAY_IPS = [];
 
 /** Запрос на конкретный IP с нужным именем хоста (SNI и проверка сертификата — по имени) → Response */
 export function pinnedFetch(url, { method = 'GET', headers = {}, body, ip, timeout = 10000 } = {}) {
@@ -48,7 +47,7 @@ export function pkce() {
 export class TelegramOIDC {
   /**
    * relay — адрес ретранслятора (Cloudflare Worker), если серверу закрыт прямой доступ к oauth.telegram.org
-   * (в РФ на части хостингов его режет ТСПУ). Через него идут только /token и ключи JWKS.
+   * (в РФ на части хостингов его режет ТСПУ). Сейчас — Vercel: server/tg-relay-vercel. Через него идут только /token и ключи JWKS.
    */
   constructor({ clientId, clientSecret, redirectUri, relay = '', relayIps = null, fetch = globalThis.fetch, pinned = pinnedFetch, keys = null }) {
     this.clientId = String(clientId || '');
@@ -86,6 +85,7 @@ export class TelegramOIDC {
     for (const ip of order) {
       try {
         const res = await this.pinned(url, { method: init.method || 'GET', headers: init.headers || {}, body: init.body, ip, timeout: 5000 });
+        if (res.status === 403 && /error code: 10\d\d/.test(await res.clone().text())) throw new Error(`${ip}: Cloudflare не отдаёт хост на этом IP`);
         this.goodIp = ip;
         return res;
       } catch (e) {

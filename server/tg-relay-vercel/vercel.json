@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/token", "destination": "https://oauth.telegram.org/token" },
+    { "source": "/.well-known/jwks.json", "destination": "https://oauth.telegram.org/.well-known/jwks.json" }
+  ]
+}
