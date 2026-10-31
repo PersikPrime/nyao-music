@@ -37,7 +37,7 @@ jobs:
             MARKETING_VERSION="$N.$B" CURRENT_PROJECT_VERSION="$B" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tee xcodebuild.log | grep -E "error:|warning: unre|BUILD" || true
           grep -E "error:" xcodebuild.log | sort -u | head -40 | while read -r l; do echo "::error::$l"; done
-          test -d "build/Build/Products/Release-iphoneos/Nyao Music.app"
+          test -f "build/Build/Products/Release-iphoneos/Nyao Music.app/Nyao Music"
       - name: IPA
         run: |
           N=$(jq -r '.name' version.json); B=$(jq -r '.build' version.json)

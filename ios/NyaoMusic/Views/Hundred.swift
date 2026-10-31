@@ -44,10 +44,12 @@ private let waveColors = ["#C6B8FF", "#7CE0C3", "#FFB86B", "#FF8FB1", "#8FB4FF",
 
 /// Маска «100» на маленькой сетке, размытая — волны поднимаются плавно
 private struct TextMask {
-    let w = 160, h = 80
+    static let W = 160, H = 80
+    let w = TextMask.W, h = TextMask.H
     var a: [Float]
 
     init(text: String) {
+        let w = TextMask.W, h = TextMask.H
         let size = CGSize(width: w, height: h)
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1
