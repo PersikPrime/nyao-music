@@ -13,7 +13,7 @@ const AUTH_URL = `${ISSUER}/auth`; // открывается в браузере
  * на которые указывает DNS ретранслятора), но не все: любой IP Cloudflare отдаёт наш хост по SNI.
  * Свой список — TG_RELAY_IPS через запятую.
  */
-export const RELAY_IPS = ['104.18.32.47', '172.66.0.227', '104.16.123.96'];
+export const RELAY_IPS = ['172.66.0.227', '104.16.123.96', '104.18.32.47'];
 
 /** Запрос на конкретный IP с нужным именем хоста (SNI и проверка сертификата — по имени) → Response */
 export function pinnedFetch(url, { method = 'GET', headers = {}, body, ip, timeout = 10000 } = {}) {
@@ -76,7 +76,7 @@ export class TelegramOIDC {
     if (!viaRelay) return this.rawFetch(url, { ...init, signal: init.signal || AbortSignal.timeout(15000) });
     if (!this.goodIp) {
       try {
-        return await this.rawFetch(url, { ...init, signal: AbortSignal.timeout(6000) });
+        return await this.rawFetch(url, { ...init, signal: AbortSignal.timeout(4000) });
       } catch (e) {
         if (!this.relayIps.length) throw e;
       }
@@ -85,7 +85,7 @@ export class TelegramOIDC {
     let last;
     for (const ip of order) {
       try {
-        const res = await this.pinned(url, { method: init.method || 'GET', headers: init.headers || {}, body: init.body, ip, timeout: 8000 });
+        const res = await this.pinned(url, { method: init.method || 'GET', headers: init.headers || {}, body: init.body, ip, timeout: 5000 });
         this.goodIp = ip;
         return res;
       } catch (e) {

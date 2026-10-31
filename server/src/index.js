@@ -48,6 +48,12 @@ for (let i = 0; ; i++) {
 
 const tg = new TelegramOIDC({ clientId: env.TG_CLIENT_ID, clientSecret: env.TG_CLIENT_SECRET, redirectUri: `${PUBLIC_URL}/auth/telegram/callback`, relay: env.TG_RELAY, relayIps: String(env.TG_RELAY_IPS || '').split(',').map((x) => x.trim()).filter(Boolean) });
 if (env.TG_RELAY) console.log(`[auth] Telegram через ретранслятор ${env.TG_RELAY}`);
+// прогрев: находим рабочий адрес ретранслятора и ключи Telegram заранее, чтобы первый вход не ждал перебора
+if (env.TG_RELAY) {
+  const warm = () => tg.jwks().then(() => console.log(`[auth] ретранслятор отвечает${tg.goodIp ? ` через ${tg.goodIp}` : ''}`)).catch((e) => console.log(`[auth] ретранслятор: ${e.message}`));
+  warm();
+  setInterval(warm, 50 * 60_000).unref();
+}
 if (!tg.configured) console.warn('[auth] TG_CLIENT_ID / TG_CLIENT_SECRET не заданы — вход через Telegram выключен');
 
 const mirror = new ReleaseMirror({ repo: env.GITHUB_REPO || 'PersikPrime/nyao-music', dir: env.MIRROR_DIR || '/data/releases', publicUrl: PUBLIC_URL });
