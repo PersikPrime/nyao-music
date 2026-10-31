@@ -22,7 +22,7 @@ const CODE_RE = /^[A-Z0-9]{6}$/;
 /** Трек от клиента → только нужные поля, обрезанные по длине */
 export function cleanTrack(t) {
   if (!t || !t.id) return null;
-  return { id: clip(t.id, 128), source: clip(t.source, 8), srcId: clip(t.srcId, 128), title: clip(t.title, 256), artist: clip(t.artist, 256), album: clip(t.album, 256), albumId: t.albumId ? clip(t.albumId, 64) : null, duration: Math.round(Number(t.duration) || 0), cover: t.cover ? clip(t.cover, 512) : null };
+  return { id: clip(t.id, 128), source: clip(t.source, 8), srcId: clip(t.srcId, 128), title: clip(t.title, 256), artist: clip(t.artist, 256), album: clip(t.album, 256), albumId: t.albumId ? clip(t.albumId, 64) : null, duration: Math.round(Number(t.duration) || 0), cover: t.cover && /^https:\/\//.test(String(t.cover)) ? clip(t.cover, 512) : null };
 }
 
 export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');

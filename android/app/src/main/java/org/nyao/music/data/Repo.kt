@@ -114,6 +114,7 @@ object Repo {
                 prefs.scIdentity = "$key|$uid"
             }
         } }
+        TemplateCover.dir = context.applicationContext.cacheDir
         vk = VkApi(prefs).also { it.appContext = context.applicationContext }
         // сессия vk.com живёт, пока сайт сам обновляет cookie — продлеваем её тихо раз в 12 часов
         if (vk.loggedIn && System.currentTimeMillis() - prefs.vkRefreshedAt > 12 * 3600_000L) {

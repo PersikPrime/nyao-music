@@ -122,7 +122,8 @@ class VkApi(private val prefs: Prefs) {
                 title = unescapeHtml(a.optString(I_TITLE)).ifBlank { "Без названия" },
                 artist = unescapeHtml(a.optString(I_PERFORMER)).ifBlank { "VK" },
                 duration = a.optInt(I_DURATION),
-                cover = covers.lastOrNull(),
+                // без обложки — шаблонный диск: пустая обложка VK оставляла на экране картинку и название прошлого трека
+                cover = covers.lastOrNull() ?: TemplateCover.uri("vk:${owner}_$id"),
             )
         }
 

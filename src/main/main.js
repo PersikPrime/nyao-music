@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, protocol, net, shell, session, nativeImage
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { renderCover } from './cover-art.js';
 import { PendingLikes } from './pending-likes.js';
 import { parseDeepLink } from './deeplink.js';
 import { safeDiagnostic } from './diagnostics.js';
@@ -1361,6 +1362,11 @@ app.whenReady().then(() => {
   };
   protocol.handle('nyao', async (request) => {
     const u = new URL(request.url);
+    // шаблонная обложка для треков без картинки (см. cover-art.js)
+    if (u.host === 'cover') {
+      const key = decodeURIComponent(u.pathname.slice(1)).replace(/\.png$/, '');
+      return new Response(renderCover(key), { headers: { 'content-type': 'image/png', 'cache-control': 'max-age=31536000', 'access-control-allow-origin': '*' } });
+    }
     // трек Spotify: в <audio> — тишина той же длины, звук даёт устройство Spotify (см. renderer/spotify-sync.js)
     let req = request;
     const sid = u.host === 'stream' ? decodeURIComponent(u.pathname.slice(1)) : '';

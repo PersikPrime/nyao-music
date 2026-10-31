@@ -1,4 +1,5 @@
 import { safeDiagnostic } from '../diagnostics.js';
+import { placeholderCover } from '../cover-art.js';
 // VK Музыка (dev-ветка): внутренние запросы сайта vk.com (al_audio.php) от имени сессии,
 // в которую пользователь вошёл в обычном окне VK. Пароль к нам не попадает — только cookie этой сессии.
 //
@@ -101,7 +102,8 @@ export function mapAudio(a) {
     artist: unescapeHtml(a[I.performer]) || 'VK',
     album: '',
     duration: Number(a[I.duration]) || 0,
-    cover: covers.length ? covers[covers.length - 1] : null,
+    // без обложки — шаблонный диск: пустая обложка VK оставляла на экране картинку и название прошлого трека
+    cover: covers.length ? covers[covers.length - 1] : placeholderCover(`vk:${owner}_${id}`),
     available: true
   };
 }
