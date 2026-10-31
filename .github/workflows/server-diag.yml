@@ -26,17 +26,19 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
           cat > probe.mjs <<'JS'
-          const { pinnedFetch, RELAY_IPS } = await import(process.cwd() + '/src/telegram.js');
-          const url = process.env.TG_RELAY.replace(/\/$/, '') + '/.well-known/jwks.json';
-          for (const ip of [...RELAY_IPS, '104.16.123.96', '172.66.0.227']) {
-            for (let k = 0; k < 2; k++) {
-              const t = Date.now();
-              try {
-                const r = await pinnedFetch(url, { ip, timeout: 6000, headers: { 'user-agent': 'NyaoServer/1.0', accept: 'application/json' } });
-                const body = (await r.text()).replace(/\s+/g, ' ').slice(0, 90);
-                console.log(`::notice::${ip} #${k}: HTTP ${r.status} ${Date.now() - t} мс — ${body}`);
-              } catch (e) { console.log(`::error::${ip} #${k}: ${e.message}`); }
-            }
+          import dns from 'node:dns/promises';
+          import tls from 'node:tls';
+          const tryTls = (ip, sni) => new Promise((res) => {
+            const t = Date.now();
+            const s = tls.connect({ host: ip, port: 443, servername: sni, timeout: 6000 }, () => { res(`ok ${Date.now() - t} мс`); s.destroy(); });
+            s.on('timeout', () => { res('timeout'); s.destroy(); });
+            s.on('error', (e) => res(e.code || e.message));
+          });
+          for (const h of ['withnyao.app', 'music.withnyao.app', 'lyrics.withnyao.app', 'bixtl.cc', 'workers.dev', 'pages.dev', 'vercel.app', 'deno.dev', 'netlify.app']) {
+            const ips = await dns.resolve4(h).catch((e) => [e.code]);
+            const res = [];
+            for (const ip of ips.slice(0, 2)) res.push(`${ip} ${/^\d/.test(ip) ? await tryTls(ip, h) : ''}`);
+            console.log(`::notice::${h}: ${res.join(' | ')}`);
           }
           JS
           $SSH "cd $REMOTE_DIR && docker compose exec -T api node --input-type=module -" < probe.mjs
