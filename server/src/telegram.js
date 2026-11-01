@@ -47,7 +47,7 @@ export function pkce() {
 export class TelegramOIDC {
   /**
    * relay — адрес ретранслятора (Cloudflare Worker), если серверу закрыт прямой доступ к oauth.telegram.org
-   * (в РФ на части хостингов его режет ТСПУ). Сейчас — Vercel: server/tg-relay-vercel. Через него идут только /token и ключи JWKS.
+   * (в РФ на части хостингов его режет ТСПУ). Запасной вариант — Vercel: server/tg-relay-vercel. Через него идут только /token и ключи JWKS.
    */
   constructor({ clientId, clientSecret, redirectUri, relay = '', relayIps = null, fetch = globalThis.fetch, pinned = pinnedFetch, keys = null }) {
     this.clientId = String(clientId || '');
