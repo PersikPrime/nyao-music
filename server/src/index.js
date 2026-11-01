@@ -10,6 +10,12 @@ import { FcmPush, parseServiceAccount } from './push.js';
 import { LogBuffer } from './logbuf.js';
 import { GitHub } from './github.js';
 import { parseAdminIds } from './admin.js';
+import tls from 'node:tls';
+
+// Провайдер в РФ режет исходящий TLS с постквантовым обменом ключами (X25519MLKEM768), который OpenSSL 3.5
+// включает по умолчанию: соединение с ретранслятором Telegram на Cloudflare просто висит. Обычные кривые проходят.
+// Входящие соединения обслуживает Caddy — его это не касается. Свой список — TLS_CURVES.
+tls.DEFAULT_ECDH_CURVE = process.env.TLS_CURVES || 'X25519:prime256v1:secp384r1';
 
 // последние строки лога — для Nyao Automator (GET /admin/logs)
 const logs = new LogBuffer(5000).hook(console);
