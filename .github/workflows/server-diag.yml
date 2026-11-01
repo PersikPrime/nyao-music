@@ -26,18 +26,17 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
           cat > probe.mjs <<'JS'
-          const { TelegramOIDC } = await import(process.cwd() + '/src/telegram.js');
-          const ips = String(process.env.TG_RELAY_IPS || '').split(',').filter(Boolean);
-          const relay = process.env.TG_RELAY || '';
-          const tg = new TelegramOIDC({ clientId: 'x', clientSecret: 'y', redirectUri: 'https://x/cb', relay, relayIps: ips });
-          const host = relay ? new URL(relay).host : 'oauth.telegram.org напрямую';
-          const t = Date.now();
-          try {
-            await tg.jwks();
-            console.log(`::notice::Telegram через ${host}: ок за ${Date.now() - t} мс`);
-          } catch (e) {
-            console.log(`::error::Telegram через ${host}: ${e.message}`);
-          }
+          import tls from 'node:tls';
+          const url = (process.env.TG_RELAY || 'https://oauth.telegram.org').replace(/\/$/, '') + '/.well-known/jwks.json';
+          console.log(`::notice::node ${process.version}, OpenSSL ${process.versions.openssl}, кривые по умолчанию: ${tls.DEFAULT_ECDH_CURVE}`);
+          const go = async (label) => {
+            const t = Date.now();
+            try { const r = await fetch(url, { signal: AbortSignal.timeout(8000) }); console.log(`::notice::${label}: HTTP ${r.status} за ${Date.now() - t} мс`); }
+            catch (e) { console.log(`::error::${label}: ${e.cause?.code || e.message}`); }
+          };
+          await go('как есть');
+          tls.DEFAULT_ECDH_CURVE = 'X25519:prime256v1:secp384r1';
+          await go('без постквантового обмена (X25519/P-256)');
           JS
           $SSH "cd $REMOTE_DIR && docker compose exec -T api node --input-type=module -" < probe.mjs
           $SSH "cd $REMOTE_DIR && docker compose logs --since 3h api 2>&1 | grep -iE 'auth|telegram' | tail -15" | sed 's/^/::warning::log /' || true
