@@ -150,3 +150,26 @@ test('своя волна Nyao: затравка уходит на сервер,
   const s = w.session;
   assert.ok(s.candidates.some((c) => c.track.id === 'vk:9_9') || out.some((t) => t.id === 'vk:9_9'), 'трек найден во VK');
 });
+test('баланс 100% Яндекса — жёсткий: треки других сервисов не попадают, даже если «нужнее» по категории', () => {
+  const p = new WavePolicy({ random: seeded(3) });
+  const input = [...candidates(20, 'library', 'ya'), ...candidates(20, 'related', 'vk'), ...candidates(20, 'related', 'yt')];
+  const out = p.select(input, { diversity: 'popular', share: 0, size: 20 });
+  assert.ok(out.length > 0);
+  assert.ok(out.every((t) => t.source === 'ya'), out.map((t) => t.source).join(','));
+});
+test('настроение: в волну идут только треки «Моей волны» Яндекса, в неё уходят только её треки', async () => {
+  const rotor = [track('R1'), track('R2'), track('R3')];
+  const sent = [];
+  const ya = {
+    loggedIn: true, likedTracks: async () => [track('Liked1'), track('Liked2')],
+    waveStart: async () => rotor, waveMore: async (ids) => { sent.push(ids); return [track('R4')]; },
+    similarTracks: async () => [track('Sim1')], search: async () => [track('Art1')], waveFeedback: async () => {}
+  };
+  const w = new WaveMixer({ ya, yt: null, sc: null, vk: null, getSettings: () => ({ waveDiversity: 'popular', waveMood: 'calm', ytmShare: 0 }),
+    nyao: { mix: async () => { throw new Error('при настроении своя волна не нужна'); } } });
+  const out = await w.start();
+  assert.ok(out.length > 0);
+  assert.ok(out.every((t) => /^ya:R\d$/.test(t.id)), out.map((t) => t.id).join(','));
+  await w.more(out.map((t) => t.id));
+  for (const ids of sent) assert.ok(ids.every((id) => /^ya:R\d$/.test(id)), 'в Яндекс уходят только его треки: ' + ids.join(','));
+});

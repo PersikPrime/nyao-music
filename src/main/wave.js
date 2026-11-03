@@ -40,7 +40,7 @@ export class WaveMixer {
   async start(queueIds = []) {
     const generation = ++this.generation;
     const policy = new WavePolicy(); this.state.disliked.forEach(t => policy.block(t));
-    const s = { generation, policy, candidates: [], libraries: [], recent: new Set(), history: [], loads: 0, loading: null, hydrated: false, excludedIds: new Set(queueIds), seedHistory: [] };
+    const s = { generation, policy, candidates: [], libraries: [], recent: new Set(), history: [], loads: 0, loading: null, hydrated: false, excludedIds: new Set(queueIds), seedHistory: [], rotorIds: new Set() };
     this.session = s;
     s.recent = await bounded(() => this.getRecent(), new Set());
     this.ensure(s);
@@ -85,7 +85,7 @@ export class WaveMixer {
     for (const c of candidates) {
       if (!c.track?.id || s.excludedIds.has(c.track.id) || c.track.available === false || c.track.preview) continue;
       const old = s.candidates.find(x => x.track.id === c.track.id);
-      if (old) { if (c.liked) Object.assign(old, c); }
+      if (old) { if (c.liked) Object.assign(old, c); if (c.moodOk) old.moodOk = true; }
       else s.candidates.push(c);
     }
     // Remove selected candidates, but keep unplayed library candidates and provenance.
@@ -101,7 +101,11 @@ export class WaveMixer {
     const favoriteNames = new Set(favorites.map(a => artistKey({ artist: a.name })));
     const lists = await Promise.all(sources.map(async ([id, p]) => {
       const tasks = [];
-      if (id === 'ya') tasks.push(bounded(() => first ? p.waveStart(opts) : p.waveMore(s.policy.selected.map(t => t.id))));
+      // «Моя волна» Яндекса — единственный источник, который знает настроение. В неё отправляем только её же
+      // треки: иначе подмешанное (лайки, похожее) уводит её от выбранного настроения
+      if (id === 'ya') tasks.push(bounded(async () => (await (first ? p.waveStart(opts) : p.waveMore(s.policy.selected.filter(t => s.rotorIds.has(t.id)).map(t => t.id)))).map(t => { s.rotorIds.add(t.id); return t; })));
+      // выбрано настроение: остальные источники его не знают — пока не подмешиваем
+      if (opts.mood) { const tracks = (await Promise.all(tasks)).flat(); return tracks.map(track => ({ track, liked: s.libraries.some(c => sameRecording(c.track, track)), recency: 0, affinity: 0.5, moodOk: true, reason: 'Моя волна Яндекса · по настроению' })); }
       else if (id === 'vk') tasks.push(bounded(() => p.recommendations()));
       else if (seed?.source === id && id === 'yt') tasks.push(bounded(() => p.radio(seed.srcId)));
       else if (seed?.source === id && id === 'sc') tasks.push(bounded(() => p.related(seed.srcId)));
@@ -118,7 +122,7 @@ export class WaveMixer {
       });
     }));
     // своя волна Nyao: похожее по открытым данным (Last.fm, Deezer) — находим эти треки в своих сервисах
-    const own = this.nyao && this.getSettings().waveNyao !== false ? await bounded(() => this.nyaoCandidates(s, sources, opts), [], 15000) : [];
+    const own = this.nyao && !opts.mood && this.getSettings().waveNyao !== false ? await bounded(() => this.nyaoCandidates(s, sources, opts), [], 15000) : [];
     this.ensure(s); this.add(s, [...lists.flat(), ...own]); s.loads++;
   }
   /** Затравка — свежие лайки и дослушанное, ответ сервера — «исполнитель — трек», ищем их в подключённых сервисах */
@@ -163,11 +167,14 @@ export class WaveMixer {
       this.ensure(s);
       const connected = new Set(this.sources().map(([id]) => id));
       s.candidates = s.candidates.filter(c => connected.has(c.track.source));
-      let result = s.policy.select(s.candidates, { ...this.opts(), recentIds: s.recent, history: s.history });
+      // настроение: в волну идут только треки, подобранные под него (сейчас — «Моя волна» Яндекса)
+      const pool = () => (this.opts().mood ? s.candidates.filter(c => c.moodOk) : s.candidates);
+      let result = s.policy.select(pool(), { ...this.opts(), recentIds: s.recent, history: s.history });
       if (!result.length) {
         await this.recommendations(s, false);
-        result = s.policy.select(s.candidates, { ...this.opts(), recentIds: s.recent, history: s.history });
+        result = s.policy.select(pool(), { ...this.opts(), recentIds: s.recent, history: s.history });
       }
+      if (!result.length && this.opts().mood && !this.ya?.loggedIn) throw new Error('Настроение пока работает только с Яндекс Музыкой — войди в неё или выключи настроение');
       if (!result.length) throw new Error(this.sources().length ? 'Новых подходящих треков пока нет. Измени настройки волны или добавь лайки.' : 'Войди хотя бы в один сервис для волны');
       this.add(s, []);
       if (first && this.ya?.loggedIn) bounded(() => this.ya.waveFeedback('radioStarted', { source: 'ya' }));

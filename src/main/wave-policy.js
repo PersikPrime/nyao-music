@@ -60,6 +60,9 @@ export class WavePolicy {
       let options = candidates.filter(c => c.track?.available !== false && !c.track?.preview && c.track?.id &&
         !selected.has(c.track) && !blocked.has(c.track) &&
         !(diversity === 'discover' && liked.has(c.track)));
+      // баланс в крайних положениях — жёсткий: 0% других сервисов значит только Яндекс, 100% — без Яндекса
+      if (share <= 0 && options.some(c => c.track.source === 'ya')) options = options.filter(c => c.track.source === 'ya');
+      else if (share >= 100 && options.some(c => c.track.source !== 'ya')) options = options.filter(c => c.track.source !== 'ya');
       if (!options.length) break;
       // Recent listening is a preference, but never silently repeat within this wave.
 
