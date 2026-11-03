@@ -26,23 +26,17 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
           cat > probe.mjs <<'JS'
-          import tls from 'node:tls';
-          tls.DEFAULT_ECDH_CURVE = 'X25519:prime256v1:secp384r1';
-          const urls = {
-            'telegram userpic': 'https://t.me/i/userpic/320/durov.jpg',
-            'telesco.pe': 'https://cdn4.telesco.pe/file/',
-            'i.ytimg.com': 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
-            'lh3.googleusercontent': 'https://lh3.googleusercontent.com/a/default-user=s96',
-            'i1.sndcdn.com': 'https://i1.sndcdn.com/avatars-000000000000-000000-t500x500.jpg',
-            'avatars.yandex.net': 'https://avatars.yandex.net/get-music-content/',
-            'sun9.userapi.com': 'https://sun9-1.userapi.com/',
-            'i.scdn.co': 'https://i.scdn.co/image/ab67616d0000b273',
-          };
-          for (const [n, u] of Object.entries(urls)) {
+          import fs from 'node:fs';
+          for (const d of ['/data/banners', '/data/imgcache']) {
+            try { fs.accessSync(d, fs.constants.W_OK); console.log(`::notice::${d}: пишется`); } catch (e) { console.log(`::error::${d}: ${e.code}`); }
+          }
+          for (const u of ['https://t.me/i/userpic/320/durov.jpg', 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg']) {
             const t = Date.now();
-            try { const r = await fetch(u, { signal: AbortSignal.timeout(8000), redirect: 'manual' }); console.log(`::notice::${n}: HTTP ${r.status} ${Date.now() - t} мс`); }
-            catch (e) { console.log(`::error::${n}: ${e.cause?.code || e.message}`); }
+            try {
+              const r = await fetch('http://127.0.0.1:8080/img?u=' + encodeURIComponent(u), { signal: AbortSignal.timeout(25000) });
+              console.log(`::notice::/img ${new URL(u).hostname}: HTTP ${r.status} ${r.headers.get('content-type')} за ${Date.now() - t} мс`);
+            } catch (e) { console.log(`::error::/img ${new URL(u).hostname}: ${e.message}`); }
           }
           JS
           $SSH "cd $REMOTE_DIR && docker compose exec -T api node --input-type=module -" < probe.mjs
-          $SSH "cd $REMOTE_DIR && docker compose logs --since 20m api 2>&1 | grep -iE 'auth|telegram' | tail -15" | sed 's/^/::warning::log /' || true
+          $SSH "cd $REMOTE_DIR && docker compose logs --since 20m api 2>&1 | grep -iE 'auth|telegram|img' | tail -15" | sed 's/^/::warning::log /' || true
