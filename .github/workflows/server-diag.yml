@@ -26,17 +26,23 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
           cat > probe.mjs <<'JS'
-          import fs from 'node:fs';
-          for (const d of ['/data/banners', '/data/imgcache']) {
-            try { fs.accessSync(d, fs.constants.W_OK); console.log(`::notice::${d}: пишется`); } catch (e) { console.log(`::error::${d}: ${e.code}`); }
-          }
-          for (const u of ['https://t.me/i/userpic/320/durov.jpg', 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg']) {
+          import tls from 'node:tls';
+          tls.DEFAULT_ECDH_CURVE = 'X25519:prime256v1:secp384r1';
+          const relay = (process.env.TG_RELAY || '').replace(/\/$/, '');
+          const urls = {
+            'last.fm': 'https://ws.audioscrobbler.com/2.0/?method=track.getsimilar&artist=cher&track=believe&format=json&api_key=x',
+            'listenbrainz': 'https://api.listenbrainz.org/1/stats/sitewide/artists?count=1',
+            'labs.listenbrainz': 'https://labs.api.listenbrainz.org/similar-artists/json?artist_mbids=8f6bd1e4-fbe1-4f50-aa9b-94c450ec0f11&algorithm=session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30',
+            'musicbrainz': 'https://musicbrainz.org/ws/2/artist?query=cher&fmt=json&limit=1',
+            'deezer': 'https://api.deezer.com/search?q=believe%20cher&limit=1',
+            'itunes': 'https://itunes.apple.com/search?term=believe+cher&limit=1',
+          };
+          for (const [n, u] of Object.entries(urls)) {
             const t = Date.now();
-            try {
-              const r = await fetch('http://127.0.0.1:8080/img?u=' + encodeURIComponent(u), { signal: AbortSignal.timeout(25000), redirect: 'manual' });
-              console.log(`::notice::/img ${new URL(u).hostname}: HTTP ${r.status} ${r.headers.get('content-type')} за ${Date.now() - t} мс`);
-            } catch (e) { console.log(`::error::/img ${new URL(u).hostname}: ${e.message}`); }
+            try { const r = await fetch(u, { signal: AbortSignal.timeout(8000), headers: { 'user-agent': 'NyaoMusic/1.0 ( https://music.withnyao.app )' } }); console.log(`::notice::${n}: HTTP ${r.status} ${Date.now() - t} мс`); }
+            catch (e) { console.log(`::error::${n}: ${e.cause?.code || e.message}`); }
           }
+          console.log(`::notice::LASTFM_KEY в окружении: ${process.env.LASTFM_KEY ? 'есть' : 'нет'}`);
           JS
           $SSH "cd $REMOTE_DIR && docker compose exec -T api node --input-type=module -" < probe.mjs
           $SSH "cd $REMOTE_DIR && docker compose logs --since 20m api 2>&1 | grep -iE 'auth|telegram|img' | tail -15" | sed 's/^/::warning::log /' || true
