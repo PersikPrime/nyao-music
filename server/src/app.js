@@ -181,12 +181,17 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)
     ['GET', /^\/status$/, async () => (status ? status.get() : normalizeStatus(null))],
     // картинки, которые в РФ без VPN не грузятся (аватарки Telegram, обложки YouTube, SoundCloud, VK) — через сервер
-    ['GET', /^\/img$/, async ({ url, ip }) => {
+    ['GET', /^\/img$/, async ({ url, ip, res }) => {
       imgLimit(ip);
       const u = url.searchParams.get('u') || '';
       if (!images || !proxyable(u)) throw new HttpError(400, 'Эту картинку сервер не отдаёт');
       const r = await images(u);
-      if (!r) throw new HttpError(502, 'Картинка не загрузилась');
+      if (!r) {
+        // сервер не достал — отправляем на исходный адрес: с VPN или где CDN не режут картинка откроется как раньше
+        res.writeHead(302, { Location: u, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+        res.end();
+        return { __sent: true };
+      }
       return { __raw: { type: r.type, body: r.body, cache: 'public, max-age=604800' } };
     }],
 
