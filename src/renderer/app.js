@@ -9,6 +9,7 @@ import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain 
 import { FullScreen } from './fullscreen.js';
 import { PRANKS, createPranks, fakeWords } from './pranks.js';
 import { createHundred } from './hundred.js';
+import { coverOf, templateCover, installImageFallback } from './covers.js';
 import { ACCENTS, paletteFor, applyAccent } from './accent.js';
 import { releaseAgo } from './releases.js';
 import { arrangeSearch } from './search.js';
@@ -20,6 +21,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const view = $('#view');
 const player = new Player($('#audio'));
+installImageFallback(document);
 // треки Spotify: <audio> ведёт очередь (тишина той же длины), звук — устройство Spotify в главном процессе
 const spotifySync = new SpotifySync(player, window.nyao && window.nyao.spotify, { onMessage: (m) => toast(m, true), onBackendChange: () => afterAuthChange() });
 if (window.nyao && window.nyao.spotify) spotifySync.start();
@@ -96,7 +98,9 @@ function coverHtml(item, cls = '', withBadge = false) {
   const src = item && item.source;
   const bgCls = src === 'ya' ? 'ya-bg' : src === 'yt' ? 'yt-bg' : src === 'sc' ? 'sc-bg' : src === 'vk' ? 'vk-bg' : src === 'sp' ? 'sp-bg' : '';
   const ring = `<svg width="45%" height="45%" viewBox="0 0 72 72" fill="none" stroke="${RING[src] || RING.mix}" stroke-width="3"><circle cx="36" cy="36" r="26"/><circle cx="36" cy="36" r="12"/></svg>`;
-  const img = item && item.cover ? `<img src="${esc(item.cover)}" alt="" loading="lazy">` : '';
+  // у трека без своей обложки — шаблонный диск; не загрузилась — через сервер Nyao, потом шаблон
+  const c = item && item.srcId ? coverOf(item) : item && item.cover;
+  const img = c ? `<img src="${esc(c)}" alt="" loading="lazy"${item.srcId ? ` data-tpl="${esc(templateCover(item.id))}"` : ''}>` : '';
   return `<div class="cover ${cls} ${bgCls}">${ring}${img}${withBadge ? badge(src) : ''}</div>`;
 }
 function artistLink(t) {
@@ -665,6 +669,8 @@ function renderWave() {
 // ---------- Выезжающая панель справа: «Об исполнителе / Далее / Об этом треке» и очередь ----------
 // Открывается кнопками в плеере, закрывается той же кнопкой, крестиком или Esc
 function openDrawer(mode = 'info') {
+  // справа одна панель за раз: «Настроить волну» закрываем
+  closeWaveTune();
   state.drawer = mode;
   const el = $('#drawer');
   el.classList.add('open');
@@ -1919,8 +1925,7 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
   menu.innerHTML = addOnly ? `
     <div class="lbl">Добавить «${esc(track.title)}»</div>
     ${mixes.map((m) => `<button data-m="mix" data-id="${esc(m.id)}">${esc(m.title)}</button>`).join('') || '<div class="lbl" style="text-transform:none;letter-spacing:0">Миксов пока нет</div>'}
-    <button data-m="newmix">${ICONS.plus} Новый микс…</button>
-    <button data-m="next">Играть следующим</button>` : `
+    <button data-m="newmix">${ICONS.plus} Новый микс…</button>` : `
     <button data-m="next">Играть следующим</button>
     <button data-m="last">В конец очереди</button>
     ${inQueue ? '<button data-m="remove">Убрать из очереди</button>' : ''}
@@ -2579,6 +2584,7 @@ async function handleAction(el, e) {
       if (state.route === 'home' || state.route === 'wave') RENDER[state.route]();
       break;
     case 'wave-tune':
+      closeDrawer();
       state.waveTune = true;
       $('.wave-tune-layer', view)?.classList.add('open');
       $('.wave-tune-btn', view)?.setAttribute('aria-expanded', 'true');

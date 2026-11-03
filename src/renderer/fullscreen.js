@@ -6,6 +6,7 @@
 // из-за неё веером расходятся обложки соседних треков; при смене трека обложки проезжают как Cover Flow.
 
 import { toggleLine, drawCard, ensureFonts, FORMATS, MAX_LINES } from './lyric-card.js';
+import { coverOf, templateCover } from './covers.js';
 
 /** Поворот обложки в покое, градусы */
 const TILT = 12;
@@ -309,7 +310,7 @@ export class FullScreen {
     this.$('.fs-q-sub').textContent = player.mode === 'wave' ? 'Моя волна' : [player.label, q.length ? `${q.length} тр.` : ''].filter(Boolean).join(' · ');
     list.innerHTML = items.length ? items.map((t, k) => {
       const i = from + k;
-      return `<button class="fs-q-row${i === player.index ? ' cur' : ''}${i < player.index ? ' past' : ''}" data-qi="${i}"><span class="fs-q-art">${t.cover ? `<img src="${esc(t.cover)}" alt="" loading="lazy">` : ''}</span><span class="fs-q-meta"><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></span>${t.duration ? `<span class="fs-q-dur">${fmt(t.duration)}</span>` : ''}</button>`;
+      return `<button class="fs-q-row${i === player.index ? ' cur' : ''}${i < player.index ? ' past' : ''}" data-qi="${i}"><span class="fs-q-art"><img src="${esc(coverOf(t))}" data-tpl="${esc(templateCover(t.id))}" alt="" loading="lazy"></span><span class="fs-q-meta"><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></span>${t.duration ? `<span class="fs-q-dur">${fmt(t.duration)}</span>` : ''}</button>`;
     }).join('') : `<div class="fs-q-empty">${player.mode === 'wave' ? 'Моя волна подберёт следующий трек сама' : 'Очередь пуста'}</div>`;
     if (scroll) {
       const cur = list.querySelector('.cur');
@@ -386,8 +387,8 @@ export class FullScreen {
     // обложку берём через main (без CORS — иначе canvas нельзя сохранить), цвет — тот же, что у фона
     const card = this.card;
     const [cover, rgb] = await Promise.all([
-      t.cover && this.d.api.card ? this.d.api.card.cover(t.cover).catch(() => null) : null,
-      t.cover ? Promise.resolve(this.d.api.coverColor(t.cover)).catch(() => null) : null
+      coverOf(t) && this.d.api.card ? this.d.api.card.cover(coverOf(t)).catch(() => null) : null,
+      coverOf(t) ? Promise.resolve(this.d.api.coverColor(coverOf(t))).catch(() => null) : null
     ]);
     if (this.card !== card) return;
     card.rgb = rgb;
@@ -693,7 +694,9 @@ export class FullScreen {
       const nb = this.$(sel);
       const img = this.$(`${sel} img`);
       if (!nb || !img) return;
-      const src = (t && t.cover) || (cur && cur.cover) || '';
+      // у соседа без обложки — его шаблон, а не обложка текущего трека
+      const src = t ? coverOf(t) : '';
+      if (t) img.dataset.tpl = templateCover(t.id);
       img.src = src;
       nb.dataset.on = src ? '1' : '';
     };
@@ -748,13 +751,17 @@ export class FullScreen {
     this.trackId = t.id;
     this.lastLine = -2;
     this.safe(() => {
+      // обложка всегда есть: своя или шаблонный диск (иначе на экране оставалась прошлая)
+      const art = coverOf(t);
       const img = $('.fs-art img');
-      img.src = t.cover || '';
-      img.style.visibility = t.cover ? 'visible' : 'hidden';
+      img.dataset.tpl = templateCover(t.id);
+      img.src = art;
+      img.style.visibility = 'visible';
       // задник и отражение — та же обложка
       this.el.querySelectorAll('.fs-back img, .fs-refl img').forEach((i) => {
-        i.src = t.cover || '';
-        i.style.visibility = t.cover ? 'visible' : 'hidden';
+        i.dataset.tpl = templateCover(t.id);
+        i.src = art;
+        i.style.visibility = 'visible';
       });
       this.setNeighbors();
       if (prevId) this.coverFlow(dir);
@@ -764,10 +771,10 @@ export class FullScreen {
       this.el.style.setProperty('--fs-glow', glowFrom(null));
     });
     this.safe(() => this.renderQueue());
-    if (t.cover) {
+    if (coverOf(t)) {
       let colorPromise;
       try {
-        colorPromise = this.d.api.coverColor(t.cover);
+        colorPromise = this.d.api.coverColor(coverOf(t));
       } catch (e) {
         colorPromise = Promise.resolve(null);
       }

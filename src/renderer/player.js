@@ -1,6 +1,7 @@
 // Плеер: очередь, режимы «волна» и «список», перемотка, Media Session (медиаклавиши Windows).
 const api = window.nyao;
 import { spMode } from './sp-mode.js';
+import { fillCover } from './covers.js';
 
 // Честное перемешивание (Фишер — Йетс): sort(() => Math.random() - 0.5) даёт перекос
 function shuffled(arr) {
@@ -224,6 +225,8 @@ export class Player extends EventTarget {
   load() {
     const t = this.current;
     if (!t) return;
+    // трек без обложки (VK) — шаблонный диск: его же покажут плеер, полноэкранный режим и шторка Windows
+    fillCover(t);
     this.audio.src = streamSrc(t);
     this.audio.play().catch(() => {});
     this.startedAt = Date.now();

@@ -43,6 +43,9 @@ services:
     volumes:
       - releases:/data/releases
       - status:/data/status
+      # баннеры профилей и кэш картинок: без тома они пропадали при каждом деплое
+      - banners:/data/banners
+      - imgcache:/data/imgcache
 
   caddy:
     image: caddy:2-alpine
@@ -68,5 +71,7 @@ volumes:
   pgdata:
   releases:
   status:
+  banners:
+  imgcache:
   caddy_data:
   caddy_config:

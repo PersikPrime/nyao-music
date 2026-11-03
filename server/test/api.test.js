@@ -188,3 +188,29 @@ test('разработчик: флаг dev только у Telegram ID из сп
     }
   }
 });
+
+test('картинки через сервер: только известные CDN, ответ — сама картинка', async () => {
+  const { proxyable, proxied, imageProxy } = await import('../src/img-proxy.js');
+  assert.ok(proxyable('https://t.me/i/userpic/320/x.jpg'));
+  assert.ok(proxyable('https://i.ytimg.com/vi/a/mqdefault.jpg'));
+  assert.ok(!proxyable('https://evil.example.com/a.jpg'));
+  assert.ok(!proxyable('http://t.me/i/userpic/320/x.jpg'));
+  assert.equal(proxied('https://api.x', 'https://t.me/i/userpic/320/x.jpg'), 'https://api.x/img?u=https%3A%2F%2Ft.me%2Fi%2Fuserpic%2F320%2Fx.jpg');
+  assert.equal(proxied('https://api.x', 'https://other.example/a.jpg'), 'https://other.example/a.jpg');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'img-'));
+  const calls = [];
+  const get = imageProxy({ dataDir: dir, relay: 'https://relay.test', fetch: async (u) => {
+    calls.push(u);
+    if (u.startsWith('https://relay.test')) return new Response('no', { status: 502 });
+    return new Response(Buffer.from([1, 2, 3]), { headers: { 'content-type': 'image/jpeg' } });
+  } });
+  const r = await get('https://i.ytimg.com/vi/a/mqdefault.jpg');
+  assert.equal(r.type, 'image/jpeg');
+  assert.equal(calls.length, 2, 'сначала ретранслятор, потом напрямую');
+  await get('https://i.ytimg.com/vi/a/mqdefault.jpg');
+  assert.equal(calls.length, 2, 'второй раз — из кэша');
+  assert.equal(await get('https://evil.example.com/a.jpg'), null);
+});

@@ -549,11 +549,20 @@ function registerIpc() {
   });
   // средний цвет обложки — для фона полноэкранного режима (картинку разбираем здесь, без CORS)
   const coverColors = new Map();
+  // шаблонный диск nyao://cover/<ключ>.png рисуем здесь же, без сети
+  const coverBuffer = async (url) => {
+    const m = /^nyao:\/\/cover\/(.+)\.png$/.exec(String(url));
+    if (m) return renderCover(decodeURIComponent(m[1]), 400);
+    const res = await net.fetch(url);
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  };
   handle('cover:color', async (url) => {
     if (!url) return null;
     if (coverColors.has(url)) return coverColors.get(url);
-    const res = await net.fetch(url);
-    const img = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()));
+    const buf = await coverBuffer(url);
+    if (!buf) return null;
+    const img = nativeImage.createFromBuffer(buf);
     if (img.isEmpty()) return null;
     const bmp = img.resize({ width: 24, height: 24, quality: 'good' }).toBitmap(); // BGRA
     let r = 0, g = 0, b = 0, n = 0;
@@ -571,10 +580,10 @@ function registerIpc() {
   });
   // карточка со строками текста: обложка для canvas (без CORS), копирование и сохранение готовой картинки
   handle('card:cover', async (url) => {
-    if (!/^https:\/\//.test(String(url || ''))) return null;
-    const res = await net.fetch(url);
-    if (!res.ok) return null;
-    const img = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()));
+    if (!/^(https:\/\/|nyao:\/\/cover\/)/.test(String(url || ''))) return null;
+    const buf = await coverBuffer(url);
+    if (!buf) return null;
+    const img = nativeImage.createFromBuffer(buf);
     if (img.isEmpty()) return null;
     const { width } = img.getSize();
     return (width > 800 ? img.resize({ width: 800, quality: 'best' }) : img).toDataURL();

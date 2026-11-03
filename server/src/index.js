@@ -11,6 +11,7 @@ import { LogBuffer } from './logbuf.js';
 import { GitHub } from './github.js';
 import { parseAdminIds } from './admin.js';
 import tls from 'node:tls';
+import { imageProxy, proxied, proxyable } from './img-proxy.js';
 
 // Провайдер в РФ режет исходящий TLS с постквантовым обменом ключами (X25519MLKEM768), который OpenSSL 3.5
 // включает по умолчанию: соединение с ретранслятором Telegram на Cloudflare просто висит. Обычные кривые проходят.
@@ -77,7 +78,22 @@ console.log(push ? `[push] Firebase: ${fcm.project_id}` : '[push] FCM_SERVICE_AC
 const github = new GitHub({ token: env.GH_ADMIN_TOKEN || '', repo: env.GITHUB_REPO || 'PersikPrime/nyao-music', automatorRepo: env.AUTOMATOR_REPO || 'PersikPrime/automator', log: console.log });
 console.log(github.configured ? '[admin] GitHub настроен' : '[admin] GH_ADMIN_TOKEN не задан — сборки и заметки из Automator недоступны');
 console.log(`[admin] админов Automator: ${ADMIN_IDS.size}`);
-const app = createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS, devIds: DEV_IDS, yaCatalog: new YaCatalog({ log: console.log }), adminIds: ADMIN_IDS, github, logs, dataDir: env.DATA_DIR || '/data' });
+// картинки через сервер (в РФ без VPN многие CDN не открываются): ретранслятор, потом напрямую, кэш на диске
+const images = imageProxy({ dataDir: env.DATA_DIR || '/data', relay: env.TG_RELAY || '', log: console.log });
+// аватарки Telegram, сохранённые раньше прямыми ссылками, — тоже через сервер
+try {
+  const { rows } = await pool.query("SELECT id, picture FROM users WHERE picture LIKE 'https://%' AND picture NOT LIKE $1", [`${PUBLIC_URL}/img?%`]);
+  let n = 0;
+  for (const r of rows) {
+    if (!proxyable(r.picture)) continue;
+    await pool.query('UPDATE users SET picture = $2 WHERE id = $1', [r.id, proxied(PUBLIC_URL, r.picture)]);
+    n++;
+  }
+  if (n) console.log(`[img] аватарок через сервер: ${n}`);
+} catch (e) {
+  console.log(`[img] аватарки: ${e.message}`);
+}
+const app = createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS, devIds: DEV_IDS, yaCatalog: new YaCatalog({ log: console.log }), adminIds: ADMIN_IDS, github, logs, dataDir: env.DATA_DIR || '/data', images });
 await app.admin.init();
 setInterval(() => app.admin.tick(), 30_000).unref();
 const server = http.createServer(app);
