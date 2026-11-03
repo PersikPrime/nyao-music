@@ -30,6 +30,7 @@ export function imageProxy({ dataDir = '/data', relay = '', fetch = globalThis.f
   const dir = path.join(dataDir, 'imgcache');
   try { fs.mkdirSync(dir, { recursive: true }); } catch { /* нет прав — будем отдавать без кэша */ }
   const inflight = new Map();
+  const failed = new Map(); // адрес → когда не получилось: 10 минут не пробуем снова, сразу отдаём «не вышло»
   let writes = 0;
 
   const keyOf = (u) => crypto.createHash('sha1').update(u).digest('hex');
@@ -66,7 +67,7 @@ export function imageProxy({ dataDir = '/data', relay = '', fetch = globalThis.f
   }
 
   async function grab(url) {
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { accept: 'image/*' } });
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000), headers: { accept: 'image/*' } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const type = String(res.headers.get('content-type') || '');
     if (!type.startsWith('image/')) throw new Error('не картинка');
@@ -97,9 +98,16 @@ export function imageProxy({ dataDir = '/data', relay = '', fetch = globalThis.f
     const cached = readCache(key);
     if (cached) return cached;
     if (inflight.has(key)) return inflight.get(key);
+    const f = failed.get(key);
+    if (f && Date.now() - f < 10 * 60_000) return null;
     const p = load(u)
       .then((r) => { writeCache(key, r.type, r.body); return r; })
-      .catch((e) => { log(`[img] ${new URL(u).hostname}: ${e.message}`); return null; })
+      .catch((e) => {
+        log(`[img] ${new URL(u).hostname}: ${e.message}`);
+        failed.set(key, Date.now());
+        if (failed.size > 5000) failed.clear();
+        return null;
+      })
       .finally(() => inflight.delete(key));
     inflight.set(key, p);
     return p;
