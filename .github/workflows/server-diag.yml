@@ -33,7 +33,7 @@ jobs:
           for (const u of ['https://t.me/i/userpic/320/durov.jpg', 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg']) {
             const t = Date.now();
             try {
-              const r = await fetch('http://127.0.0.1:8080/img?u=' + encodeURIComponent(u), { signal: AbortSignal.timeout(25000) });
+              const r = await fetch('http://127.0.0.1:8080/img?u=' + encodeURIComponent(u), { signal: AbortSignal.timeout(25000), redirect: 'manual' });
               console.log(`::notice::/img ${new URL(u).hostname}: HTTP ${r.status} ${r.headers.get('content-type')} за ${Date.now() - t} мс`);
             } catch (e) { console.log(`::error::/img ${new URL(u).hostname}: ${e.message}`); }
           }
