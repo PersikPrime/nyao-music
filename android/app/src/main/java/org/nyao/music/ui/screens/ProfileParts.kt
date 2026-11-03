@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -82,7 +83,7 @@ fun inkOn(c: Color): Color = if (0.2126f * c.red + 0.7152f * c.green + 0.0722f *
 fun ShapedAvatar(user: UserCard?, size: Int, shape: String? = user?.shape, color: String? = user?.color, ring: Int = 0, modifier: Modifier = Modifier) {
     val sh = avatarShape(shape)
     val c = profileColor(color)
-    Box(modifier.size(size.dp).then(if (ring > 0) Modifier.clip(sh).background(Color.Black).padding(ring.dp) else Modifier).clip(sh).background(c), contentAlignment = Alignment.Center) {
+    Box(modifier.requiredSize(size.dp).then(if (ring > 0) Modifier.clip(sh).background(Color.Black).padding(ring.dp) else Modifier).clip(sh).background(c), contentAlignment = Alignment.Center) {
         val pic = user?.picture
         if (pic != null) AsyncImage(model = pic, contentDescription = user.display, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         else Text(((user?.name?.firstOrNull() ?: user?.nick?.firstOrNull()) ?: 'N').uppercase(), color = inkOn(c), fontWeight = FontWeight.Bold, fontSize = ((size - ring * 2) * 0.42f).sp)

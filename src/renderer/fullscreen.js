@@ -128,9 +128,52 @@ export class FullScreen {
     const { player } = this.d;
     $('[data-fs="prev"]').innerHTML = this.d.icons.prev;
     $('[data-fs="next"]').innerHTML = this.d.icons.next;
+    // очередь: перетаскивание строк (за любое место строки, удобнее — за точки справа)
+    let dragFrom = -1;
+    el.addEventListener('dragstart', (e) => {
+      const row = e.target.closest && e.target.closest('.fs-q-row');
+      if (!row) return;
+      dragFrom = Number(row.dataset.qi);
+      row.classList.add('dragging');
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+    el.addEventListener('dragover', (e) => {
+      const row = e.target.closest && e.target.closest('.fs-q-row');
+      if (!row || dragFrom < 0) return;
+      e.preventDefault();
+      el.querySelectorAll('.fs-q-row.drop').forEach((r) => r.classList.remove('drop'));
+      row.classList.add('drop');
+    });
+    el.addEventListener('drop', (e) => {
+      const row = e.target.closest && e.target.closest('.fs-q-row');
+      if (!row || dragFrom < 0) return;
+      e.preventDefault();
+      player.move(dragFrom, Number(row.dataset.qi));
+      dragFrom = -1;
+      this.renderQueue(false, true);
+    });
+    el.addEventListener('dragend', () => {
+      dragFrom = -1;
+      el.querySelectorAll('.fs-q-row.dragging, .fs-q-row.drop').forEach((r) => r.classList.remove('dragging', 'drop'));
+    });
+    el.addEventListener('keydown', (e) => {
+      const row = e.target.closest && e.target.closest('.fs-q-row');
+      if (row && (e.key === 'Enter' || e.key === ' ') && !e.target.closest('[data-qmenu]')) {
+        e.preventDefault();
+        player.playAt(Number(row.dataset.qi));
+      }
+    });
     el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-fs]');
       const line = e.target.closest('[data-t]');
+      const qm = e.target.closest('[data-qmenu]');
+      if (qm) {
+        // точки у трека: меню без правой кнопки
+        const i = Number(qm.dataset.qmenu);
+        const r = qm.getBoundingClientRect();
+        if (this.d.menu && player.queue[i]) this.d.menu(r.left, r.bottom + 4, player.queue[i], i);
+        return;
+      }
       const qi = e.target.closest('[data-qi]');
       if (qi) {
         player.playAt(Number(qi.dataset.qi));
@@ -310,7 +353,7 @@ export class FullScreen {
     this.$('.fs-q-sub').textContent = player.mode === 'wave' ? 'Моя волна' : [player.label, q.length ? `${q.length} тр.` : ''].filter(Boolean).join(' · ');
     list.innerHTML = items.length ? items.map((t, k) => {
       const i = from + k;
-      return `<button class="fs-q-row${i === player.index ? ' cur' : ''}${i < player.index ? ' past' : ''}" data-qi="${i}"><span class="fs-q-art"><img src="${esc(coverOf(t))}" data-tpl="${esc(templateCover(t.id))}" alt="" loading="lazy"></span><span class="fs-q-meta"><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></span>${t.duration ? `<span class="fs-q-dur">${fmt(t.duration)}</span>` : ''}</button>`;
+      return `<div class="fs-q-row${i === player.index ? ' cur' : ''}${i < player.index ? ' past' : ''}" data-qi="${i}" role="button" tabindex="0" draggable="true"><span class="fs-q-art"><img src="${esc(coverOf(t))}" data-tpl="${esc(templateCover(t.id))}" alt="" loading="lazy"></span><span class="fs-q-meta"><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></span>${t.duration ? `<span class="fs-q-dur">${fmt(t.duration)}</span>` : ''}<span class="fs-q-more" data-qmenu="${i}" role="button" tabindex="0" title="Меню трека · потяни, чтобы переставить" aria-label="Меню трека «${esc(t.title)}»"><svg width="14" height="18" viewBox="0 0 14 18" fill="currentColor" aria-hidden="true"><circle cx="4" cy="3" r="1.6"/><circle cx="10" cy="3" r="1.6"/><circle cx="4" cy="9" r="1.6"/><circle cx="10" cy="9" r="1.6"/><circle cx="4" cy="15" r="1.6"/><circle cx="10" cy="15" r="1.6"/></svg></span></div>`;
     }).join('') : `<div class="fs-q-empty">${player.mode === 'wave' ? 'Моя волна подберёт следующий трек сама' : 'Очередь пуста'}</div>`;
     if (scroll) {
       const cur = list.querySelector('.cur');

@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -647,7 +648,8 @@ fun UserScreen(model: AppModel, key: String) {
             else -> {
                 item {
                     Column(Modifier.fillMaxWidth().appear(0).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Box(Modifier.offset(y = (-56).dp).height(64.dp)) {
+                        // аватар заходит на баннер: место под него — 64dp, остальное свисает вверх (без сплющивания)
+                        Box(Modifier.offset(y = (-56).dp).height(64.dp).wrapContentHeight(Alignment.Top, unbounded = true)) {
                             ShapedAvatar(pp.user, 120, ring = 5)
                         }
                         Text(pp.user.display, style = MaterialTheme.typography.headlineMedium)

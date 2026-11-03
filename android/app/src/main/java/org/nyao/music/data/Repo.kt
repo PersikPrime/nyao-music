@@ -608,7 +608,9 @@ object Repo {
 
     // ---------- Воспроизведение ----------
 
-    fun mediaItem(t: Track): MediaItem {
+    fun mediaItem(t0: Track): MediaItem {
+        // трек без обложки (VK и др.) — шаблонный диск везде: плеер, очередь, шторка, виджеты; иначе висела прошлая
+        val t = if (t0.cover.isNullOrBlank()) t0.copy(cover = TemplateCover.uri(t0.id) ?: t0.cover) else t0
         tracks[t.id] = t
         val meta = MediaMetadata.Builder()
             .setTitle(t.title)

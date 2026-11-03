@@ -1,4 +1,5 @@
 {
   "name": "0.8",
-  "build": 100
+  "build": 101,
+  "channel": "dev"
 }

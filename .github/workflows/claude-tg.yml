@@ -1,0 +1,25 @@
+# Сообщение в группу от бота Claude (не связан с приложением). Запускается вручную: Actions → «Сообщение в группу».
+# Секреты: CLAUDE_TG_BOT_TOKEN (токен бота), CLAUDE_TG_CHAT_ID (id группы). Токен нигде не печатается.
+name: Сообщение в группу
+
+on:
+  workflow_dispatch:
+    inputs:
+      text:
+        description: Текст (HTML Telegram: <b>, <i>, <a>, <code>)
+        required: true
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Отправка
+        env:
+          TOKEN: ${{ secrets.CLAUDE_TG_BOT_TOKEN }}
+          CHAT: ${{ secrets.CLAUDE_TG_CHAT_ID }}
+          TEXT: ${{ inputs.text }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$CHAT" ]; then echo "::warning::Нет секретов CLAUDE_TG_BOT_TOKEN / CLAUDE_TG_CHAT_ID — пропускаю"; exit 0; fi
+          body=$(jq -n --arg chat "$CHAT" --arg text "$TEXT" '{chat_id: $chat, text: $text, parse_mode: "HTML", disable_web_page_preview: true}')
+          out=$(curl -sS -m 20 -H 'Content-Type: application/json' -d "$body" "https://api.telegram.org/bot$TOKEN/sendMessage")
+          if echo "$out" | jq -e '.ok' >/dev/null; then echo "::notice::Отправлено"; else echo "::error::Telegram: $(echo "$out" | jq -r '.description // "ошибка"')"; exit 1; fi
