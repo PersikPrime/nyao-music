@@ -103,7 +103,7 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [], devIds = [], yaCatalog = null, adminIds = new Map(), github = null, logs = null, dataDir = '/data', images = null }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [], devIds = [], yaCatalog = null, adminIds = new Map(), github = null, logs = null, dataDir = '/data', images = null, waveMix = null }) {
   // минимальная сборка: из переменной окружения, но Automator может поменять её на лету (хранится в app_settings)
   const cfg = { minBuild, minBuildEnv: minBuild };
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
@@ -114,6 +114,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
   const authLimit = limiter(30);
   const apiLimit = limiter(600);
   const imgLimit = limiter(900);
+  const waveLimit = limiter(40);
 
   const q = (sql, params) => db.query(sql, params);
 
@@ -180,6 +181,17 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     ['GET', /^\/health$/, async () => ({ ok: true, minBuild: cfg.minBuild, telegram: tg.configured, relay: !String(tg.tokenUrl || '').startsWith('https://oauth.telegram.org') })],
     // техработы и сбои сервисов — приложения спрашивают раз в 2 минуты (без входа и без проверки сборки)
     ['GET', /^\/status$/, async () => (status ? status.get() : normalizeStatus(null))],
+    // своя волна Nyao (этап 1): похожее по открытым данным, приложение само находит треки в своих сервисах
+    ['POST', /^\/wave\/mix$/, async ({ req, ip }) => {
+      waveLimit(ip);
+      if (!waveMix) throw new HttpError(503, 'Волна Nyao на сервере выключена');
+      const body = await readJson(req);
+      const seeds = (Array.isArray(body.seeds) ? body.seeds : []).slice(0, 40).map((x) => ({ artist: clip(x && x.artist, 200), title: clip(x && x.title, 200) }));
+      const recent = (Array.isArray(body.recent) ? body.recent : []).slice(0, 600).map((x) => (x && typeof x === 'object' ? { artist: clip(x.artist, 200), title: clip(x.title, 200) } : clip(x, 400)));
+      const diversity = ['any', 'favorite', 'discover', 'popular'].includes(body.diversity) ? body.diversity : 'any';
+      const size = Math.max(1, Math.min(40, Number(body.size) || 20));
+      return { tracks: await waveMix({ seeds, recent, diversity, size }) };
+    }],
     // картинки, которые в РФ без VPN не грузятся (аватарки Telegram, обложки YouTube, SoundCloud, VK) — через сервер
     ['GET', /^\/img$/, async ({ url, ip, res }) => {
       imgLimit(ip);

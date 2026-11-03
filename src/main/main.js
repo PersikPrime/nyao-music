@@ -201,7 +201,7 @@ function configureRpc() {
 }
 
 // Что из настроек едет на другие устройства (остальное — своё у каждого компьютера)
-const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood', 'waveFresh'];
+const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood', 'waveFresh', 'waveNyao'];
 // вид приложения и «Мне нравится» по сервисам — тоже общие для всех устройств
 const PREF_KEYS = ['layout', 'splitLiked', 'waveTab', 'accent', 'lyricsOrder', 'lyricsWordsFirst'];
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
@@ -413,7 +413,9 @@ function initProviders() {
       get: () => { try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'wave-profile.json'), 'utf8')); } catch { return {}; } },
       set: (value) => { const file = path.join(app.getPath('userData'), 'wave-profile.json'); fs.writeFileSync(file + '.tmp', JSON.stringify(value)); fs.renameSync(file + '.tmp', file); }
     },
-    getFavorites: async () => readFav()
+    getFavorites: async () => readFav(),
+    // своя волна Nyao (nightly): похожее с сервера, без входа в аккаунт Nyao тоже работает
+    nyao: { mix: (body) => cloud.request('POST', '/wave/mix', body) }
   });
   streams = new StreamService({ ya, yt, sc, vk, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch, vk: vkSessionFetch } });
   catalog = new Catalog({ ya, yt });

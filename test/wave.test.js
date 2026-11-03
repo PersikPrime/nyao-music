@@ -134,3 +134,19 @@ test('desktop and Android share a deterministic selection fixture', () => {
   const input=Array.from({length:120},(_,i)=>({track:track(i,sources[i%5],{artist:'Артист '+i%8}),liked:i<80,recency:i<40?0.9:0.05,affinity:0}));
   assert.deepEqual(new WavePolicy({random}).select(input,{diversity:'favorite',fresh:100,share:40,size:20}).map(t=>t.id),["sp:9","ya:5","ya:75","vk:23","ya:0","yt:81","ya:30","sc:2","ya:40","ya:15","sc:22","ya:35","yt:66","ya:25","ya:20","ya:80","sp:19","vk:18","ya:45","vk:38"]);
 });
+test('своя волна Nyao: затравка уходит на сервер, ответ находится в подключённом сервисе', async () => {
+  let body = null;
+  const liked = [track('L1'), track('L2')];
+  const found = { id: 'vk:9_9', source: 'vk', srcId: '9_9', title: 'Song C', artist: 'Band C', duration: 180, available: true };
+  const vk = { loggedIn: true, likedTracks: async () => [], recommendations: async () => [], search: async (q) => (/band c/i.test(q) ? [found] : []) };
+  const ya = { loggedIn: true, likedTracks: async () => liked, waveStart: async () => [], waveMore: async () => [], similarTracks: async () => [], search: async () => [], waveFeedback: async () => {} };
+  const w = new WaveMixer({
+    ya, yt: null, sc: null, vk, getSettings: () => ({ waveDiversity: 'any' }),
+    nyao: { mix: async (b) => { body = b; return { tracks: [{ artist: 'Band C', title: 'Song C', reason: 'Похоже на «Song L1»' }] }; } }
+  });
+  const out = await w.start();
+  assert.ok(body && body.seeds.length >= 1, 'затравка отправлена');
+  assert.ok(body.seeds.every((s) => s.artist && s.title));
+  const s = w.session;
+  assert.ok(s.candidates.some((c) => c.track.id === 'vk:9_9') || out.some((t) => t.id === 'vk:9_9'), 'трек найден во VK');
+});

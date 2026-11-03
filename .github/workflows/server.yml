@@ -58,6 +58,7 @@ jobs:
           DB_PASSWORD: ${{ secrets.NYAO_DB_PASSWORD }}
           # адрес Cloudflare Worker из server/cloudflare-worker.js: в РФ ТСПУ режет серверу oauth.telegram.org
           TG_RELAY: ${{ secrets.NYAO_TG_RELAY }}
+          LASTFM_KEY: ${{ secrets.NYAO_LASTFM_KEY }}
           FCM: ${{ secrets.NYAO_FCM_SERVICE_ACCOUNT }}
           KS_B64: ${{ secrets.NYAO_KEYSTORE_B64 }}
           KS_PASS: ${{ secrets.NYAO_KEYSTORE_PASSWORD }}
@@ -90,6 +91,8 @@ jobs:
             echo "TG_CLIENT_SECRET=$(q "$TG_SECRET")"
             echo "POSTGRES_PASSWORD=$(q "$DB_PASSWORD")"
             echo "TG_RELAY=$(q "$TG_RELAY")"
+            # ключ Last.fm приложения (тот же, что у ПК): своя волна Nyao берёт оттуда похожие треки
+            echo "LASTFM_KEY=$(q "$LASTFM_KEY")"
             # запасные IP Cloudflare для ретранслятора, если провайдер режет его адреса (Variables → NYAO_TG_RELAY_IPS)
             echo "TG_RELAY_IPS=${{ vars.NYAO_TG_RELAY_IPS }}"
             # ключ Firebase многострочный — кладём одной строкой base64

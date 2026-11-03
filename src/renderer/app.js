@@ -252,6 +252,10 @@ function waveControlsHtml(compact = false) {
     <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="eyebrow">Баланс источников</span><span style="font-size:12px;color:var(--accent)" id="share-label">${shareLabel(share)}</span></div>
     <div class="balance"><div class="track" id="share-track" style="background:${balanceTrack(share)}"></div><input type="range" min="0" max="100" step="5" value="${share}" data-input="share" aria-label="Доля других сервисов"></div>
     <div class="balance-legend"><span>${badge('ya')}<b id="share-ya">${100 - share}%</b></span><span><b id="share-yt">${share}%</b>${badge('yt')}${state.status.sc ? badge('sc') : ''}${state.status.vk ? badge('vk') : ''}${state.status.sp ? badge('sp') : ''}</span></div>
+  </div>
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span><span class="eyebrow">Своя волна Nyao · бета</span>${compact ? '' : '<span class="hint" style="display:block;margin-top:4px">Похожее по открытым данным (Last.fm, Deezer) — для всех сервисов сразу. Мы находим эти треки в твоих сервисах.</span>'}</span>
+      <button class="btn sm ${s.waveNyao !== false ? 'primary' : ''}" data-action="wave-nyao" aria-pressed="${s.waveNyao !== false}">${s.waveNyao !== false ? 'Вкл' : 'Выкл'}</button></div>
   </div>`;
 }
 
@@ -2594,6 +2598,9 @@ async function handleAction(el, e) {
       break;
     case 'wave-div':
       await setWave({ waveDiversity: el.dataset.v });
+      break;
+    case 'wave-nyao':
+      await setWave({ waveNyao: !(state.settings.waveNyao !== false) });
       break;
     case 'wave-mood':
       await setWave({ waveMood: state.settings.waveMood === el.dataset.v ? null : el.dataset.v });

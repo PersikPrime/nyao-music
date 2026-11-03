@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   waveFresh: 60,         // свежесть волны: 0 — всё время одинаково, 100 — почти только недавние лайки
   waveDiversity: 'any', // any | favorite | discover | popular
   waveMood: null,        // null | active | fun | calm | sad
+  waveNyao: true,        // своя волна Nyao (бета, nightly): похожее с сервера для всех сервисов
   autoplay: true,
   quality: 'high',
   sourcePref: 'auto',

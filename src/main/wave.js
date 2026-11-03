@@ -1,6 +1,7 @@
 // Unified wave: all services supply candidates, one policy owns the resulting queue.
 import { recencyPick } from './freshness.js';
 import { WavePolicy, artistKey, sameRecording, recentAffinity } from './wave-policy.js';
+import { findMatch } from './match.js';
 
 export function shuffle(list) {
   const a = [...list];
@@ -24,8 +25,8 @@ const bounded = async (work, fallback = [], timeout = 8000) => {
 };
 const DAY = 86400000;
 export class WaveMixer {
-  constructor({ ya, yt, sc, vk = null, sp = null, getSettings, getRecent = async () => new Set(), getHistory = () => [], getFavorites = async () => [], profile = null, isDown = () => false }) {
-    Object.assign(this, { ya, yt, sc, vk, sp, getSettings, getRecent, getHistory, getFavorites, profile, isDown });
+  constructor({ ya, yt, sc, vk = null, sp = null, getSettings, getRecent = async () => new Set(), getHistory = () => [], getFavorites = async () => [], profile = null, isDown = () => false, nyao = null }) {
+    Object.assign(this, { ya, yt, sc, vk, sp, getSettings, getRecent, getHistory, getFavorites, profile, isDown, nyao });
     this.generation = 0;
     this.session = null;
     try { this.state = profile?.get() || {}; } catch { this.state = {}; }
@@ -116,7 +117,41 @@ export class WaveMixer {
           reason: seed && artistKey(track) === artistKey(seed) ? `Исполнитель из твоих лайков: ${seed.artist}` : 'Рекомендация сервиса' };
       });
     }));
-    this.ensure(s); this.add(s, lists.flat()); s.loads++;
+    // своя волна Nyao: похожее по открытым данным (Last.fm, Deezer) — находим эти треки в своих сервисах
+    const own = this.nyao && this.getSettings().waveNyao !== false ? await bounded(() => this.nyaoCandidates(s, sources, opts), [], 15000) : [];
+    this.ensure(s); this.add(s, [...lists.flat(), ...own]); s.loads++;
+  }
+  /** Затравка — свежие лайки и дослушанное, ответ сервера — «исполнитель — трек», ищем их в подключённых сервисах */
+  async nyaoCandidates(s, sources, opts) {
+    const liked = s.libraries.filter(c => c.track.available !== false).sort((a, b) => b.recency - a.recency).map(c => c.track);
+    const heard = (s.history || []).filter(t => t && t.artist && t.title && !t.skipped);
+    const seeds = [...recencyPick(liked.slice(0, 120).map(track => ({ track })), 14, opts.fresh).map(x => x.track), ...heard.slice(0, 8)]
+      .map(t => ({ artist: t.artist, title: t.title }));
+    if (!seeds.length) return [];
+    const recent = [...(s.history || []), ...s.policy.selected].slice(-400).map(t => ({ artist: t.artist, title: t.title }));
+    const res = await this.nyao.mix({ seeds, recent, diversity: opts.diversity === 'any' ? 'any' : opts.diversity, size: 14 });
+    const wanted = (res && res.tracks) || [];
+    // где искать: сначала Яндекс и VK (полные треки), потом SoundCloud и YouTube Music; Spotify — нет
+    const order = ['ya', 'vk', 'sc', 'yt'].map(id => sources.find(([x]) => x === id)).filter(Boolean);
+    if (!order.length) return [];
+    const out = [];
+    let i = 0;
+    const worker = async () => {
+      while (i < wanted.length) {
+        const w = wanted[i++];
+        for (const [, p] of order) {
+          const m = await bounded(() => findMatch({ artist: w.artist, title: w.title, duration: 0 }, (q) => p.search(q), { minScore: 0.72 }), null, 6000);
+          if (m && m.track) {
+            const t = m.track;
+            out.push({ track: t, liked: s.libraries.some(c => sameRecording(c.track, t)), recency: 0,
+              affinity: 0.5 + (this.state.taste[artistKey(t)] || 0) / 5, reason: w.reason || 'Своя волна Nyao' });
+            break;
+          }
+        }
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    return out;
   }
   async batch(s, first = false) {
     if (s.loading) return s.loading;
