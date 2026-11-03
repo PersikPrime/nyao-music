@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       text:
-        description: Текст (HTML Telegram: <b>, <i>, <a>, <code>)
+        description: "Текст (HTML для Telegram: b, i, a, code)"
         required: true
 
 jobs:
