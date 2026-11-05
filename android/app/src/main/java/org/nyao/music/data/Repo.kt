@@ -48,7 +48,7 @@ object Repo {
     private val LIBRARY_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC, SOURCE_VK, SOURCE_SP)
     private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
-    enum class Mode { LIST, WAVE, RADIO }
+    enum class Mode { LIST, WAVE, RADIO, LIVE }
 
     /** Что сейчас играет: «Моя волна» (сама подгружает треки) или обычный список */
     val mode = MutableStateFlow(Mode.LIST)
@@ -179,6 +179,7 @@ object Repo {
         return when (key) {
             "wave" -> org.json.JSONObject().put("ytmShare", s.ytmShare).put("waveDiversity", s.diversity).put("waveMood", s.mood ?: org.json.JSONObject.NULL).put("waveFresh", s.waveFresh)
             "prefs" -> org.json.JSONObject().put("layout", s.layout ?: org.json.JSONObject.NULL).put("splitLiked", s.splitLiked).put("waveTab", s.waveTab)
+                .put("radioTab", s.radioTab).put("radioFavs", org.json.JSONArray(s.radioFavs))
                 .put("lyricsWordsFirst", s.lyricsWordsFirst)
                 .apply { if (s.lyricsOrder.isNotEmpty()) put("lyricsOrder", org.json.JSONArray(s.lyricsOrder.map { org.json.JSONObject().put("id", it.first).put("on", it.second) })) }
             else -> mixStore.toJson()
@@ -227,6 +228,8 @@ object Repo {
                     o.str("layout")?.let { putString("layout", if (it == "wave") "wave" else "player") }
                     if (o.has("splitLiked")) putBoolean("splitLiked", o.optBoolean("splitLiked"))
                     if (o.has("waveTab")) putBoolean("waveTab", o.optBoolean("waveTab"))
+                    if (o.has("radioTab")) putBoolean("radioTab", o.optBoolean("radioTab", true))
+                    o.optJSONArray("radioFavs")?.let { a -> putString("radioFavs", (0 until a.length()).mapNotNull { a.optString(it).takeIf { s -> s.isNotBlank() } }.joinToString(",")) }
                     if (o.has("lyricsWordsFirst")) putBoolean("lyricsWordsFirst", o.optBoolean("lyricsWordsFirst", true))
                     o.optJSONArray("lyricsOrder")?.let { a ->
                         putString("lyricsOrder", a.objects().mapNotNull { x -> x.str("id")?.let { "$it:${if (x.optBoolean("on", true)) 1 else 0}" } }.joinToString(","))
@@ -633,7 +636,9 @@ object Repo {
             .setMediaMetadata(meta)
             // SoundCloud играет через HLS: тип нужно знать заранее, до получения ссылки
             // VK тоже отдаёт HLS (.m3u8, куски с AES-128 — ExoPlayer расшифровывает сам)
-            .apply { if (t.source == SOURCE_SC || t.source == SOURCE_VK) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            .apply { if (t.source == SOURCE_SC || t.source == SOURCE_VK || t.source == SOURCE_LIVE) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            // эфир: живой поток, ExoPlayer держится у живого края
+            .apply { if (t.source == SOURCE_LIVE) setLiveConfiguration(MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(12_000).build()) }
             .apply { if (t.source == SOURCE_SP && spotifyPlayable()) setMimeType(MimeTypes.AUDIO_WAV) }
             .build()
     }
@@ -647,6 +652,10 @@ object Repo {
     fun resolve(uri: Uri): Resolved {
         val source = uri.host ?: throw ApiException("Плохая ссылка $uri")
         val id = uri.pathSegments.firstOrNull() ?: throw ApiException("Плохая ссылка $uri")
+        if (source == SOURCE_LIVE) {
+            // эфир Яндекс Радио: ссылка подписана на время — каждый раз свежая
+            return Resolved(YandexRadio.streamUrl(id.substringBefore('/'), id.substringAfter('/')), null, -1)
+        }
         if (source == SOURCE_SPX) {
             val sub = substituteFor(id)
             return resolve(Uri.parse("nyao://${sub.source}/${Uri.encode(sub.srcId)}"))
@@ -672,7 +681,7 @@ object Repo {
             SOURCE_YA -> yaStreamCache.remove(id)
             SOURCE_SC -> sc.forget(id)
             SOURCE_VK -> vk.forget(id)
-            SOURCE_SP -> {}
+            SOURCE_SP, SOURCE_LIVE -> {}
             SOURCE_SPX -> _substitutes.value["$SOURCE_SP:$id"]?.let { forgetStream(Uri.parse("nyao://${it.source}/${Uri.encode(it.srcId)}"), blocked) }
             else -> ytStreams.invalidate(id, blocked)
         }

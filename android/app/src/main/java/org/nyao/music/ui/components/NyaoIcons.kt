@@ -18,6 +18,20 @@ object NyaoIcons {
             .addPath(pathData = addPathNodes(path), fill = SolidColor(Color.Black))
             .clearGroup()
             .build()
+    /** Иконки из нескольких фигур с вырезами (even-odd): радио, звезда — своих в наборе нет */
+    private fun iconEO(name: String, path: String): ImageVector =
+        ImageVector.Builder(name = name, defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 960f, viewportHeight = 960f)
+            .addGroup(translationY = 960f)
+            .addPath(pathData = addPathNodes(path), fill = SolidColor(Color.Black), pathFillType = androidx.compose.ui.graphics.PathFillType.EvenOdd)
+            .clearGroup()
+            .build()
+    private const val RADIO_BODY = "M160-680H800Q880-680 880-600V-200Q880-120 800-120H160Q80-120 80-200V-600Q80-680 160-680Z"
+    private const val RADIO_PARTS = "M600-490A90 90 0 1 1 599.9-490ZM200-470H420V-430H200ZM200-370H420V-330H200ZM250-690L680-866L696-830L330-690Z"
+    val Radio: ImageVector by lazy { iconEO("Radio", RADIO_BODY + "M150-610V-190H810V-610Z" + RADIO_PARTS) }
+    val RadioFilled: ImageVector by lazy { iconEO("RadioFilled", RADIO_BODY + RADIO_PARTS) }
+    val Star: ImageVector by lazy { iconEO("Star", "M480 -850 L574 -599 L841 -587 L632 -421 L703 -163 L480 -310 L257 -163 L328 -421 L119 -587 L386 -599 Z M480 -762 L549 -557 L765 -555 L592 -426 L656 -219 L480 -344 L304 -219 L368 -426 L195 -555 L411 -557 Z") }
+    val StarFilled: ImageVector by lazy { iconEO("StarFilled", "M480 -850 L574 -599 L841 -587 L632 -421 L703 -163 L480 -310 L257 -163 L328 -421 L119 -587 L386 -599 Z") }
+    val Stop: ImageVector by lazy { icon("Stop", "M300-240q-25 0-42.5-17.5T240-300v-360q0-25 17.5-42.5T300-720h360q25 0 42.5 17.5T720-660v360q0 25-17.5 42.5T660-240H300Z") }
     val PlayArrow: ImageVector by lazy { icon("PlayArrow", "M320-258v-450q0-14 9-22t21-8q4 0 8 1t8 3l354 226q7 5 10.5 11t3.5 14q0 8-3.5 14T720-458L366-232q-4 2-8 3t-8 1q-12 0-21-8t-9-22Z") }
     val Pause: ImageVector by lazy { icon("Pause", "M615-200q-24.75 0-42.37-17.63Q555-235.25 555-260v-440q0-24.75 17.63-42.38Q590.25-760 615-760h55q24.75 0 42.38 17.62Q730-724.75 730-700v440q0 24.75-17.62 42.37Q694.75-200 670-200h-55Zm-325 0q-24.75 0-42.37-17.63Q230-235.25 230-260v-440q0-24.75 17.63-42.38Q265.25-760 290-760h55q24.75 0 42.38 17.62Q405-724.75 405-700v440q0 24.75-17.62 42.37Q369.75-200 345-200h-55Z") }
     val SkipNext: ImageVector by lazy { icon("SkipNext", "M680-270v-420q0-13 8.5-21.5T710-720q13 0 21.5 8.5T740-690v420q0 13-8.5 21.5T710-240q-13 0-21.5-8.5T680-270Zm-460-27v-366q0-14 9-22t21-8q5 0 9 1.5t8 4.5l263 182q7 5 10 11.5t3 13.5q0 7-3 13.5T530-455L267-273q-4 3-8 4.5t-9 1.5q-12 0-21-8t-9-22Z") }

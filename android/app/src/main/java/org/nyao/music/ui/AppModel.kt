@@ -19,6 +19,7 @@ import org.nyao.music.playback.PlayerConnection
 sealed interface Route {
     data object Home : Route
     data object Wave : Route
+    data object Radio : Route
     data object Search : Route
     data object Library : Route
     /** Профиль: аккаунт и все настройки (раньше — вкладка «Настройки») */
