@@ -1279,3 +1279,34 @@ body.fs-on .toast { z-index: 1000; }
 .hundred-cap b { font-family: Unbounded, sans-serif; font-size: clamp(24px, 4vw, 40px); color: #fff; }
 .hundred-cap span { color: #c9c9ce; max-width: 520px; font-size: 15px; line-height: 1.5; }
 .hundred-cap .btn { margin-top: 8px; }
+
+/* ---------- Радио (эфир Яндекс Радио) ---------- */
+.st-logo { position: relative; display: grid; place-items: center; border-radius: 50%; overflow: hidden; flex-shrink: 0; color: #fff; font-weight: 700; width: 48px; height: 48px; font-size: 14px; }
+.st-logo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.st-logo b { font-weight: 700; }
+.st-logo.md { width: 56px; height: 56px; font-size: 16px; }
+.st-logo.lg { width: 58%; height: auto; aspect-ratio: 1; font-size: 20px; }
+.st-tile .st-box { position: relative; aspect-ratio: 1; border-radius: 20px; background: #0e0e10; border: 1px solid var(--line); display: grid; place-items: center; }
+.st-tile.sel .st-box { border-color: #3b3360; background: #0e0d14; }
+.st-count { position: absolute; left: 10px; bottom: 10px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #ff4d4d; margin-right: 6px; vertical-align: 1px; flex-shrink: 0; }
+.live-dot.green { background: #3dd68c; margin-right: 0; }
+#onair .aside-head { padding-bottom: 8px; }
+.onair-st { display: flex; align-items: center; gap: 12px; }
+.onair-st .t, .onair-track .t, .onair-row .t { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.onair-st .s, .onair-track .s, .onair-row .s, .onair-now > .s { font-size: 12px; color: var(--muted); }
+.onair-st .icon-btn, .onair-row .icon-btn { width: 40px; height: 40px; border-radius: 50%; border: 0; background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
+.onair-st .icon-btn.on, .onair-row .icon-btn.on { color: var(--accent); }
+.onair-now { border-radius: 20px; background: #0e0d14; border: 1px solid #221f33; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.onair-live { font-size: 12px; color: var(--muted); display: flex; align-items: center; }
+.onair-track { display: flex; align-items: center; gap: 12px; }
+.onair-track .cover { width: 64px; height: 64px; flex-shrink: 0; }
+.onair-now .btn { height: 40px; padding: 0 14px; font-size: 13px; }
+.onair-now .btn.on { color: var(--accent); border-color: #3b3360; }
+.aside-body { padding: 8px 24px 24px; overflow-y: auto; min-height: 0; flex: 1; }
+.onair-h { margin: 8px 0; font-size: 15px; font-weight: 600; }
+.onair-row { display: flex; align-items: center; gap: 12px; height: 52px; }
+.onair-row .tm { width: 40px; font-size: 12px; color: #6e6e76; font-variant-numeric: tabular-nums; }
+body.live-mode #pb-seek { pointer-events: none; opacity: .45; }
+body.live-mode #pb-cur { color: #ff7a7a; font-weight: 600; }
+body.live-mode #pb-shuffle, body.live-mode #pb-repeat, body.live-mode #pb-radio, body.live-mode #pb-add { visibility: hidden; }

@@ -27,6 +27,7 @@ import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
 import { NyaoCloud, API_BASE } from './cloud.js';
 import { LastFm } from './lastfm.js';
 import { Radio } from './radio.js';
+import { LiveRadio } from './live-radio.js';
 import { LiveEvents } from './live.js';
 import { Popups, popupFor } from './popup.js';
 import { mergeArtists as mergeFavArtists } from './freshness.js';
@@ -148,6 +149,8 @@ const up = (id) => !svcStatus.outages.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
 let ya, yt, sc, vk, sp, spEngine, wave, streams, catalog, win, cloud, lastfm, radio, live;
 let spExperiment, nativePermission = false;
+const onAir = new LiveRadio();
+let onAirError = '';
 const LIBRESPOT_REDIRECT = 'http://127.0.0.1:43820/spotify-callback';
 const nativeAllowed = () => nativePermission && readVersion().channel === 'nightly' && cloud?.loggedIn && cloud.user?.dev === true;
 async function requireNativeDeveloper() {
@@ -203,7 +206,7 @@ function configureRpc() {
 // Что из настроек едет на другие устройства (остальное — своё у каждого компьютера)
 const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood', 'waveFresh', 'waveNyao'];
 // вид приложения и «Мне нравится» по сервисам — тоже общие для всех устройств
-const PREF_KEYS = ['layout', 'splitLiked', 'waveTab', 'accent', 'lyricsOrder', 'lyricsWordsFirst'];
+const PREF_KEYS = ['layout', 'splitLiked', 'waveTab', 'radioTab', 'accent', 'lyricsOrder', 'lyricsWordsFirst'];
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -822,6 +825,11 @@ function registerIpc() {
     if (track.source === 'sc') return sc.trackDetails(track.srcId);
     return {};
   });
+  // Яндекс Радио: эфир станций (см. live-radio.js). Вход не нужен
+  handle('onair:stations', () => onAir.stations());
+  handle('onair:genres', () => onAir.genres());
+  handle('onair:recent', (station, stream) => onAir.recent(station, stream));
+  handle('onair:error', () => onAirError);
   handle('radio:start', (track) => radio.start(track));
   handle('radio:more', (ids) => radio.more(ids));
   handle('radio:feedback', (type, track, played) => radio.feedback(type, track, played));
@@ -1374,6 +1382,16 @@ app.whenReady().then(() => {
   protocol.handle('nyao', async (request) => {
     const u = new URL(request.url);
     // шаблонная обложка для треков без картинки (см. cover-art.js)
+    // эфир Яндекс Радио: nyao://live/<станция>/<поток> — бесконечный аудиопоток
+    if (u.host === 'live') {
+      const [station, stream] = u.pathname.slice(1).split('/').map(decodeURIComponent);
+      try {
+        return await onAir.response(station, stream);
+      } catch (e) {
+        onAirError = e.message;
+        return new Response(e.message, { status: 502, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+      }
+    }
     if (u.host === 'cover') {
       const key = decodeURIComponent(u.pathname.slice(1)).replace(/\.png$/, '');
       return new Response(renderCover(key), { headers: { 'content-type': 'image/png', 'cache-control': 'max-age=31536000', 'access-control-allow-origin': '*' } });

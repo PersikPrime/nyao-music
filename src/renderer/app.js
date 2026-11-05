@@ -49,6 +49,7 @@ const state = {
   home: null,
   lib: { lists: null, filter: 'all', selected: 'liked', tracks: null, counts: null },
   search: { q: '', res: null, filter: 'all', loading: false },
+  radio: { stations: null, genres: [], genre: 'all', q: '', recent: [], error: '' },
   drawer: null,
   lyrics: { id: null, data: undefined },
   artist: { ref: null, data: null, error: null, kind: 'album' },
@@ -195,12 +196,16 @@ const ICONS = {
   wave: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0"/></svg>',
   transfer: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h14l-3.5-3.5M20 16H6l3.5 3.5"/></svg>',
   prev: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>',
-  next: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>'
+  next: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>',
+  star: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>',
+  starOn: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>',
+  stop: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>'
 };
 const NAV = [
   ['home', 'Главная', 'M4 10.5 12 4l8 6.5V20h-5v-6H9v6H4z'],
   ['search', 'Поиск', 'M11 4.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13M20 20l-4.2-4.2'],
   ['wave', 'Моя волна', 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0'],
+  ['radio', 'Радио', 'M5 8h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2M7 8l9-4M15.5 11.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5M6.5 12.5h3M6.5 15.5h3'],
   ['library', 'Медиатека', 'M5 4v16M10 4v16M15 5l4 15'],
 ];
 // «Друзья», «Вместе» и «Статистика» живут внутри «Профиля» (как на Android)
@@ -296,7 +301,8 @@ const navFriends = () => !!(state.settings && state.settings.navFriends);
 const navPrefs = () => !!(state.settings && state.settings.navPrefs);
 function navItems() {
   // в режиме «Плеер» вкладка волны прячется (волна — плитка на главной), если не вернуть её в настройках
-  return NAV.filter((n) => n[0] !== 'wave' || layout() === 'wave' || (state.settings && state.settings.waveTab));
+  const s = state.settings || {};
+  return NAV.filter((n) => (n[0] !== 'wave' || layout() === 'wave' || s.waveTab) && (n[0] !== 'radio' || s.radioTab !== false));
 }
 
 // ---------- Навигация ----------
@@ -434,6 +440,7 @@ function go(route, params = {}, push = true) {
   if (route === 'together') loadRoom();
   if (route === 'stats') loadStats();
   if (route === 'friends') friends.load();
+  if (route === 'radio') loadRadio();
 }
 function back() {
   const prev = state.stack.pop();
@@ -1110,6 +1117,118 @@ async function checkUpdates(silent = false) {
   if (isSettingsRoute()) renderSettings();
 }
 
+// ---------- Радио: эфир станций Яндекс Радио (main/live-radio.js) ----------
+// Станции, жанры и «недавно звучало» — публичный API, вход не нужен. «Мои станции» — настройка radioFavs,
+// едет на другие устройства через аккаунт Nyao. В плеере эфир — режим 'live': ‹ › листают станции.
+const radioFavs = () => (Array.isArray(state.settings && state.settings.radioFavs) ? state.settings.radioFavs : []);
+function stationLogo(st, cls = '') {
+  const mark = esc(String(st.name || '?').replace(/^Радио\s+/i, '').slice(0, 2));
+  return `<span class="st-logo ${cls}" style="background:${esc(st.bg || '#222226')}">${st.logo ? `<img src="${esc(st.logo)}" alt="" loading="lazy">` : ''}<b>${mark}</b></span>`;
+}
+function radioShown() {
+  const r = state.radio;
+  if (!r.stations) return null;
+  const q = r.q.trim().toLowerCase();
+  return r.stations.filter((st) => (r.genre === 'all' || st.genres.includes(r.genre)) && (!q || st.name.toLowerCase().includes(q) || (st.desc || '').toLowerCase().includes(q)));
+}
+function onAirPanelHtml() {
+  const t = player.live ? player.current : null;
+  if (!t) return `<div class="aside-head"><div class="empty">Выбери станцию — здесь будет то, что сейчас в эфире, и что звучало до этого.</div></div>`;
+  const fav = radioFavs().includes(t.station);
+  const a = player.onAir;
+  const liked = a && a.yaId && player.liked.has(`ya:${a.yaId}`);
+  const streams = t.streams || [];
+  const recent = state.radio.recent || [];
+  return `<div class="aside-head">
+      <div class="onair-st">${stationLogo({ name: t.title, logo: t.cover, bg: t.bg }, 'md')}
+        <div style="flex:1;min-width:0"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}${t.listeners ? ` · ${t.listeners.toLocaleString('ru-RU')} слушают` : ''}</div></div>
+        <button class="icon-btn ${fav ? 'on' : ''}" data-action="radio-fav" data-slug="${esc(t.station)}" aria-label="${fav ? 'Убрать из моих станций' : 'В мои станции'}" title="${fav ? 'Убрать из моих станций' : 'В мои станции'}">${fav ? ICONS.starOn : ICONS.star}</button></div>
+      ${streams.length > 1 ? `<div class="pill-seg" role="radiogroup" aria-label="Поток">${streams.map((x) => `<button role="radio" aria-checked="${x.slug === t.stream}" class="${x.slug === t.stream ? 'on' : ''}" data-action="radio-stream" data-v="${esc(x.slug)}">${esc(x.name || 'Эфир')}</button>`).join('')}</div>` : ''}
+      <section class="onair-now">
+        <div class="onair-live"><span class="live-dot"></span>Сейчас в эфире</div>
+        ${a ? `<div class="onair-track">${coverHtml({ cover: a.cover, source: 'ya' }, 'sm')}<div style="min-width:0"><div class="t">${esc(a.title)}</div><div class="s">${esc(a.artist)}</div></div></div>
+        ${a.yaId ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ${liked ? 'on' : ''}" data-action="radio-like">${liked ? ICONS.heartOn : ICONS.heart}${liked ? 'В лайках Яндекса' : 'В лайки Яндекса'}</button><button class="btn ghost" data-action="radio-full">Слушать целиком</button></div>` : ''}`
+          : `<div class="s">${recent.length ? 'Сейчас реклама, новости или ведущие' : 'Станция не сообщает, что играет'}</div>`}
+      </section>
+    </div>
+    ${recent.length ? `<div class="aside-body"><h3 class="onair-h">Недавно звучало</h3>${recent.slice(a ? 1 : 0, 30).map((x, i) => {
+      const on = x.yaId && player.liked.has(`ya:${x.yaId}`);
+      return `<div class="onair-row"><span class="tm">${x.at ? new Date(x.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : ''}</span><div style="flex:1;min-width:0"><div class="t">${esc(x.title)}</div><div class="s">${esc(x.artist)}</div></div>
+        ${x.yaId ? `<button class="icon-btn ${on ? 'on' : ''}" data-action="radio-like" data-i="${i + (a ? 1 : 0)}" aria-label="${on ? 'Убрать из лайков' : 'В лайки Яндекса'}">${on ? ICONS.heartOn : ICONS.heart}</button>` : ''}</div>`;
+    }).join('')}</div>` : ''}`;
+}
+function renderRadio() {
+  const r = state.radio;
+  const shown = radioShown();
+  const favs = r.stations ? radioFavs().map((slug) => r.stations.find((x) => x.slug === slug)).filter(Boolean) : [];
+  const cur = player.live && player.current;
+  const card = (st) => `<button class="tile st-tile ${cur && cur.station === st.slug ? 'sel' : ''}" data-action="radio-play" data-slug="${esc(st.slug)}">
+      <div class="st-box">${stationLogo(st, 'lg')}${st.listeners ? `<span class="st-count"><span class="live-dot green"></span>${st.listeners.toLocaleString('ru-RU')}</span>` : ''}</div>
+      <div class="t">${esc(st.name)}</div><div class="s">${esc(st.desc || st.tag)}</div></button>`;
+  view.innerHTML = `<div class="split">
+    <div class="scroll">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+        <div><h1 class="page">Радио</h1><div class="hint">Прямой эфир${r.stations ? ` ${r.stations.length} станций` : ''} из Яндекс Радио</div></div>
+        <label class="search-field" style="width:320px;max-width:100%">${ICONS.search}<input type="search" placeholder="Станция или жанр" value="${esc(r.q)}" data-input="radio-q" aria-label="Поиск станции"></label>
+      </div>
+      ${r.genres.length ? `<div class="chips" role="tablist" aria-label="Жанры"><button class="chip solid ${r.genre === 'all' ? 'on' : ''}" data-action="radio-genre" data-v="all">Все</button>${r.genres.map((g) => `<button class="chip solid ${r.genre === g.slug ? 'on' : ''}" data-action="radio-genre" data-v="${esc(g.slug)}">${esc(g.name)}</button>`).join('')}</div>` : ''}
+      ${favs.length && r.genre === 'all' && !r.q ? `<h2 class="sec">Мои станции</h2><div class="tiles">${favs.map(card).join('')}</div>` : ''}
+      ${r.error ? `<div class="empty">${esc(r.error)} <button class="btn" data-action="radio-reload">Ещё раз</button></div>`
+        : shown ? (shown.length ? `<h2 class="sec">${r.genre === 'all' && !r.q ? 'Все станции' : 'Станции'}</h2><div class="tiles">${shown.map(card).join('')}</div>` : '<div class="empty">Ничего не нашлось</div>')
+        : '<div class="tiles">' + '<div class="skeleton" style="aspect-ratio:1"></div>'.repeat(12) + '</div>'}
+    </div>
+    <aside class="aside" id="onair">${onAirPanelHtml()}</aside>
+  </div>`;
+}
+async function loadRadio(force = false) {
+  const r = state.radio;
+  if (r.stations && !force) return;
+  r.error = '';
+  try {
+    const [stations, genres] = await Promise.all([api.onair.stations(), api.onair.genres().catch(() => [])]);
+    r.stations = stations;
+    // жанры — только те, где есть станции, в порядке числа станций
+    const n = new Map();
+    for (const st of stations) for (const g of st.genres) n.set(g, (n.get(g) || 0) + 1);
+    r.genres = genres.filter((g) => n.get(g.slug) >= 2).sort((a, b) => n.get(b.slug) - n.get(a.slug)).slice(0, 14);
+  } catch (e) {
+    r.error = `Не получилось загрузить станции: ${e.message}`;
+  }
+  if (state.route === 'radio') renderRadio();
+}
+function playStation(slug) {
+  const r = state.radio;
+  if (!r.stations) return;
+  // очередь эфира — станции, которые сейчас видно на экране: ‹ › листают их
+  const list = radioShown() && radioShown().some((x) => x.slug === slug) ? radioShown() : r.stations;
+  r.recent = [];
+  player.playLive(list, list.findIndex((x) => x.slug === slug), 'Радио');
+}
+function refreshOnAirPanel() {
+  const el = state.route === 'radio' && $('#onair', view);
+  if (el) el.innerHTML = onAirPanelHtml();
+}
+// что звучит в эфире: раз в 20 секунд, пока играет станция
+let onAirTimer = 0;
+let radioQTimer = 0;
+async function pollOnAir() {
+  clearTimeout(onAirTimer);
+  const t = player.live && player.current;
+  if (!t) return;
+  try {
+    const list = await api.onair.recent(t.station, t.stream);
+    if (player.current !== t) return;
+    state.radio.recent = list;
+    // свежий трек (до 8 минут) считаем звучащим сейчас; у станций без треклиста — пусто
+    const top = list[0] && (!list[0].at || Date.now() - list[0].at < 8 * 60_000) ? list[0] : null;
+    player.setOnAir(top);
+    refreshOnAirPanel();
+  } catch {
+    // не критично: эфир играет и без «сейчас звучит»
+  }
+  onAirTimer = setTimeout(pollOnAir, 20_000);
+}
+
 // ---------- Аккаунт Nyao (свой сервер): вход через Telegram, синхронизация, продолжение ----------
 function nyaoAvatar(cls = 'av') {
   const u = state.cloud.loggedIn && state.cloud.user;
@@ -1393,6 +1512,8 @@ function renderSettingsSection(sec) {
         <button class="switch ${state.settings.splitLiked ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.splitLiked}" aria-label="«Мне нравится» по сервисам" data-action="split-liked" data-v="${state.settings.splitLiked ? 0 : 1}"><span></span></button></div>
       ${layout() === 'player' ? `<div class="pref-row"><span><b>Вкладка «Моя волна» в меню</b><span class="hint">В режиме «Плеер» волна живёт плиткой на главной. Можно вернуть её отдельной вкладкой.</span></span>
         <button class="switch ${state.settings.waveTab ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.waveTab}" aria-label="Вкладка «Моя волна» в меню" data-action="toggle-wavetab"><span></span></button></div>` : ''}
+      <div class="pref-row"><span><b>Вкладка «Радио» в меню</b><span class="hint">Прямой эфир 300+ станций из Яндекс Радио. Вход не нужен</span></span>
+        <button class="switch ${state.settings.radioTab !== false ? 'on' : ''}" role="switch" aria-checked="${state.settings.radioTab !== false}" aria-label="Вкладка «Радио» в меню" data-action="toggle-radiotab"><span></span></button></div>
       <div class="pref-row"><span><b>«Друзья» отдельной кнопкой</b><span class="hint">Друзья, профили и заявки — в боковой панели, а не внутри профиля</span></span>
         <button class="switch ${navFriends() ? 'on' : ''}" role="switch" aria-checked="${navFriends()}" aria-label="«Друзья» отдельной кнопкой" data-action="toggle-nav" data-k="navFriends"><span></span></button></div>
       <div class="pref-row"><span><b>«Настройки» отдельной кнопкой</b><span class="hint">В профиле остаются аккаунт, статистика и устройства, всё остальное — на своей странице</span></span>
@@ -1746,7 +1867,7 @@ const friends = createFriends({
     renderRail();
   }
 });
-const RENDER = { friends: () => friends.renderFriends(), user: () => friends.renderUser(), profile: () => friends.renderProfile(), home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, prefs: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList };
+const RENDER = { friends: () => friends.renderFriends(), user: () => friends.renderUser(), profile: () => friends.renderProfile(), home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, prefs: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList, radio: renderRadio };
 
 // ---------- Загрузка данных ----------
 /** Может ли Spotify играть сам; если нет — треки Spotify играют копиями из других сервисов */
@@ -3066,6 +3187,50 @@ async function handleAction(el, e) {
       renderRail();
       renderSettings();
       break;
+    case 'toggle-radiotab':
+      state.settings = await api.settings.set({ radioTab: state.settings.radioTab === false });
+      renderRail();
+      renderSettings();
+      break;
+    case 'radio-play': {
+      const cur = player.live && player.current;
+      if (cur && cur.station === el.dataset.slug) player.toggle();
+      else playStation(el.dataset.slug);
+      renderRadio();
+      break;
+    }
+    case 'radio-genre':
+      state.radio.genre = el.dataset.v;
+      renderRadio();
+      break;
+    case 'radio-reload':
+      loadRadio(true);
+      break;
+    case 'radio-fav': {
+      const favs = radioFavs();
+      const slug = el.dataset.slug;
+      const on = !favs.includes(slug);
+      state.settings = await api.settings.set({ radioFavs: on ? [slug, ...favs].slice(0, 50) : favs.filter((x) => x !== slug) });
+      toast(on ? 'Станция в «Моих станциях»' : 'Убрал из «Моих станций»');
+      if (state.route === 'radio') renderRadio();
+      break;
+    }
+    case 'radio-stream':
+      state.radio.recent = [];
+      player.switchStream(el.dataset.v);
+      break;
+    case 'radio-like': {
+      const x = el.dataset.i != null ? state.radio.recent[Number(el.dataset.i)] : player.onAir;
+      if (!x || !x.yaId) break;
+      await player.toggleLike({ id: `ya:${x.yaId}`, source: 'ya', srcId: x.yaId, title: x.title, artist: x.artist, cover: x.cover, duration: 0, available: true });
+      refreshOnAirPanel();
+      break;
+    }
+    case 'radio-full': {
+      const t = player.onAirTrack();
+      if (t) player.playList([t], 0, `Из эфира «${player.current ? player.current.title : 'радио'}»`);
+      break;
+    }
     case 'mix-builder':
       openMixBuilder();
       break;
@@ -3257,6 +3422,18 @@ view.addEventListener('submit', async (e) => {
 });
 
 view.addEventListener('input', (e) => {
+  if (e.target.dataset.input === 'radio-q') {
+    state.radio.q = e.target.value;
+    clearTimeout(radioQTimer);
+    // перерисовка с задержкой: иначе поле теряет курсор на каждой букве
+    radioQTimer = setTimeout(() => {
+      const pos = e.target.selectionStart;
+      renderRadio();
+      const inp = $('input[data-input="radio-q"]', view);
+      if (inp) { inp.focus(); inp.setSelectionRange(pos, pos); }
+    }, 200);
+    return;
+  }
   if (e.target.dataset.input === 'fade') {
     const v = Number(e.target.value);
     state.settings = { ...state.settings, fade: v };
@@ -3324,9 +3501,20 @@ function renderBar() {
   title.textContent = t ? t.title : 'Ничего не играет';
   title.title = t && t.albumRef ? 'Открыть альбом' : '';
   $('#pb-sub').innerHTML = t ? `${trackBadge(t)}${artistLink(t)}${player.label ? ' · ' + esc(player.label) : ''}` : 'Запусти «Мою волну»';
+  const live = player.live;
+  document.body.classList.toggle('live-mode', live);
+  if (live && t) {
+    // эфир: в заголовке — что звучит сейчас (если станция сообщает), ниже — станция
+    const a = player.onAir;
+    title.textContent = a ? a.title : t.title;
+    $('#pb-sub').innerHTML = `<span class="live-dot"></span>${esc(a ? `${a.artist} · ${t.title}` : t.artist)}`;
+  }
   $('#pb-play').innerHTML = player.playing ? ICONS.pause : ICONS.play;
   $('#pb-play').setAttribute('aria-label', player.playing ? 'Пауза' : 'Играть');
-  const liked = t && player.liked.has(t.id);
+  const likeId = live ? (player.onAir && player.onAir.yaId ? `ya:${player.onAir.yaId}` : '') : t && t.id;
+  const liked = likeId && player.liked.has(likeId);
+  $('#pb-like').disabled = live && !likeId;
+  $('#pb-play').innerHTML = live && player.playing ? ICONS.stop : $('#pb-play').innerHTML;
   $('#pb-like').innerHTML = liked ? ICONS.heartOn : ICONS.heart;
   $('#pb-like').classList.toggle('on', !!liked);
   const wave = player.mode === 'wave';
@@ -3348,6 +3536,13 @@ let seeking = false;
 function updateTime() {
   const a = player.audio;
   const dur = Number.isFinite(a.duration) ? a.duration : (player.current && player.current.duration) || 0;
+  if (player.live) {
+    $('#pb-cur').textContent = 'В эфире';
+    const t = player.current;
+    const sub = t && (t.streams || []).find((x) => x.slug === t.stream);
+    $('#pb-dur').textContent = sub && sub.name ? sub.name : '';
+    return;
+  }
   $('#pb-cur').textContent = fmt(a.currentTime);
   $('#pb-dur').textContent = fmt(dur);
   if (!seeking) {
@@ -3372,9 +3567,10 @@ $('#pb-repeat').onclick = () => {
   renderBar();
 };
 $('#pb-like').onclick = () => player.toggleLike();
-$('#pb-coverbtn').onclick = () => fullscreen.show();
+$('#pb-coverbtn').onclick = () => (player.live ? go('radio') : fullscreen.show());
 $('#pb-title').onclick = () => {
   const t = player.current;
+  if (player.live) return go('radio');
   if (t && t.albumRef) go('album', { ref: t.albumRef });
   else fullscreen.show();
 };
@@ -3460,6 +3656,15 @@ player.addEventListener('track', () => {
   if (state.route === 'home' || state.route === 'wave' || state.route === 'album' || state.route === 'artist') RENDER[state.route]();
   else $$('.trow.cur').forEach((r) => r.classList.remove('cur'));
 });
+player.addEventListener('onair', () => {
+  renderBar();
+  refreshOnAirPanel();
+});
+player.addEventListener('track', () => {
+  if (player.live) pollOnAir();
+  else clearTimeout(onAirTimer);
+  if (state.route === 'radio') renderRadio();
+});
 player.addEventListener('queue', () => {
   if (state.drawer === 'queue') {
     const sc = $('#drawer .dr-scroll');
@@ -3507,6 +3712,7 @@ const pranks = createPranks({
   }
 });
 player.addEventListener('like', renderBar);
+player.addEventListener('like', refreshOnAirPanel);
 const hundred = createHundred({ player, toast, build: () => (state.versionInfo && state.versionInfo.build) || 0 });
 player.addEventListener('track', () => fullscreen.update());
 player.addEventListener('track', applyTrackSound);

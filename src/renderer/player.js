@@ -16,6 +16,8 @@ function shuffled(arr) {
 
 /** Ссылка на поток. Трек Spotify — тишина его длины (звук даёт устройство Spotify, см. spotify-sync.js) */
 export function streamSrc(t) {
+  // эфир Яндекс Радио: main отдаёт бесконечный поток (см. main/live-radio.js)
+  if (t.source === 'live') return `nyao://live/${encodeURIComponent(t.station)}/${encodeURIComponent(t.stream)}`;
   const base = `nyao://stream/${encodeURIComponent(t.id)}`;
   if (t.source !== 'sp') return base;
   const q = new URLSearchParams({ d: String(Math.round(t.duration || 0)), t: t.title || '', a: t.artist || '' });
@@ -29,7 +31,8 @@ export class Player extends EventTarget {
     this.audio = audio;
     this.queue = [];
     this.index = -1;
-    this.mode = null; // 'wave' | 'list'
+    this.mode = null; // 'wave' | 'list' | 'radio' (похожее) | 'live' (эфир станции)
+    this.onAir = null; // что звучит в эфире: { title, artist, cover, yaId }
     this.label = '';
     this.shuffle = false;
     this.repeat = 'off'; // 'off' | 'all' (плейлист) | 'one' (трек)
@@ -42,6 +45,8 @@ export class Player extends EventTarget {
     this.forceContinue = false; // трек из поиска в режиме «дальше похожее»
 
     audio.addEventListener('ended', () => {
+      // у эфира нет конца: поток оборвался — подключаемся заново к той же станции
+      if (this.live) { this.load(); return; }
       // повтор трека: тот же трек с начала (в историю — как полное прослушивание)
       if (this.repeat === 'one' && this.current) {
         this.reportLeave(false);
@@ -77,6 +82,52 @@ export class Player extends EventTarget {
 
   get current() {
     return this.queue[this.index] || null;
+  }
+
+  get live() {
+    return this.mode === 'live';
+  }
+
+  /** Станция → «трек» очереди эфира */
+  static stationTrack(st, stream = st.stream) {
+    const sub = (st.streams || []).find((x) => x.slug === stream);
+    return {
+      id: `live:${st.slug}/${stream}`, source: 'live', srcId: `${st.slug}/${stream}`, station: st.slug, stream,
+      title: st.name, artist: st.desc || 'Прямой эфир', album: sub && sub.name ? `Эфир · ${sub.name}` : 'Прямой эфир',
+      cover: st.logo, duration: 0, available: true, bg: st.bg, streams: st.streams || [], listeners: st.listeners || 0,
+    };
+  }
+
+  /** Эфир: очередь — станции (‹ › листают их), играет одна выбранная */
+  playLive(stations, index = 0, label = 'Радио') {
+    if (!stations.length) return;
+    ++this.queueGeneration;
+    this.loadingMore = false;
+    this.reportLeave(true);
+    this.mode = 'live';
+    this.label = label;
+    this.queue = stations.map((st) => (st.source === 'live' ? st : Player.stationTrack(st)));
+    this.index = Math.max(0, Math.min(index, this.queue.length - 1));
+    this.onAir = null;
+    this.load();
+  }
+
+  /** Другой поток той же станции (Москва / Россия / регион) */
+  switchStream(stream) {
+    const t = this.current;
+    if (!this.live || !t || t.stream === stream) return;
+    const st = { slug: t.station, name: t.title, desc: t.artist, logo: t.cover, bg: t.bg, streams: t.streams, listeners: t.listeners };
+    this.queue[this.index] = Player.stationTrack(st, stream);
+    this.onAir = null;
+    this.load();
+  }
+
+  setOnAir(item) {
+    const same = this.onAir && item && this.onAir.title === item.title && this.onAir.artist === item.artist;
+    if (same || (!this.onAir && !item)) return;
+    this.onAir = item;
+    this.updateSession();
+    this.emit('onair');
   }
 
   get playing() {
@@ -230,6 +281,12 @@ export class Player extends EventTarget {
     this.audio.src = streamSrc(t);
     this.audio.play().catch(() => {});
     this.startedAt = Date.now();
+    if (this.live) {
+      this.updateSession();
+      this.emit('track');
+      this.emit('queue');
+      return;
+    }
     if (this.mode === 'wave') api.wave.feedback('trackStarted', t, 0).catch(() => {});
     if (this.mode === 'radio') api.radio.feedback('trackStarted', t, 0).catch(() => {});
     const nxt = this.queue[this.index + 1];
@@ -304,7 +361,7 @@ export class Player extends EventTarget {
   /** Трек закончился или его переключили: отчёт волне Яндекса и запись в историю (для волны без повторов) */
   reportLeave(skipped) {
     const t = this.current;
-    if (!t || this.reported === this.startedAt) return;
+    if (!t || t.source === 'live' || this.reported === this.startedAt) return;
     this.reported = this.startedAt;
     const played = Math.round(this.audio.currentTime || 0);
     // «пропущен» — только если переключили в первые полминуты, а не на последних секундах
@@ -320,6 +377,7 @@ export class Player extends EventTarget {
    * дальше волна подберёт свежие треки, а не повторит стоявшие в очереди.
    */
   snapshot() {
+    if (this.live) return null; // эфир после перезапуска не восстанавливаем — он уже другой
     const cur = this.index;
     if (!this.queue.length || cur < 0) return null;
     const from = Math.max(0, cur - 100);
@@ -381,6 +439,12 @@ export class Player extends EventTarget {
     if (!this.current) return;
     // переход сам по окончании трека (для Spotify: он перейдёт к следующему по списку без команды)
     this.lastAuto = !skipped;
+    if (this.live) {
+      this.index = (this.index + 1) % this.queue.length;
+      this.onAir = null;
+      this.load();
+      return;
+    }
     this.reportLeave(skipped);
     if (this.index + 1 >= this.queue.length) {
       if (this.mode === 'wave' || this.mode === 'radio') {
@@ -401,6 +465,13 @@ export class Player extends EventTarget {
   }
 
   prev() {
+    if (this.live) {
+      if (!this.queue.length) return;
+      this.index = (this.index - 1 + this.queue.length) % this.queue.length;
+      this.onAir = null;
+      this.load();
+      return;
+    }
     if (this.audio.currentTime > 3 || this.index <= 0) {
       this.seek(0);
       return;
@@ -411,11 +482,14 @@ export class Player extends EventTarget {
 
   toggle() {
     if (!this.current) return;
+    // эфир после паузы — с живого края, а не с места остановки
+    if (this.live && this.audio.paused) { this.load(); return; }
     if (this.audio.paused) this.audio.play().catch(() => {});
     else this.audio.pause();
   }
 
   seek(sec) {
+    if (this.live) return;
     if (Number.isFinite(sec)) this.audio.currentTime = Math.max(0, sec);
   }
 
@@ -434,13 +508,21 @@ export class Player extends EventTarget {
 
   async dislike() {
     const t = this.current;
-    if (!t) return;
+    if (!t || this.live) return;
     if (this.mode === 'wave') api.wave.feedback('dislike', t, Math.round(this.audio.currentTime)).catch(() => {});
     if (this.mode === 'radio') api.radio.feedback('dislike', t, Math.round(this.audio.currentTime)).catch(() => {});
     this.next(true);
   }
 
+  /** Трек, который сейчас звучит в эфире, — как трек Яндекс Музыки (для лайка и «слушать целиком») */
+  onAirTrack() {
+    const a = this.onAir;
+    if (!a || !a.yaId) return null;
+    return { id: `ya:${a.yaId}`, source: 'ya', srcId: a.yaId, title: a.title, artist: a.artist, cover: a.cover, duration: 0, available: true };
+  }
+
   async toggleLike(track = this.current) {
+    if (track && track.source === 'live') track = this.onAirTrack();
     if (!track) return;
     const on = !this.liked.has(track.id);
     if (on) this.liked.add(track.id);
@@ -463,6 +545,14 @@ export class Player extends EventTarget {
     const t = this.current;
     if (!t || !this.audio.src) return;
     this.errors++;
+    if (this.live) {
+      // эфир оборвался — переподключаемся к той же станции, после трёх неудач останавливаемся
+      const stop = this.errors >= 3;
+      api.onair.error().catch(() => '').then((why) => this.emit('error', `Эфир «${t.title}» ${stop ? 'не играет' : 'прервался — переподключаю'}${why ? `: ${why}` : ''}`));
+      if (!stop) setTimeout(() => { if (this.current === t) this.load(); }, 2000);
+      else this.emit('state');
+      return;
+    }
     const stop = this.errors >= 3;
     api.streamError(t.id).catch(() => null).then((reason) => {
       const why = reason ? `: ${reason.length > 220 ? reason.slice(0, 220) + '…' : reason}` : '';
@@ -476,6 +566,16 @@ export class Player extends EventTarget {
   updateSession() {
     const t = this.current;
     if (!t || !('mediaSession' in navigator)) return;
+    if (t.source === 'live') {
+      const a = this.onAir;
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: a ? a.title : t.title,
+        artist: a ? a.artist : 'Прямой эфир',
+        album: t.title,
+        artwork: (a && a.cover) || t.cover ? [{ src: (a && a.cover) || t.cover, sizes: '400x400' }] : []
+      });
+      return;
+    }
     navigator.mediaSession.metadata = new MediaMetadata({
       title: t.title,
       artist: t.artist,
