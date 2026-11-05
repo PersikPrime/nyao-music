@@ -97,6 +97,8 @@ function trackBadge(t) {
 const RING = { ya: '#FFD60A', yt: '#FF6A5C', sc: '#FF8A3D', vk: '#5AA9FF', sp: '#1ED760', mix: '#C6B8FF' };
 function coverHtml(item, cls = '', withBadge = false) {
   const src = item && item.source;
+  // станция эфира: логотип прозрачный — под ним цвет станции, а не шаблонный диск
+  if (src === 'live') return `<div class="cover ${cls}" style="background:${esc(item.bg || '#222226')}">${item.cover ? `<img src="${esc(item.cover)}" alt="" loading="lazy">` : ''}</div>`;
   const bgCls = src === 'ya' ? 'ya-bg' : src === 'yt' ? 'yt-bg' : src === 'sc' ? 'sc-bg' : src === 'vk' ? 'vk-bg' : src === 'sp' ? 'sp-bg' : '';
   const ring = `<svg width="45%" height="45%" viewBox="0 0 72 72" fill="none" stroke="${RING[src] || RING.mix}" stroke-width="3"><circle cx="36" cy="36" r="26"/><circle cx="36" cy="36" r="12"/></svg>`;
   // у трека без своей обложки — шаблонный диск; не загрузилась — через сервер Nyao, потом шаблон
@@ -1123,8 +1125,17 @@ async function checkUpdates(silent = false) {
 const radioFavs = () => (Array.isArray(state.settings && state.settings.radioFavs) ? state.settings.radioFavs : []);
 function stationLogo(st, cls = '') {
   const mark = esc(String(st.name || '?').replace(/^Радио\s+/i, '').slice(0, 2));
-  return `<span class="st-logo ${cls}" style="background:${esc(st.bg || '#222226')}">${st.logo ? `<img src="${esc(st.logo)}" alt="" loading="lazy">` : ''}<b>${mark}</b></span>`;
+  // буквы — запасной вариант: видны, только если логотипа нет или он не загрузился (см. обработчик error ниже)
+  return `<span class="st-logo ${cls} ${st.logo ? 'has-img' : ''}" style="background:${esc(st.bg || '#222226')}">${st.logo ? `<img src="${esc(st.logo)}" alt="" loading="lazy">` : ''}<b>${mark}</b></span>`;
 }
+// логотип станции не загрузился — показываем буквы (inline onerror запрещён CSP, ловим событие на документе)
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (img && img.tagName === 'IMG' && img.parentElement && img.parentElement.classList.contains('st-logo')) {
+    img.parentElement.classList.remove('has-img');
+    img.remove();
+  }
+}, true);
 function radioShown() {
   const r = state.radio;
   if (!r.stations) return null;
@@ -1141,9 +1152,9 @@ function onAirPanelHtml() {
   const recent = state.radio.recent || [];
   return `<div class="aside-head">
       <div class="onair-st">${stationLogo({ name: t.title, logo: t.cover, bg: t.bg }, 'md')}
-        <div style="flex:1;min-width:0"><div class="t">${esc(t.title)}</div><div class="s">${esc(t.artist)}${t.listeners ? ` · ${t.listeners.toLocaleString('ru-RU')} слушают` : ''}</div></div>
+        <div style="flex:1;min-width:0"><div class="t">${esc(t.title)}</div><div class="s clamp2">${esc(t.artist)}</div>${t.listeners ? `<div class="s"><span class="live-dot green" style="margin-right:6px"></span>${t.listeners.toLocaleString('ru-RU')} слушают</div>` : ''}</div>
         <button class="icon-btn ${fav ? 'on' : ''}" data-action="radio-fav" data-slug="${esc(t.station)}" aria-label="${fav ? 'Убрать из моих станций' : 'В мои станции'}" title="${fav ? 'Убрать из моих станций' : 'В мои станции'}">${fav ? ICONS.starOn : ICONS.star}</button></div>
-      ${streams.length > 1 ? `<div class="pill-seg" role="radiogroup" aria-label="Поток">${streams.map((x) => `<button role="radio" aria-checked="${x.slug === t.stream}" class="${x.slug === t.stream ? 'on' : ''}" data-action="radio-stream" data-v="${esc(x.slug)}">${esc(x.name || 'Эфир')}</button>`).join('')}</div>` : ''}
+      ${streams.length > 1 ? `<div class="pill-seg onair-streams" role="radiogroup" aria-label="Поток">${streams.map((x) => `<button role="radio" aria-checked="${x.slug === t.stream}" class="${x.slug === t.stream ? 'on' : ''}" data-action="radio-stream" data-v="${esc(x.slug)}">${esc(x.name || 'Эфир')}</button>`).join('')}</div>` : ''}
       <section class="onair-now">
         <div class="onair-live"><span class="live-dot"></span>Сейчас в эфире</div>
         ${a ? `<div class="onair-track">${coverHtml({ cover: a.cover, source: 'ya' }, 'sm')}<div style="min-width:0"><div class="t">${esc(a.title)}</div><div class="s">${esc(a.artist)}</div></div></div>

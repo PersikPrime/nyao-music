@@ -185,8 +185,9 @@ private fun StationLogo(st: YandexRadio.Station, size: Int, ring: Boolean = fals
     val mod = if (ring) Modifier.size(size.dp).clip(CircleShape).background(NyaoColors.Lavender).padding(3.dp).clip(CircleShape).background(NyaoColors.Bg).padding(3.dp)
     else Modifier.size(size.dp)
     Box(mod.clip(CircleShape).background(Color(st.bg)), contentAlignment = Alignment.Center) {
-        Text(st.name.removePrefix("Радио ").take(2), color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size / 4).sp)
-        if (st.logo.isNotBlank()) Cover(st.logo, Modifier.fillMaxSize(), CircleShape)
+        // логотип прозрачный — буквы под ним просвечивали; буквы только у станций без логотипа
+        if (st.logo.isNotBlank()) Cover(st.logo, Modifier.fillMaxSize(), CircleShape, bg = Color(st.bg))
+        else Text(st.name.removePrefix("Радио ").take(2), color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size / 4).sp)
     }
 }
 

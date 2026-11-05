@@ -1310,3 +1310,8 @@ body.fs-on .toast { z-index: 1000; }
 body.live-mode #pb-seek { pointer-events: none; opacity: .45; }
 body.live-mode #pb-cur { color: #ff7a7a; font-weight: 600; }
 body.live-mode #pb-shuffle, body.live-mode #pb-repeat, body.live-mode #pb-radio, body.live-mode #pb-add { visibility: hidden; }
+.st-logo.has-img b { display: none; }
+.st-logo img { z-index: 1; }
+.onair-st .s.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.onair-streams { overflow-x: auto; scrollbar-width: none; }
+.onair-streams button { white-space: nowrap; flex-shrink: 0; }
