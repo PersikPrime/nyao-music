@@ -173,3 +173,18 @@ test('настроение: в волну идут только треки «М�
   await w.more(out.map((t) => t.id));
   for (const ids of sent) assert.ok(ids.every((id) => /^ya:R\d$/.test(id)), 'в Яндекс уходят только его треки: ' + ids.join(','));
 });
+test('волна иссякла: дальше — похожее на последние треки и те же исполнители, а не ошибка', async () => {
+  // две песни в лайках, обычные рекомендации пусты — раньше после них была ошибка «Новых подходящих треков пока нет»
+  const likes = [track('a', 'ya', { artist: 'Same Band', likedAt: Date.now() }), track('b', 'ya', { artist: 'Same Band', likedAt: Date.now() - 1000 })];
+  const ya = provider('ya', likes);
+  let fallback = false;
+  ya.similarTracks = async () => (fallback ? [track('sim', 'ya', { artist: 'Similar Band' })] : []);
+  ya.search = async (q) => (fallback && q === 'Same Band' ? [track('c', 'ya', { artist: 'Same Band' })] : []);
+  const m = new WaveMixer({ ya, getSettings: () => ({ waveDiversity: 'favorite', waveFresh: 100, ytmShare: 0 }) });
+  const orig = m.similarToRecent.bind(m);
+  m.similarToRecent = async (s) => { fallback = true; try { return await orig(s); } finally { fallback = false; } };
+  const first = await m.start();
+  assert.deepEqual(first.map(t => t.srcId).sort(), ['a', 'b']);
+  const more = await m.more(first.map(t => t.id));
+  assert.deepEqual(more.map(t => t.srcId).sort(), ['c', 'sim']);
+});

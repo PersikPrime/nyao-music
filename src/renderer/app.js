@@ -263,7 +263,7 @@ function waveControlsHtml(compact = false) {
   </div>
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span><span class="eyebrow">Своя волна Nyao · бета</span>${compact ? '' : '<span class="hint" style="display:block;margin-top:4px">Похожее по открытым данным (Last.fm, Deezer) — для всех сервисов сразу. Мы находим эти треки в твоих сервисах.</span>'}</span>
-      <button class="btn sm ${s.waveNyao !== false ? 'primary' : ''}" data-action="wave-nyao" aria-pressed="${s.waveNyao !== false}">${s.waveNyao !== false ? 'Вкл' : 'Выкл'}</button></div>
+      <button class="switch ${s.waveNyao !== false ? 'on' : ''}" role="switch" aria-checked="${s.waveNyao !== false}" aria-label="Своя волна Nyao" data-action="wave-nyao" style="flex-shrink:0"><span></span></button></div>
   </div>`;
 }
 

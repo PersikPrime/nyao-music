@@ -157,6 +157,46 @@ export class WaveMixer {
     await Promise.all([worker(), worker(), worker(), worker()]);
     return out;
   }
+  /**
+   * Волна иссякла (всё подходящее уже сыграно): берём то, что играло последним, и ищем максимально похожее —
+   * те же исполнители во всех сервисах, «похожие треки» Яндекса, радио YouTube, related SoundCloud, своя волна Nyao.
+   * Настройки баланса и характера тут вторичны: лучше похожее, чем тишина.
+   */
+  async similarToRecent(s) {
+    const anchors = [...s.policy.selected].reverse().filter(t => t && t.artist).slice(0, 3);
+    if (!anchors.length) return;
+    const sources = this.sources();
+    const artists = [...new Map(anchors.map(t => [artistKey(t), String(t.artist).split(/,| feat\.? /i)[0].trim()])).entries()];
+    const lists = await Promise.all(sources.map(async ([id, p]) => {
+      const tasks = artists.map(([key, name]) => bounded(async () => (await p.search(name)).filter(t => artistKey(t) === key)));
+      for (const a of anchors.filter(t => t.source === id)) {
+        if (id === 'ya' && p.similarTracks) tasks.push(bounded(() => p.similarTracks(a.srcId)));
+        if (id === 'yt' && p.radio) tasks.push(bounded(() => p.radio(a.srcId)));
+        if (id === 'sc' && p.related) tasks.push(bounded(() => p.related(a.srcId)));
+      }
+      return (await Promise.all(tasks)).flat();
+    }));
+    const anchorKeys = new Set(artists.map(([k]) => k));
+    const found = lists.flat().map(track => ({ track, liked: s.libraries.some(c => sameRecording(c.track, track)), recency: 0,
+      affinity: anchorKeys.has(artistKey(track)) ? 0.9 : 0.6,
+      reason: anchorKeys.has(artistKey(track)) ? `Ещё от ${track.artist}` : `Похоже на «${anchors[0].title}»` }));
+    let own = [];
+    if (this.nyao && this.getSettings().waveNyao !== false) {
+      own = await bounded(async () => {
+        const res = await this.nyao.mix({ seeds: anchors.map(t => ({ artist: t.artist, title: t.title })), recent: s.policy.selected.slice(-200).map(t => ({ artist: t.artist, title: t.title })), diversity: 'any', size: 14 });
+        const order = ['ya', 'vk', 'sc', 'yt'].map(id => sources.find(([x]) => x === id)).filter(Boolean);
+        const out = [];
+        for (const w of ((res && res.tracks) || []).slice(0, 10)) {
+          for (const [, p] of order) {
+            const m = await bounded(() => findMatch({ artist: w.artist, title: w.title, duration: 0 }, (q) => p.search(q), { minScore: 0.72 }), null, 6000);
+            if (m && m.track) { out.push({ track: m.track, liked: false, recency: 0, affinity: 0.6, reason: w.reason || 'Своя волна Nyao' }); break; }
+          }
+        }
+        return out;
+      }, [], 20000);
+    }
+    this.ensure(s); this.add(s, [...found, ...own]);
+  }
   async batch(s, first = false) {
     if (s.loading) return s.loading;
     s.loading = (async () => {
@@ -172,6 +212,16 @@ export class WaveMixer {
       let result = s.policy.select(pool(), { ...this.opts(), recentIds: s.recent, history: s.history });
       if (!result.length) {
         await this.recommendations(s, false);
+        result = s.policy.select(pool(), { ...this.opts(), recentIds: s.recent, history: s.history });
+      }
+      // всё подходящее уже сыграно — максимально похожее на последние треки и те же исполнители
+      if (!result.length && !this.opts().mood) {
+        await this.similarToRecent(s);
+        result = s.policy.select(pool(), { ...this.opts(), recentIds: s.recent, history: s.history });
+      }
+      // и это кончилось — разрешаем вернуться трекам, сыгранным давно (кроме последних 40): лучше повтор, чем тишина
+      if (!result.length && s.policy.selected.length > 40) {
+        s.policy.selected = s.policy.selected.slice(-40);
         result = s.policy.select(pool(), { ...this.opts(), recentIds: s.recent, history: s.history });
       }
       if (!result.length && this.opts().mood && !this.ya?.loggedIn) throw new Error('Настроение пока работает только с Яндекс Музыкой — войди в неё или выключи настроение');

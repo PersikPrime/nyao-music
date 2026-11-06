@@ -158,6 +158,33 @@ class WaveMixer(
         } }.awaitAll() }
         ensure(s); add(s, lists.flatten()); s.loads++
     }
+    /**
+     * Волна иссякла (всё подходящее уже сыграно): максимально похожее на последние треки — те же исполнители
+     * во всех сервисах, «похожие треки» Яндекса, радио YouTube, related SoundCloud. Как на ПК: similarToRecent в wave.js.
+     */
+    private suspend fun similarToRecent(s: Session) {
+        val anchors = synchronized(feedbackLock) { s.policy.selected.toList() }.asReversed().filter { it.artist.isNotBlank() }.take(3)
+        if (anchors.isEmpty()) return
+        val artists = anchors.associate { WavePolicy.artistKey(it) to it.artist.split(Regex(",| feat\\.? ", RegexOption.IGNORE_CASE))[0].trim() }
+        val found = coroutineScope { sources().map { source -> async {
+            val tasks = ArrayList<kotlinx.coroutines.Deferred<List<Track>>>()
+            fun task(load: suspend () -> List<Track>) { tasks += async { bounded(emptyList(), load) } }
+            artists.forEach { (key, name) -> task { search(source, name).filter { WavePolicy.artistKey(it) == key } } }
+            anchors.filter { it.source == source }.forEach { a ->
+                when (source) {
+                    SOURCE_YA -> task { ya.similarTracks(a.srcId) }
+                    SOURCE_YT -> task { yt.radio(a.srcId) }
+                    SOURCE_SC -> task { sc.related(a.srcId) }
+                }
+            }
+            tasks.awaitAll().flatten()
+        } }.awaitAll() }.flatten().map { track ->
+            val same = WavePolicy.artistKey(track) in artists
+            WaveCandidate(track, s.libraries.any { WavePolicy.sameRecording(it.track, track) }, 0.0, if (same) 0.9 else 0.6,
+                if (same) "Ещё от ${track.artist}" else "Похоже на «${anchors[0].title}»")
+        }
+        ensure(s); add(s, found)
+    }
     private suspend fun batch(s: Session, first: Boolean = false): List<Track> {
         ensure(s)
         if (!s.hydrated) { libraries(s); s.hydrated = true }
@@ -171,6 +198,12 @@ class WaveMixer(
         }
         var result = select()
         if (result.isEmpty()) { recommendations(s, false); result = select() }
+        // всё подходящее сыграно — похожее на последние треки; не нашлось — разрешаем давно сыгранное (кроме последних 40)
+        if (result.isEmpty() && prefs.settings.value.mood.isNullOrEmpty()) { similarToRecent(s); result = select() }
+        if (result.isEmpty() && s.policy.selected.size > 40) {
+            synchronized(feedbackLock) { val keep = s.policy.selected.takeLast(40); s.policy.selected.clear(); s.policy.selected.addAll(keep) }
+            result = select()
+        }
         if (result.isEmpty()) throw ApiException(if (sources().isEmpty()) "Войди хотя бы в один сервис для волны" else "Новых подходящих треков пока нет. Измени настройки волны или добавь лайки.")
         add(s, emptyList())
         if (first && ya.loggedIn) bounded(Unit) { ya.waveFeedback("radioStarted", null); Unit }
