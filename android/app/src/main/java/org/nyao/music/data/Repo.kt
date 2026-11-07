@@ -131,6 +131,7 @@ object Repo {
         radio = Radio(ya, yt, sc, vk) { !up(it) }
         _favArtists.value = FavArtist.listFromJson(runCatching { org.json.JSONArray(prefs.favArtists) }.getOrNull())
         wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) }, favorites = { _favArtists.value }, sp = sp, historyProvider = { cloud.waveHistory() })
+        seedAccounts()
     }
 
     fun track(id: String): Track? = tracks[id]
@@ -262,13 +263,58 @@ object Repo {
 
     // ---------- Аккаунты ----------
 
-    suspend fun refreshAccounts() {
-        val a = if (ya.loggedIn) runCatching { ya.account() }.getOrElse { Account("Яндекс (токен не принят)") } else null
-        val b = if (yt.loggedIn) runCatching { yt.account() }.getOrElse { Account("YouTube Music") } else null
-        val c = if (sc.loggedIn) runCatching { sc.account() }.getOrElse { Account("SoundCloud (токен не принят)") } else null
-        val d = if (vk.loggedIn) vk.account() else null
-        val e = if (sp.loggedIn) runCatching { sp.account() }.getOrElse { Account(if (sp.regionBlocked) "Spotify (нужен VPN)" else "Spotify (вход не принят)") } else null
-        _accounts.value = mapOf(SOURCE_YA to a, SOURCE_YT to b, SOURCE_SC to c, SOURCE_VK to d, SOURCE_SP to e)
+    private val ACCOUNT_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC, SOURCE_VK, SOURCE_SP)
+
+    private fun loggedIn(source: String): Boolean = when (source) {
+        SOURCE_YA -> ya.loggedIn
+        SOURCE_YT -> yt.loggedIn
+        SOURCE_SC -> sc.loggedIn
+        SOURCE_VK -> vk.loggedIn
+        SOURCE_SP -> sp.loggedIn
+        else -> false
+    }
+
+    private fun readAccountsCache(): Map<String, Account> = runCatching {
+        val o = org.json.JSONObject(prefs.accountsCache ?: return emptyMap())
+        o.keys().asSequence().associateWith { k ->
+            val a = o.getJSONObject(k)
+            Account(a.optString("name"), if (a.has("plus")) a.getBoolean("plus") else null, a.str("uid"))
+        }
+    }.getOrDefault(emptyMap())
+
+    private fun writeAccountsCache(m: Map<String, Account>) {
+        val o = org.json.JSONObject()
+        m.forEach { (k, a) -> o.put(k, org.json.JSONObject().put("name", a.name).apply { a.plus?.let { put("plus", it) }; a.uid?.let { put("uid", it) } }) }
+        prefs.accountsCache = o.toString()
+    }
+
+    /**
+     * Аккаунты сразу при запуске, без сети: токены лежат в телефоне, имена — с прошлого раза.
+     * Так главная не показывает «Подключи сервисы», пока сервисы отвечают на запрос имени.
+     */
+    private fun seedAccounts() {
+        val cache = readAccountsCache()
+        _accounts.value = ACCOUNT_SOURCES.associateWith { s -> if (loggedIn(s)) cache[s] ?: Account("") else null }
+    }
+
+    suspend fun refreshAccounts() = kotlinx.coroutines.coroutineScope {
+        // все сервисы спрашиваем разом: ждём самый медленный, а не сумму всех
+        fun <T> io(block: suspend () -> T) = async(kotlinx.coroutines.Dispatchers.IO) { block() }
+        val a = io { if (ya.loggedIn) runCatching { ya.account() } else null }
+        val b = io { if (yt.loggedIn) runCatching { yt.account() } else null }
+        val c = io { if (sc.loggedIn) runCatching { sc.account() } else null }
+        val d = io { if (vk.loggedIn) runCatching { vk.account() } else null }
+        val e = io { if (sp.loggedIn) runCatching { sp.account() } else null }
+        val got = mapOf(SOURCE_YA to a.await(), SOURCE_YT to b.await(), SOURCE_SC to c.await(), SOURCE_VK to d.await(), SOURCE_SP to e.await())
+        val fallback = mapOf(
+            SOURCE_YA to "Яндекс (токен не принят)", SOURCE_YT to "YouTube Music", SOURCE_SC to "SoundCloud (токен не принят)",
+            SOURCE_VK to "VK", SOURCE_SP to if (sp.regionBlocked) "Spotify (нужен VPN)" else "Spotify (вход не принят)",
+        )
+        _accounts.value = ACCOUNT_SOURCES.associateWith { s -> got[s]?.let { r -> r.getOrNull() ?: Account(fallback[s] ?: s) } }
+        // в кеш — только принятые ответы; при сбое сети остаётся имя с прошлого раза
+        val cache = readAccountsCache().filterKeys { got[it] != null }.toMutableMap()
+        got.forEach { (s, r) -> r?.getOrNull()?.let { cache[s] = it } }
+        writeAccountsCache(cache)
     }
 
     /** Удаляет cookie только указанных сайтов (выход из одного сервиса не выкидывает из остальных) */

@@ -491,7 +491,7 @@ function renderHome() {
         <span class="muted" style="font-size:13px">${ytSection.tracks.length} треков · включить</span>
       </button>` : ''}
     </div>
-    ${!h && loggedAny ? '<div class="skeleton" style="height:220px"></div>' : ''}
+    ${!h && loggedAny ? shelfSkeleton() + shelfSkeleton() : ''}
     ${releasesHtml()}
     ${tiles.length ? `<section><div class="sec-head"><h2 class="sec">Плейлисты и миксы</h2><button class="link" data-action="go" data-route="library">Вся медиатека</button></div>
       <div class="tiles">${tiles.map((p) => `<button class="tile" data-action="open-pl" data-id="${esc(p.id)}">${coverHtml(p, '', true)}<div class="t">${esc(p.title)}</div><div class="s">${esc(p.sub || (p.count ? p.count + ' треков' : ''))}</div></button>`).join('')}</div></section>` : ''}
@@ -549,7 +549,8 @@ function renderHomePlayer() {
     </div>
     ${continueHtml()}
     ${!loggedAny ? `<div class="card"><div class="field"><label>Подключи сервисы</label><div class="hint">Войди в Яндекс Музыку, YouTube Music или SoundCloud — здесь появятся лайки, плейлисты и волна.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Открыть настройки</button></div></div>` : ''}
-    ${loggedAny ? `<section class="qgrid">${tiles.map(quickTile).join('')}</section>` : ''}
+    ${loggedAny && !state.lib.lists && !state.lib.counts ? qgridSkeleton() : loggedAny ? `<section class="qgrid">${tiles.map(quickTile).join('')}</section>` : ''}
+    ${!recent.length && state.recentLoading ? shelfSkeleton() : ''}
     ${recent.length ? `<section><div class="sec-head"><h2 class="sec">Недавно слушал</h2></div>
       <div class="recent-row">${recent.slice(0, 12).map((t, i) => `<button class="rcard" data-action="play-row" data-list="home-recent" data-i="${i}">${coverHtml(t, '', true)}<b>${esc(t.title)}</b><span>${esc(t.artist)}</span></button>`).join('')}</div></section>` : ''}
     ${releasesHtml()}
@@ -568,9 +569,22 @@ function renderHomePlayer() {
   new Ribbon($('#home-ribbon'), { lines: 12, cy: 0.5, amp: 0.8, accent: accentColor() });
   injectOutage();
 }
+/** Силуэты загрузки: серые формы будущих элементов с бликом (styles.css .sk) */
+function shelfSkeleton() {
+  const tile = '<div class="sk-tile"><div class="sk sk-art"></div><div class="sk sk-line" style="width:78%"></div><div class="sk sk-line sm" style="width:50%"></div></div>';
+  return `<section aria-busy="true" aria-label="Загружается"><div class="sk sk-title"></div><div class="sk-row">${tile.repeat(6)}</div></section>`;
+}
+function qgridSkeleton() {
+  return `<section class="qgrid" aria-busy="true" aria-label="Загружается">${'<div class="sk sk-q"></div>'.repeat(8)}</section>`;
+}
+
 /** История и «чаще всего» для главной */
 async function loadRecent() {
   if (!api.cloud) return;
+  if (!state.recent) {
+    state.recentLoading = !!(state.cloud && state.cloud.loggedIn);
+    if (state.recentLoading && state.route === 'home') renderHome();
+  }
   try {
     const hist = await api.cloud.history();
     const seen = new Set();
@@ -586,6 +600,7 @@ async function loadRecent() {
   } catch {
     // без истории — просто без этих блоков
   }
+  state.recentLoading = false;
   if (state.route === 'home') renderHome();
 }
 
@@ -1940,6 +1955,7 @@ async function loadLibrary(force = false) {
     state.lib.lists = lists2;
     renderRail();
     if (state.route === 'library') renderLibrary();
+    else if (state.route === 'home' && layout() === 'player') renderHome(); // силуэты плиток → плитки
   }
   if (!state.lib.tracks && state.route === 'library') selectPlaylist(state.lib.selected);
 }
@@ -4115,6 +4131,8 @@ function openMixBuilder() {
   volEl.value = Math.round(state.settings.volume * 100);
   setRangeFill(volEl);
   renderBar();
+  // кто вошёл — известно сразу (входы лежат на компьютере); точные имена догрузит loadStatus
+  if (api.auth.quick) state.status = await api.auth.quick().catch(() => state.status);
   // Стартовый экран: в виде «Моя волна» на Mac — волна (как в макете Liquid Glass), иначе — главная
   const start = IS_MAC && layout() === 'wave' ? 'wave' : 'home';
   go(start, {}, false);

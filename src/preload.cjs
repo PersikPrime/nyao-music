@@ -111,6 +111,7 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   auth: {
     status: () => call('auth:status'),
+    quick: () => call('auth:quick'),
     login: (service) => call('auth:login', service),
     setManual: (service, value) => call('auth:setManual', service, value),
     logout: (service) => call('auth:logout', service)

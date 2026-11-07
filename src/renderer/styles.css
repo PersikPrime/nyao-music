@@ -374,8 +374,17 @@ details textarea, details input[type=text] { flex: 1; min-width: 0; background: 
 .menu button:hover { background: var(--s3); color: var(--text); }
 .menu .lbl { padding: 6px 12px 4px; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
 
-.skeleton { background: var(--s2); border-radius: 12px; animation: sk 1.2s ease-in-out infinite; }
-@keyframes sk { 50% { opacity: .5; } }
+/* Силуэты загрузки: форма будущего элемента, по ней наискосок катится мягкий блик */
+.skeleton, .sk { background-color: var(--s2); background-image: linear-gradient(100deg, transparent 40%, rgba(255,255,255,.06) 50%, transparent 60%); background-size: 300% 100%; background-repeat: no-repeat; border-radius: 12px; animation: sk 1.3s linear infinite; }
+@keyframes sk { from { background-position: 100% 0; } to { background-position: 0% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton, .sk { animation: none; } }
+.sk-title { width: 180px; height: 22px; border-radius: 8px; margin-bottom: 14px; }
+.sk-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); grid-auto-rows: auto; gap: 18px; max-height: 240px; overflow: hidden; }
+.sk-tile { display: flex; flex-direction: column; gap: 10px; }
+.sk-art { aspect-ratio: 1; border-radius: 16px; }
+.sk-line { height: 13px; border-radius: 6px; }
+.sk-line.sm { height: 11px; }
+.sk-q { height: 64px; border-radius: 16px; }
 
 @media (max-width: 1180px) {
   .aside, .np-aside { width: 340px; }

@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import org.nyao.music.ui.components.QuickGridSkeleton
+import org.nyao.music.ui.components.ShelfSkeleton
 import org.nyao.music.ui.components.NyaoIcons
 
 import androidx.compose.foundation.BorderStroke
@@ -166,6 +168,8 @@ fun PlayerHome(model: AppModel, name: String?) {
                     Text("Войди в Яндекс Музыку, YouTube Music или SoundCloud — здесь появятся лайки, плейлисты и волна.", color = NyaoColors.Muted, style = MaterialTheme.typography.bodyMedium)
                 }
             }
+        } else if (model.liked == null && model.playlists == null) {
+            item { QuickGridSkeleton() }
         } else {
             item {
                 FlowRow(
@@ -191,6 +195,9 @@ fun PlayerHome(model: AppModel, name: String?) {
             }
         }
         val recent = model.recent
+        if (recent == null && model.recentLoading) {
+            item { ShelfSkeleton(Modifier.padding(top = 24.dp)) }
+        }
         if (!recent.isNullOrEmpty()) {
             item { Text("Недавно слушал", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 24.dp, bottom = 12.dp)) }
             item { TrackShelf(recent) { i -> PlayerConnection.playList(recent, i, "Недавно слушал") } }

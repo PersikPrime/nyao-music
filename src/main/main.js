@@ -1020,6 +1020,13 @@ function registerIpc() {
     ].join('\n');
   });
 
+  // Сразу, без сети: кто вошёл — по сохранённым входам, имена — с прошлого раза.
+  // Главная не показывает «Подключи сервисы», пока сервисы отвечают на запрос имени.
+  handle('auth:quick', () => {
+    const cache = settings.get().accountsCache || {};
+    const has = { ya: ya.loggedIn, yt: yt.loggedIn, sc: sc.loggedIn, vk: vk.loggedIn || !!secrets.get('vkUid') };
+    return Object.fromEntries(Object.entries(has).map(([k, on]) => [k, on ? { name: '', ...(cache[k] || {}), cached: true } : null]));
+  });
   handle('auth:status', async () => {
     await vk.refresh();
     const [yaAcc, ytAcc, scAcc, vkAcc] = await Promise.all([
@@ -1028,7 +1035,17 @@ function registerIpc() {
       sc.loggedIn ? safe(sc.getAccount(), { name: 'SoundCloud', error: true }) : null,
       vk.loggedIn ? safe(vk.getAccount(), { name: 'VK', error: true }) : null
     ]);
-    return { ya: yaAcc, yt: ytAcc, sc: scAcc, vk: vkAcc };
+    const out = { ya: yaAcc, yt: ytAcc, sc: scAcc, vk: vkAcc };
+    // в кеш — только принятые ответы; при сбое сети остаётся имя с прошлого раза
+    const old = settings.get().accountsCache || {};
+    const cache = {};
+    for (const [k, a] of Object.entries(out)) {
+      if (!a) continue;
+      if (!a.error && a.name) cache[k] = { name: a.name, ...(a.avatar ? { avatar: a.avatar } : {}), ...(a.plus !== undefined ? { plus: a.plus } : {}) };
+      else if (old[k]) cache[k] = old[k];
+    }
+    if (JSON.stringify(cache) !== JSON.stringify(old)) settings.set({ accountsCache: cache });
+    return out;
   });
   handle('auth:login', async (service) => {
     if (service === 'ya') {

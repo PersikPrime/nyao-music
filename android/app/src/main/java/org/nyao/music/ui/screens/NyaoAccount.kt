@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import org.nyao.music.ui.components.shimmer
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -71,7 +72,11 @@ fun NyaoAvatar(size: Int = 52, shape: androidx.compose.ui.graphics.Shape = Circl
         contentAlignment = Alignment.Center,
     ) {
         val pic = user?.picture
-        if (pic != null) AsyncImage(model = pic, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (pic != null) {
+            var loaded by androidx.compose.runtime.remember(pic) { androidx.compose.runtime.mutableStateOf(false) }
+            if (!loaded) Box(Modifier.fillMaxSize().shimmer(shape))
+            AsyncImage(model = pic, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), onSuccess = { loaded = true }, onError = { loaded = true })
+        }
         else Text((user?.name?.firstOrNull() ?: 'N').uppercase(), color = NyaoColors.OnLavender, fontWeight = FontWeight.Bold, fontSize = (size * 0.42f).sp)
     }
 }

@@ -273,9 +273,14 @@ class AppModel(private val scope: CoroutineScope) {
     var top by mutableStateOf<List<Pair<Track, Int>>?>(null)
     var mixBuilderOpen by mutableStateOf(false)
 
+    /** Идёт первая загрузка истории — на главной силуэт полки (только с аккаунтом Nyao: история живёт там) */
+    var recentLoading by mutableStateOf(Repo.cloud.user.value != null)
+
     fun loadRecent() {
         scope.launch {
+            if (recent == null) recentLoading = Repo.cloud.user.value != null
             recent = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.cloud.recent() } }.getOrNull()
+            recentLoading = false
             recent?.forEach { Repo.rememberTrack(it) }
             top = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Repo.cloud.top(30) } }.getOrNull()?.filter { it.second >= 2 }
             top?.forEach { Repo.rememberTrack(it.first) }

@@ -209,6 +209,11 @@ class Prefs(context: Context) {
         get() = sp.getString("nyaoUser", null)
         set(v) = sp.edit().apply { if (v == null) remove("nyaoUser") else putString("nyaoUser", v) }.apply()
 
+    /** Последние известные аккаунты сервисов (имя, Плюс, uid) — показать сразу при запуске, пока сеть отвечает */
+    var accountsCache: String?
+        get() = sp.getString("accountsCache", null)
+        set(v) = sp.edit().apply { if (v == null) remove("accountsCache") else putString("accountsCache", v) }.apply()
+
     /** С каких треков начинались последние запуски волны — чтобы не начинать с одного и того же */
     var waveProfile: String
         get() = sp.getString("waveProfileV2", "{}") ?: "{}"
