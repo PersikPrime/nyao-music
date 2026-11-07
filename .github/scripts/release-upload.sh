@@ -12,6 +12,8 @@ PRE=""
 if [ -n "$CHANNEL" ]; then TAG="v$N.$B-$CHANNEL"; PRE="--prerelease"; fi
 TITLE="Nyao Music $N ($B)${CHANNEL:+ $CHANNEL}"
 if [ -n "$DISPLAY" ]; then TITLE="Nyao Music $DISPLAY${CHANNEL:+ $CHANNEL}"; fi
+# канал nightly для людей — Nyao Music Red
+if [ "$CHANNEL" = "nightly" ]; then TITLE="Nyao Music Red · $B"; fi
 NOTES_FILE=".github/notes/$TAG.md"
 create() {
   # Если для сборки написаны заметки (.github/notes/v0.4.24.md) — они видны в центре обновлений

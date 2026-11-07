@@ -1315,3 +1315,4 @@ body.live-mode #pb-shuffle, body.live-mode #pb-repeat, body.live-mode #pb-radio,
 .onair-st .s.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .onair-streams { overflow-x: auto; scrollbar-width: none; }
 .onair-streams button { white-space: nowrap; flex-shrink: 0; }
+.brand .brand-red { color: #ff5c5c; font-weight: inherit; }

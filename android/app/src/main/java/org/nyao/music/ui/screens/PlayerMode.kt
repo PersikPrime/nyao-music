@@ -468,7 +468,7 @@ fun OutdatedDialog(apkUrl: String?) {
         onDismissRequest = {},
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
         title = { Text("Нужно обновиться") },
-        text = { Text("Эта версия Nyao Music (${org.nyao.music.BuildConfig.VERSION_NAME}) больше не поддерживается. Скачай свежую — обновление встанет поверх, входы сохранятся.") },
+        text = { Text("Эта версия (${org.nyao.music.BuildConfig.DISPLAY_NAME}) больше не поддерживается. Скачай свежую — обновление встанет поверх, входы сохранятся.") },
         confirmButton = {
             Button(onClick = {
                 val url = apkUrl ?: "https://github.com/PersikPrime/nyao-music/releases/latest"

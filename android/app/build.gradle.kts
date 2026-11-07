@@ -13,6 +13,9 @@ val nyaoDisplay = Regex("\"displayVersion\"\\s*:\\s*\"([^\"]+)\"").find(versionJ
 val nyaoBuild = Regex("\"build\"\\s*:\\s*(\\d+)").find(versionJson)?.groupValues?.get(1)?.toInt() ?: 1
 // "channel": "dev" — сборка из dev-ветки
 val nyaoChannel = Regex("\"channel\"\\s*:\\s*\"([^\"]+)\"").find(versionJson)?.groupValues?.get(1)
+// канал nightly для людей называется Nyao Music Red: своё имя, красные волны на иконке, версия «Red · 106»
+val nyaoRed = nyaoChannel == "nightly"
+val nyaoVersionName = if (nyaoRed) "Red · $nyaoBuild" else (nyaoDisplay ?: "$nyaoName ($nyaoBuild)") + (nyaoChannel?.let { " $it" } ?: "")
 
 android {
     namespace = "org.nyao.music"
@@ -23,7 +26,9 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = nyaoBuild
-        versionName = (nyaoDisplay ?: "$nyaoName ($nyaoBuild)") + (nyaoChannel?.let { " $it" } ?: "")
+        versionName = nyaoVersionName
+        // как приложение называет себя в интерфейсе: «Nyao Music Red · 106» или «Nyao Music 0.8 (106) dev»
+        buildConfigField("String", "DISPLAY_NAME", "\"Nyao Music $nyaoVersionName\"")
         // ключи Last.fm — из секретов GitHub (без них Last.fm в настройках выключен)
         buildConfigField("String", "CHANNEL", "\"" + (nyaoChannel ?: "stable") + "\"")
         buildConfigField("String", "LASTFM_KEY", "\"" + (System.getenv("NYAO_LASTFM_KEY") ?: "") + "\"")
@@ -45,6 +50,11 @@ android {
         }
     }
 
+    // Nyao Music Red: имя и иконка из src/red поверх основных (ресурсы типа сборки важнее main)
+    if (nyaoRed) sourceSets {
+        getByName("debug").res.srcDir("src/red/res")
+        getByName("release").res.srcDir("src/red/res")
+    }
     buildTypes {
         release {
             // Есть постоянный ключ — подписываем им; локально без ключа — debug-ключом, чтобы APK ставился

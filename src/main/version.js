@@ -5,6 +5,8 @@ export function publicVersion(v) {
     ? v.displayVersion : v.name + '.' + v.build;
 }
 export function versionLabel(v) {
+  // канал nightly для людей — Nyao Music Red: «Red · 106» (в окне — «Nyao Music Red · 106»)
+  if (v.channel === 'nightly') return 'Red · ' + v.build;
   const name = v.displayVersion ? publicVersion(v) : v.name + ' (' + v.build + ')';
   return name + (v.channel ? ' ' + v.channel : '');
 }

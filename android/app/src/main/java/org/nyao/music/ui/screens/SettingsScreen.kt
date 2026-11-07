@@ -266,7 +266,7 @@ private fun AboutCard() {
             }
             Column(Modifier.padding(start = 14.dp)) {
                 Text("Nyao Music", style = MaterialTheme.typography.titleLarge)
-                Text("версия ${BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { org.nyao.music.ui.Hundred.tapVersion() })
+                Text(BuildConfig.DISPLAY_NAME, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { org.nyao.music.ui.Hundred.tapVersion() })
             }
         }
         Text(
@@ -634,11 +634,11 @@ private fun UpdateCard(model: AppModel, showTitle: Boolean = true) {
                 error != null -> "Не получилось: $error"
                 i != null && i.available -> "Доступна версия ${i.label} · ${i.apkSize / (1024 * 1024)} МБ"
                 i != null -> "Установлена последняя версия" + (i.label?.let { " ($it)" } ?: "")
-                else -> "Сейчас: ${BuildConfig.VERSION_NAME}"
+                else -> "Сейчас: ${BuildConfig.DISPLAY_NAME}"
             },
             style = MaterialTheme.typography.titleSmall,
         )
-        Text("Сейчас установлена ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Сейчас установлена ${BuildConfig.DISPLAY_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         // Канал обновлений — как в центре обновлений macOS
         val channel = Repo.prefs.settings.collectAsState().value.let { org.nyao.music.data.Updates.channel() }
         Text("Канал обновлений", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
@@ -660,7 +660,7 @@ private fun UpdateCard(model: AppModel, showTitle: Boolean = true) {
         Text(
             when (channel) {
                 "dev" -> "Бета: новое раньше всех, иногда с недочётами. Если обычный релиз новее — придёт он."
-                "nightly" -> "Ночные сборки: эксперименты прямо из разработки, могут ломаться."
+                "nightly" -> "Nyao Music Red: эксперименты прямо из разработки, могут ломаться."
                 else -> "Проверенные релизы."
             } + if (i != null && !i.available && i.build in 1 until BuildConfig.VERSION_CODE) " Версия в этом канале старше установленной — обновление придёт, когда канал её догонит." else "",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -1051,11 +1051,11 @@ function svcCard(svc) {
 
 /** Центр обновлений: версия, проверка релиза на GitHub, скачивание установщика */
 // Каналы обновлений — как в центре обновлений macOS
-const UPDATE_CHANNELS = [['stable', 'Обычные'], ['dev', 'Бета'], ['nightly', 'Ночные']];
+const UPDATE_CHANNELS = [['stable', 'Обычные'], ['dev', 'Бета'], ['nightly', 'Red']];
 const UPDATE_CHANNEL_HINT = {
   stable: 'Проверенные релизы.',
   dev: 'Бета: новое раньше всех, иногда с недочётами. Если обычный релиз новее — придёт он.',
-  nightly: 'Ночные сборки — эксперименты прямо из разработки, могут ломаться.'
+  nightly: 'Nyao Music Red — эксперименты прямо из разработки, могут ломаться.'
 };
 /** Заметки релиза: текст как есть, а <sub>…</sub> (мелкий шрифт на GitHub) — мелким и здесь */
 function notesHtml(text) {
@@ -4158,6 +4158,12 @@ function openMixBuilder() {
   api.version().then((v) => {
     state.version = v.label;
     state.versionInfo = v;
+    // канал nightly — Nyao Music Red: имя в заголовке окна и в шапке
+    if (v.channel === 'nightly') {
+      document.title = 'Nyao Music Red';
+      const brand = document.querySelector('.titlebar .brand span');
+      if (brand) brand.innerHTML = 'Nyao Music <b class="brand-red">Red</b>';
+    }
     if (isSettingsRoute()) renderSettings();
     hundred.maybeFirstRun();
   }).catch(() => {});

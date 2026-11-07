@@ -79,6 +79,15 @@ jobs:
       # совместимость для быстрых обновлений: пакет кода подходит только установке с тем же Electron и библиотеками
       - name: Совместимость быстрых обновлений
         run: node scripts/hot-bundle.mjs --compat
+      # канал nightly — Nyao Music Red: красные волны на иконке. После --compat: иконки на совместимость не влияют.
+      # productName не меняем — от него зависит папка с настройками и входами (userData)
+      - name: Иконка Nyao Music Red
+        shell: bash
+        run: |
+          if [ "$(node -p "require('./version.json').channel || ''")" = "nightly" ]; then
+            cp build/red/icon.png build/icon.png
+            cp build/red/icon-mac.png build/icon-mac.png
+          fi
       - name: "Сборка Windows: EXE → VMP → NSIS/ZIP"
         if: runner.os == 'Windows'
         env:

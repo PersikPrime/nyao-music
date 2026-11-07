@@ -27,7 +27,9 @@ test('patch naming preserves monotonic builds, sync and the next regular release
     bump('--patch');
     assert.equal(read('version.json').build, 98);
     assert.equal(publicVersion(read('version.json')), '0.8.97.1');
-    assert.equal(versionLabel(read('version.json')), '0.8.97.1 nightly');
+    // канал nightly для людей — Nyao Music Red: номер сборки вместо публичной версии
+    assert.equal(versionLabel(read('version.json')), 'Red · 98');
+    assert.equal(versionLabel({ ...read('version.json'), channel: 'dev' }), '0.8.97.1 dev');
     assert.equal(read('package.json').version, '0.8.98', 'Electron receives valid semver');
     assert.ok(read('package.json').build.artifactName.includes('0.8.97.1-build-0.8.98-'));
     bump('--sync'); assert.equal(read('version.json').build, 98);
@@ -83,7 +85,7 @@ test('legacy mirror keeps the patch NUI alongside an APK and 97 discovers it', a
       async () => Response.json(release), { compat: 'abc' });
     assert.equal(result.available, true);
     assert.equal(result.latest.build, 98);
-    assert.equal(result.latest.label, '0.8.97.1');
+    assert.equal(result.latest.label, 'Red · 98', 'nightly называется Nyao Music Red');
     assert.equal(result.hot.name, nui);
     assert.ok(result.hot.sigUrl.endsWith(nui + '.sig'));
   } finally { fs.rmSync(d, { recursive: true, force: true }); }

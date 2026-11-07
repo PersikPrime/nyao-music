@@ -1460,7 +1460,8 @@ function trayMenu() {
 }
 function updateTray() {
   if (!tray) return;
-  tray.setToolTip(nowInfo.title ? `Nyao Music — ${nowInfo.title}` : 'Nyao Music');
+  const appName = readVersion().channel === 'nightly' ? 'Nyao Music Red' : 'Nyao Music';
+  tray.setToolTip(nowInfo.title ? `${appName} — ${nowInfo.title}` : appName);
   tray.setContextMenu(trayMenu());
 }
 function setupTray() {

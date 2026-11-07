@@ -94,7 +94,7 @@ export async function checkUpdate(current, fetchFn = globalThis.fetch, { compat 
   const publicName = /^Nyao Music (\d+\.\d+\.\d+(?:\.\d+)?)(?:\s|$)/.exec(rel.name || '')?.[1];
   return {
     current,
-    latest: latest ? { ...latest, label: publicName || `${latest.name} (${latest.build})` } : null,
+    latest: latest ? { ...latest, label: latest.channel === 'nightly' ? `Red · ${latest.build}` : publicName || `${latest.name} (${latest.build})` } : null,
     available: !!latest && latest.build > current.build,
     required: minBuild > 0 && current.build < minBuild && !!latest && latest.build >= minBuild,
     minBuild,
