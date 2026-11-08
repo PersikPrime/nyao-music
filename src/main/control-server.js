@@ -12,6 +12,7 @@
 //   GET  /v1/state?since=<rev>          — длинный опрос: ответит, как только rev изменится (или через 25 с)
 //   POST /v1/cmd {cmd, value?}          — toggle | play | pause | next | prev | like | seek(сек) | volume(0..1) | shuffle | repeat | wave
 //   GET  /v1/cover?size=64              — обложка текущего трека, PNG size×size (Minecraft читает только PNG)
+//   GET  /v1/lyrics                     — текст текущего трека: {trackId, synced, lines:[{t, text, words?:[{t, e, text}]}]}
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -28,10 +29,12 @@ export class ControlServer {
    * @param {(url: string, size: number) => Promise<Buffer|null>} o.cover  PNG обложки
    * @param {string} o.version
    */
-  constructor({ dir, onCommand, cover, version = '', log = () => {} }) {
+  constructor({ dir, onCommand, cover, lyrics = null, version = '', log = () => {} }) {
     this.dir = dir;
     this.onCommand = onCommand;
     this.coverPng = cover;
+    this.lyricsFor = lyrics;
+    this.lyricsCache = { id: null, value: null }; // текст последнего трека (или промис, пока ищется)
     this.version = version;
     this.log = log;
     this.server = null;
@@ -192,6 +195,33 @@ export class ControlServer {
       return this.send(res, 200, png, 'image/png');
     }
 
+    if (req.method === 'GET' && url.pathname === '/v1/lyrics') {
+      const t = this.state.track;
+      if (!t || !this.lyricsFor || this.state.live) return this.send(res, 404, { error: 'нет текста' });
+      if (this.lyricsCache.id !== t.id) {
+        const p = Promise.resolve().then(() => this.lyricsFor(t)).then((r) => compactLyrics(t.id, r)).catch(() => null);
+        this.lyricsCache = { id: t.id, value: p };
+      }
+      const value = await this.lyricsCache.value;
+      if (!value) return this.send(res, 404, { error: 'нет текста' });
+      return this.send(res, 200, value);
+    }
+
     return this.send(res, 404, { error: 'нет такого адреса' });
   }
+}
+
+/** Текст для мода: только строки с временем; слова — с началом и концом (караоке), если они есть */
+export function compactLyrics(trackId, r) {
+  if (!r || !Array.isArray(r.lines) || !r.synced) return null;
+  const round = (x) => Math.round(Number(x) * 100) / 100;
+  const lines = r.lines
+    .filter((l) => l && Number.isFinite(Number(l.time)))
+    .map((l) => ({
+      t: round(l.time),
+      text: String(l.text || ''),
+      ...(Array.isArray(l.words) && l.words.length ? { words: l.words.map((w) => ({ t: round(w.time), e: round(w.end ?? w.time), text: String(w.text) })) } : {}),
+    }));
+  if (!lines.length) return null;
+  return { trackId, synced: true, words: lines.some((l) => l.words), source: r.source || '', lines };
 }

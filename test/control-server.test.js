@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ControlServer } from '../src/main/control-server.js';
+import { ControlServer, compactLyrics } from '../src/main/control-server.js';
 
 test('пульт: токен, защита от браузера, состояние, длинный опрос, команды', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nyao-ctl-'));
@@ -36,4 +36,12 @@ test('пульт: токен, защита от браузера, состоян
     s.stop();
   }
   assert.equal(fs.existsSync(path.join(dir, 'control.json')), false);
+});
+
+test('пульт: текст для мода — только синхронный, слова с концом', () => {
+  assert.equal(compactLyrics('ya:1', { synced: false, lines: [{ time: 0, text: 'a' }] }), null);
+  const r = compactLyrics('ya:1', { synced: true, source: 'LRCLIB', lines: [{ time: 1.234, text: 'привет мир', words: [{ time: 1.234, end: 1.8, text: 'привет' }, { time: 1.8, end: 2.5, text: 'мир' }] }, { time: 3, text: '' }] });
+  assert.deepEqual(r.lines[0], { t: 1.23, text: 'привет мир', words: [{ t: 1.23, e: 1.8, text: 'привет' }, { t: 1.8, e: 2.5, text: 'мир' }] });
+  assert.equal(r.words, true);
+  assert.equal(r.lines.length, 2);
 });

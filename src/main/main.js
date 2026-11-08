@@ -206,6 +206,7 @@ function configureRpc() {
 
 // Пульт для других программ (мод Nyao MinePlay для Minecraft): только этот компьютер, по токену
 let controlSrv = null;
+let controlLyrics = null; // (track) → текст песни той же цепочкой, что в окне; задаётся ниже, где есть lyricsDeps
 async function controlCover(url, size) {
   // nativeImage понимает только PNG и JPEG: просим JPEG и убираем webp из известных ссылок
   const urls = [url];
@@ -236,6 +237,7 @@ function configureControl() {
       dir: app.getPath('userData'),
       version: versionLabel(readVersion()),
       cover: controlCover,
+      lyrics: (track) => (controlLyrics ? controlLyrics(track) : null),
       onCommand: (cmd, value) => { if (win && !win.isDestroyed()) win.webContents.send('control', { cmd, value }); },
       log: (m) => console.log('[nyao]', m),
     });
@@ -1310,6 +1312,7 @@ function registerIpc() {
     ...lyricsDeps(),
     exclude: Array.isArray(opts && opts.exclude) ? opts.exclude.map(String) : []
   }));
+  controlLyrics = (track) => findLyricsChain(track, { ...lyricsDeps(), log: () => {} });
   // Разработчик: каждый источник текста отдельно — что вернул и за сколько
   handle('dev:lyricsProbe', async (track) => {
     const deps = lyricsDeps();

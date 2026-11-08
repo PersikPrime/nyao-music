@@ -1886,7 +1886,7 @@ function pushControl() {
   controlTimer = setTimeout(() => {
     const t = player.current;
     const a = player.audio;
-    const slim = (x) => x && { id: x.id, title: x.title, artist: x.artist, album: x.album || '', source: x.source, cover: x.cover && /^https?:/.test(x.cover) ? x.cover : null };
+    const slim = (x) => x && { id: x.id, title: x.title, artist: x.artist, album: x.album || '', source: x.source, srcId: x.srcId, albumId: x.albumId, duration: x.duration || 0, url: x.url, cover: x.cover && /^https?:/.test(x.cover) ? x.cover : null };
     const upcoming = player.live ? [] : player.queue.slice(player.index + 1, player.index + 6).map(slim);
     api.control.state({
       playing: player.playing,
