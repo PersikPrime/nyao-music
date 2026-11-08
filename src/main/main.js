@@ -207,10 +207,24 @@ function configureRpc() {
 // Пульт для других программ (мод Nyao MinePlay для Minecraft): только этот компьютер, по токену
 let controlSrv = null;
 async function controlCover(url, size) {
-  const r = await net.fetch(url);
-  if (!r.ok) return null;
-  let img = nativeImage.createFromBuffer(Buffer.from(await r.arrayBuffer()));
-  if (img.isEmpty()) return null;
+  // nativeImage понимает только PNG и JPEG: просим JPEG и убираем webp из известных ссылок
+  const urls = [url];
+  const jpg = url.replace(/-rw(?=[-=]|$)/, '').replace('/vi_webp/', '/vi/').replace(/\.webp(\?|$)/, '.jpg$1');
+  if (jpg !== url) urls.unshift(jpg);
+  let img = null;
+  for (const u of urls) {
+    try {
+      const r = await net.fetch(u, { headers: { accept: 'image/jpeg,image/png;q=0.9,*/*;q=0.1' } });
+      if (!r.ok) { console.warn('[nyao] пульт: обложка HTTP', r.status); continue; }
+      const type = r.headers.get('content-type') || '';
+      const im = nativeImage.createFromBuffer(Buffer.from(await r.arrayBuffer()));
+      if (!im.isEmpty()) { img = im; break; }
+      console.warn('[nyao] пульт: обложка не читается:', type);
+    } catch (e) {
+      console.warn('[nyao] пульт: обложка не скачалась:', safeDiagnostic(e.message));
+    }
+  }
+  if (!img) return null;
   const { width, height } = img.getSize();
   const m = Math.min(width, height); // YouTube отдаёт 16:9 — режем по центру в квадрат
   if (width !== height) img = img.crop({ x: Math.floor((width - m) / 2), y: Math.floor((height - m) / 2), width: m, height: m });
