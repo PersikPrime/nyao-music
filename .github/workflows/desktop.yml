@@ -92,13 +92,31 @@ jobs:
         if: runner.os == 'Windows'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run dist
+        shell: bash
+        # Electron качается с GitHub Releases, а там бывают 504 — повторяем, со второй попытки через зеркало
+        run: |
+          for i in 1 2 3; do
+            npm run dist && exit 0
+            echo "::warning::сборка не удалась (попытка $i), повторяю"
+            export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+            export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+            sleep $((i*30))
+          done
+          exit 1
       - name: Сборка macOS
         if: runner.os == 'macOS'
         env:
           # Подписи разработчика нет — сборка неподписанная (на Mac — ad-hoc подпись)
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder ${{ matrix.args }} --publish never
+        run: |
+          for i in 1 2 3; do
+            npx electron-builder ${{ matrix.args }} --publish never && exit 0
+            echo "::warning::сборка не удалась (попытка $i), повторяю"
+            export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+            export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+            sleep $((i*30))
+          done
+          exit 1
       - name: Проверка финальных VMP-подписей macOS
         if: runner.os == 'macOS'
         run: |
