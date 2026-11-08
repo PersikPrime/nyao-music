@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -37,6 +38,9 @@ object Net {
     suspend fun call(req: Request): Pair<Int, String> = withContext(Dispatchers.IO) { execute(req) }
 
     // ---- Есть ли интернет ----
+    // Система считает сеть рабочей, только если открылся её проверочный сервер (у Android — Google).
+    // На «белых списках» Google закрыт, а Яндекс и VK открыты: тогда система говорит «без интернета»,
+    // хотя музыка работает. Поэтому при неподтверждённой сети проверяем сами — открываются ли Яндекс или VK.
 
     private var cm: ConnectivityManager? = null
     private val _online = MutableStateFlow(true)
@@ -44,26 +48,51 @@ object Net {
     val online: StateFlow<Boolean> = _online
 
     /** Пока система не спрошена (тесты, ранний старт), считаем, что интернет есть */
-    val isOnline: Boolean get() = cm?.let { hasInternet(it) } ?: true
+    val isOnline: Boolean get() = if (cm == null) true else _online.value
+
+    private val probeScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    private var probing: kotlinx.coroutines.Job? = null
+    private val probeClient: OkHttpClient by lazy {
+        client.newBuilder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).callTimeout(6, TimeUnit.SECONDS).build()
+    }
+    /** Любой ответ этих серверов (даже 404) значит, что до сервиса достучались */
+    private val PROBES = listOf("https://api.music.yandex.net/", "https://api.vk.com/", "https://music.yandex.ru/")
 
     fun init(context: Context) {
         if (cm != null) return
         val m = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
         cm = m
-        _online.value = hasInternet(m)
+        update(runCatching { m.getNetworkCapabilities(m.activeNetwork) }.getOrNull())
         runCatching {
             m.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) { _online.value = true }
-                override fun onLost(network: Network) { _online.value = hasInternet(m) }
-                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) { _online.value = usable(caps) }
+                override fun onAvailable(network: Network) { update(runCatching { m.getNetworkCapabilities(network) }.getOrNull()) }
+                override fun onLost(network: Network) { update(runCatching { m.getNetworkCapabilities(m.activeNetwork) }.getOrNull()) }
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) { update(caps) }
             })
         }
     }
 
-    private fun usable(caps: NetworkCapabilities?): Boolean =
-        caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    private fun update(caps: NetworkCapabilities?) {
+        val hasNet = caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        val validated = hasNet && caps!!.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        if (validated || !hasNet) {
+            probing?.cancel(); probing = null
+            _online.value = validated
+            return
+        }
+        // сеть есть, но система её не подтвердила — проверяем сами и повторяем, пока так
+        if (probing?.isActive == true) return
+        probing = probeScope.launch {
+            while (true) {
+                _online.value = reachable()
+                kotlinx.coroutines.delay(30_000)
+            }
+        }
+    }
 
-    private fun hasInternet(m: ConnectivityManager): Boolean = runCatching { usable(m.getNetworkCapabilities(m.activeNetwork)) }.getOrDefault(false)
+    private fun reachable(): Boolean = PROBES.any { url ->
+        runCatching { probeClient.newCall(Request.Builder().url(url).head().build()).execute().use { true } }.getOrDefault(false)
+    }
 }
 
 class ApiException(message: String, val code: Int = 0) : IOException(message)
