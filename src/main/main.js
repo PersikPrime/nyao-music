@@ -29,6 +29,7 @@ import { LastFm } from './lastfm.js';
 import { Radio } from './radio.js';
 import { LiveRadio } from './live-radio.js';
 import { LiveEvents } from './live.js';
+import { ControlServer } from './control-server.js';
 import { Popups, popupFor } from './popup.js';
 import { mergeArtists as mergeFavArtists } from './freshness.js';
 import { transferPlaylist, TARGETS } from './transfer.js';
@@ -201,6 +202,32 @@ function lastfmKeys() {
 const rpc = new DiscordRPC({ log: (m) => console.log(m) });
 function configureRpc() {
   rpc.configure({ enabled: settings.get().discordRpc, clientId: DISCORD_APP_ID });
+}
+
+// Пульт для других программ (мод Nyao MinePlay для Minecraft): только этот компьютер, по токену
+let controlSrv = null;
+async function controlCover(url, size) {
+  const r = await net.fetch(url);
+  if (!r.ok) return null;
+  let img = nativeImage.createFromBuffer(Buffer.from(await r.arrayBuffer()));
+  if (img.isEmpty()) return null;
+  const { width, height } = img.getSize();
+  const m = Math.min(width, height); // YouTube отдаёт 16:9 — режем по центру в квадрат
+  if (width !== height) img = img.crop({ x: Math.floor((width - m) / 2), y: Math.floor((height - m) / 2), width: m, height: m });
+  return img.resize({ width: size, height: size, quality: 'best' }).toPNG();
+}
+function configureControl() {
+  if (!controlSrv) {
+    controlSrv = new ControlServer({
+      dir: app.getPath('userData'),
+      version: versionLabel(readVersion()),
+      cover: controlCover,
+      onCommand: (cmd, value) => { if (win && !win.isDestroyed()) win.webContents.send('control', { cmd, value }); },
+      log: (m) => console.log('[nyao]', m),
+    });
+  }
+  if (settings.get().controlServer) controlSrv.start();
+  else controlSrv.stop();
 }
 
 // Что из настроек едет на другие устройства (остальное — своё у каждого компьютера)
@@ -755,12 +782,15 @@ function registerIpc() {
   handle('settings:set', (patch) => {
     const next = settings.set(patch);
     if ('discordRpc' in patch) configureRpc();
+    if ('controlServer' in patch) configureControl();
     if ('globalKeys' in patch) applyShortcuts();
     if (WAVE_KEYS.some((k) => k in patch) && cloud) cloud.pushState('wave', pick(next, WAVE_KEYS)).catch(() => {});
     if (PREF_KEYS.some((k) => k in patch) && cloud) cloud.pushState('prefs', pick(next, PREF_KEYS)).catch(() => {});
     return next;
   });
   handle('rpc:update', (info) => rpc.update(info));
+  handle('control:state', (st) => { if (controlSrv && controlSrv.running) controlSrv.setState(st || {}); });
+  handle('control:info', () => ({ running: !!(controlSrv && controlSrv.running), port: controlSrv ? controlSrv.port : 0 }));
   handle('rpc:status', () => rpc.status);
   handle('sc:pending', () => scLikes.list());
   handle('yt:openLog', () => {
@@ -1434,6 +1464,7 @@ app.whenReady().then(() => {
   });
   registerIpc();
   configureRpc();
+  configureControl();
   createWindow();
   // отложенные лайки SoundCloud: через минуту после запуска и потом раз в 10 минут
   setTimeout(flushScLikes, 60_000);
@@ -1500,7 +1531,7 @@ function applyShortcuts() {
     }
   }
 }
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => { globalShortcut.unregisterAll(); controlSrv?.stop(); });
 app.on('before-quit', () => { quitting = true; spExperiment?.nativeEngine.release(); });
 
 app.on('window-all-closed', () => {

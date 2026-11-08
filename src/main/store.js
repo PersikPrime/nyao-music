@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS = {
   accent: 'lavender',     // акцентный цвет: lavender | coral | mint | sun | cover     // полноэкранный режим: прятать кнопки, если мышь не двигается
   continueSimilar: true, // список доиграл — продолжать похожим (радио по последнему треку)
   searchPlay: 'similar', // трек из поиска: 'similar' — дальше похожее, 'list' — остальные результаты
+  controlServer: false, // пульт для других программ на этом ПК (мод Nyao MinePlay)
   globalKeys: true,      // сочетания Ctrl+Alt+… работают, даже когда окно свёрнуто
   closeToTray: false     // крестик прячет окно в трей, музыка играет дальше
 };

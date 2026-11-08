@@ -1583,6 +1583,8 @@ function controlCardHtml() {
   return `<section class="card eq-card">
     <div class="pref-row"><span><b>Сочетания клавиш везде</b><span class="hint">Работают, даже когда окно свёрнуто: ${mod}Пробел — пауза, ${mod}→ / ${mod}← — следующий и предыдущий, ${mod}L — «Мне нравится». Медиаклавиши клавиатуры работают всегда.</span></span>
       <button class="switch ${s.globalKeys !== false ? 'on' : ''}" role="switch" aria-checked="${s.globalKeys !== false}" aria-label="Сочетания клавиш везде" data-action="toggle-globalkeys"><span></span></button></div>
+    <div class="pref-row"><span><b>Пульт для Minecraft</b><span class="hint">Мод Nyao MinePlay показывает трек в игре и управляет плеером. Доступен только программам на этом компьютере, по ключу, который меняется при каждом запуске.</span></span>
+      <button class="switch ${s.controlServer ? 'on' : ''}" role="switch" aria-checked="${!!s.controlServer}" aria-label="Пульт для Minecraft" data-action="toggle-control"><span></span></button></div>
     <div class="pref-row"><span><b>Сворачивать в трей при закрытии</b><span class="hint">Крестик прячет окно, музыка играет дальше. Иконка Nyao в трее — управление и выход.</span></span>
       <button class="switch ${s.closeToTray ? 'on' : ''}" role="switch" aria-checked="${!!s.closeToTray}" aria-label="Сворачивать в трей при закрытии" data-action="toggle-tray"><span></span></button></div>
     <div class="pref-row"><span><b>Прятать кнопки в полноэкранном режиме</b><span class="hint">Если мышь не двигается 3 секунды, кнопки исчезают и остаются обложка и текст</span></span>
@@ -1875,6 +1877,35 @@ function pushRpc() {
     api.rpc.update(info).catch(() => {});
   }, 400);
 }
+
+// Состояние для пульта (мод Nyao MinePlay): главный процесс отдаёт его по 127.0.0.1, только когда пульт включён
+let controlTimer;
+function pushControl() {
+  if (!api.control || !state.settings || !state.settings.controlServer) return;
+  clearTimeout(controlTimer);
+  controlTimer = setTimeout(() => {
+    const t = player.current;
+    const a = player.audio;
+    const slim = (x) => x && { id: x.id, title: x.title, artist: x.artist, album: x.album || '', source: x.source, cover: x.cover && /^https?:/.test(x.cover) ? x.cover : null };
+    const upcoming = player.live ? [] : player.queue.slice(player.index + 1, player.index + 6).map(slim);
+    api.control.state({
+      playing: player.playing,
+      position: a.currentTime || 0,
+      duration: Number.isFinite(a.duration) ? a.duration : (t && t.duration) || 0,
+      live: !!player.live,
+      liked: !!(t && player.liked.has(t.id)),
+      volume: a.volume,
+      shuffle: !!player.shuffle,
+      repeat: player.repeat,
+      mode: player.mode || '',
+      track: slim(t),
+      next: upcoming,
+    }).catch(() => {});
+  }, 150);
+}
+['track', 'state', 'like', 'queue', 'onair'].forEach((e) => player.addEventListener(e, pushControl));
+player.audio.addEventListener('seeked', pushControl);
+player.audio.addEventListener('volumechange', pushControl);
 
 const friends = createFriends({
   api, state, esc, coverHtml, badge, toast, go, player, copyText, ago,
@@ -2893,6 +2924,12 @@ async function handleAction(el, e) {
       toast('Last.fm отключён');
       refreshLastfm();
       break;
+    case 'toggle-control':
+      state.settings = await api.settings.set({ controlServer: !state.settings.controlServer });
+      renderSettings();
+      pushControl();
+      toast(state.settings.controlServer ? 'Пульт включён — запусти Minecraft с модом Nyao MinePlay' : 'Пульт выключен');
+      break;
     case 'toggle-globalkeys':
       state.settings = await api.settings.set({ globalKeys: state.settings.globalKeys === false });
       renderSettings();
@@ -3748,7 +3785,24 @@ player.addEventListener('state', () => fullscreen.update());
 player.addEventListener('like', () => fullscreen.update());
 player.addEventListener('time', () => fullscreen.tick());
 // команды из трея и глобальных сочетаний
-api.onControl((cmd) => {
+api.onControl((msg) => {
+  // строка — от трея и сочетаний клавиш; объект {cmd, value} — от пульта (мод Nyao MinePlay)
+  const cmd = typeof msg === 'string' ? msg : msg && msg.cmd;
+  const value = msg && typeof msg === 'object' ? msg.value : undefined;
+  if (cmd === 'play' && !player.playing) return player.current ? player.toggle() : player.startWave().catch(() => {});
+  if (cmd === 'pause' && player.playing) return player.toggle();
+  if (cmd === 'seek' && player.current && !player.live) return player.seek(value);
+  if (cmd === 'volume') {
+    player.setVolume(value);
+    const v = $('#pb-vol');
+    if (v) v.value = Math.round(value * 100);
+    api.settings.set({ volume: value }).catch(() => {});
+    return pushControl();
+  }
+  if (cmd === 'shuffle') return $('#pb-shuffle') && $('#pb-shuffle').click();
+  if (cmd === 'repeat') return $('#pb-repeat') && $('#pb-repeat').click();
+  if (cmd === 'wave') return player.startWave().catch((e) => toast(e.message, true));
+  if (cmd === 'toggle' && !player.current) return player.startWave().catch(() => {});
   if (cmd === 'toggle') player.toggle();
   else if (cmd === 'next') player.next(true);
   else if (cmd === 'prev') player.prev();
