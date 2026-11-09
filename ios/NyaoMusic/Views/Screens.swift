@@ -11,7 +11,9 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 WaveHero()
-                if !repo.recent.isEmpty {
+                if repo.recent.isEmpty && repo.libraryLoading {
+                    HomeSection(title: "Продолжить слушать") { ShelfSkeleton() }
+                } else if !repo.recent.isEmpty {
                     HomeSection(title: "Продолжить слушать") {
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(alignment: .top, spacing: 12) {
@@ -32,7 +34,9 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 16)
                 }
-                if !repo.playlists.isEmpty {
+                if repo.playlists.isEmpty && repo.libraryLoading && repo.anyService {
+                    HomeSection(title: "Плейлисты") { ShelfSkeleton() }
+                } else if !repo.playlists.isEmpty {
                     HomeSection(title: "Плейлисты") {
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(alignment: .top, spacing: 12) {
@@ -245,7 +249,7 @@ struct LibraryView: View {
                     }
                 }
             }
-            if repo.libraryLoading { HStack { Spacer(); ProgressView(); Spacer() } }
+            if repo.libraryLoading { RowsSkeleton(count: repo.playlists.isEmpty ? 6 : 2).listRowSeparator(.hidden) }
         }
         .navigationTitle("Медиатека")
         .refreshable { await repo.loadLibrary() }
@@ -329,7 +333,7 @@ struct PlaylistView: View {
                 }
             }
             .listRowSeparator(.hidden)
-            if loading { HStack { Spacer(); ProgressView(); Spacer() } }
+            if loading { RowsSkeleton(count: 8).listRowSeparator(.hidden) }
             if let error { Text(error).foregroundStyle(Nyao.muted) }
             TrackList(tracks: tracks, label: playlist.title)
         }

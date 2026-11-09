@@ -23,6 +23,10 @@ final class Repo: ObservableObject {
 
     private init() {
         cloudUser = cloud.user
+        // имена аккаунтов — сразу из кеша (по входам, которые есть), сеть уточнит потом: без мигания «войди»
+        if let data = UserDefaults.standard.data(forKey: "accountsCache"), let cached = try? JSONDecoder().decode([String: Account].self, from: data) {
+            accounts = cached.filter { loggedIn($0.key) }
+        }
     }
 
     func loggedIn(_ source: String) -> Bool {
@@ -48,7 +52,10 @@ final class Repo: ObservableObject {
         if ya.loggedIn, let a = try? await ya.account() { acc[Source.ya] = a }
         if vk.loggedIn { acc[Source.vk] = vk.account() }
         if sc.loggedIn, let a = try? await sc.account() { acc[Source.sc] = a }
+        // сеть не ответила — оставляем то, что было (из кеша), а не стираем аккаунт
+        for s in Source.all where acc[s] == nil && loggedIn(s) { if let old = accounts[s] { acc[s] = old } }
         accounts = acc
+        if let data = try? JSONEncoder().encode(acc) { UserDefaults.standard.set(data, forKey: "accountsCache") }
         cloudUser = cloud.user
     }
 

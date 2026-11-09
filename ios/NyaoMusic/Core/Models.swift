@@ -29,7 +29,7 @@ struct Playlist: Identifiable, Hashable {
     var subtitle: String = ""
 }
 
-struct Account: Hashable {
+struct Account: Hashable, Codable {
     var name: String
     var plus: Bool? = nil
     var uid: String? = nil

@@ -81,7 +81,7 @@ struct CoverView: View {
                     switch phase {
                     case .success(let img): img.resizable().scaledToFill()
                     case .failure: TemplateCoverView(key: key)
-                    default: Rectangle().fill(Nyao.surface2)
+                    default: Rectangle().fill(Nyao.surface2).shimmer()
                     }
                 }
             } else {
@@ -216,5 +216,80 @@ struct TrackRow: View {
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Силуэты загрузки (как на ПК и Android)
+
+/// Блик, бегущий по силуэту, пока данные грузятся. При «Уменьшить движение» — просто ровный силуэт.
+struct Shimmer: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: CGFloat = -1
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if !reduceMotion {
+                GeometryReader { g in
+                    LinearGradient(colors: [.clear, Color.white.opacity(0.07), .clear], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: g.size.width * 0.8)
+                        .offset(x: phase * g.size.width * 1.8)
+                }
+                .allowsHitTesting(false)
+                .onAppear { withAnimation(.linear(duration: 1.3).repeatForever(autoreverses: false)) { phase = 1 } }
+            }
+        }
+        .clipped()
+    }
+}
+
+extension View {
+    func shimmer() -> some View { modifier(Shimmer()) }
+}
+
+struct Silhouette: View {
+    var radius: CGFloat = 8
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Nyao.surface2).shimmer()
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+    }
+}
+
+/// Полка плиток (как «Продолжить слушать» или «Плейлисты»), пока она грузится
+struct ShelfSkeleton: View {
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(0..<5, id: \.self) { i in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Silhouette(radius: 22).frame(width: 132, height: 132)
+                        Silhouette(radius: 6).frame(width: CGFloat(90 + (i * 23) % 36), height: 12)
+                        Silhouette(radius: 6).frame(width: CGFloat(60 + (i * 17) % 30), height: 10)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .disabled(true)
+        .accessibilityLabel("Загружается")
+    }
+}
+
+/// Строки списка (треки, плейлисты), пока он грузится
+struct RowsSkeleton: View {
+    var count = 6
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(0..<count, id: \.self) { i in
+                HStack(spacing: 12) {
+                    Silhouette(radius: 10).frame(width: 48, height: 48)
+                    VStack(alignment: .leading, spacing: 7) {
+                        Silhouette(radius: 6).frame(width: CGFloat(150 + (i * 37) % 60), height: 13)
+                        Silhouette(radius: 6).frame(width: CGFloat(90 + (i * 23) % 40), height: 11)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Загружается")
     }
 }
