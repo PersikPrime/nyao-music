@@ -116,6 +116,7 @@ object NyaoColors {
     val Text: Color get() = Look.base.text
     val Muted: Color get() = Look.base.muted
     val Outline: Color get() = Look.base.outline
+    val OutlineVariant: Color get() = Look.base.outlineVariant
     val Ya = Color(0xFFFFD60A)
     val Yt = Color(0xFFFF6A5C)
     val YtBadge = Color(0xFFE5281F)

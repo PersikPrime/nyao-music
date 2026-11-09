@@ -74,7 +74,7 @@ fun sourceShort(source: String): String = when (source) {
 }
 
 @Composable
-fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(16.dp), bg: Color? = null) {
+fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(16.dp), bg: Color? = null, filter: androidx.compose.ui.graphics.ColorFilter? = null) {
     // bg — подложка под прозрачной картинкой (логотипы радиостанций — на цвете станции)
     Box(modifier.clip(shape).background(bg ?: NyaoColors.S3), contentAlignment = Alignment.Center) {
         if (org.nyao.music.ui.Pranks.has("cat")) {
@@ -87,7 +87,7 @@ fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCor
             var loaded by remember(url) { mutableStateOf(false) }
             if (!loaded) Box(Modifier.fillMaxSize().shimmer(androidx.compose.ui.graphics.RectangleShape))
             AsyncImage(
-                model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), colorFilter = filter,
                 onSuccess = { loaded = true }, onError = { loaded = true },
             )
         }
