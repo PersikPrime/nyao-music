@@ -41,4 +41,5 @@ jobs:
           exit 1
       - name: Проверка /img
         if: steps.s.outputs.ok == '1'
-        run: echo "Готово. Проверь: <адрес воркера>/img?u=https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg"
+        run: |
+          echo "Готово. Проверь <адрес воркера>/img?u=https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg"
