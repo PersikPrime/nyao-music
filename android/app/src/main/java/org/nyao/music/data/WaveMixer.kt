@@ -145,7 +145,7 @@ class WaveMixer(
         val favoriteNames = favorites().map { WavePolicy.normal(it.name) }.toSet()
         val lists = coroutineScope { sources().map { source -> async {
             val tasks = ArrayList<kotlinx.coroutines.Deferred<List<Track>>>()
-            fun task(load: suspend () -> List<Track>) { tasks += async { bounded(emptyList(), load) } }
+            fun task(load: suspend () -> List<Track>) { tasks += async { bounded(emptyList(), work = load) } }
             when (source) {
                 SOURCE_YA -> task {
                     val rotorIds = synchronized(feedbackLock) { s.policy.selected.filter { it.id in s.rotorIds }.map { it.id } }
@@ -227,7 +227,7 @@ class WaveMixer(
         val artists = anchors.associate { WavePolicy.artistKey(it) to it.artist.split(Regex(",| feat\\.? ", RegexOption.IGNORE_CASE))[0].trim() }
         val found = coroutineScope { sources().map { source -> async {
             val tasks = ArrayList<kotlinx.coroutines.Deferred<List<Track>>>()
-            fun task(load: suspend () -> List<Track>) { tasks += async { bounded(emptyList(), load) } }
+            fun task(load: suspend () -> List<Track>) { tasks += async { bounded(emptyList(), work = load) } }
             artists.forEach { (key, name) -> task { search(source, name).filter { WavePolicy.artistKey(it) == key } } }
             anchors.filter { it.source == source }.forEach { a ->
                 when (source) {
