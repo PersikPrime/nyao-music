@@ -170,16 +170,7 @@ fun NyaoRoot() {
     var requiredUpdate by remember { mutableStateOf<org.nyao.music.data.UpdateInfo?>(null) }
     val outdated by Repo.cloud.outdated.collectAsState()
 
-    // эфир Яндекс Радио: что звучит сейчас — раз в 20 секунд, пока играет станция
-    val nowTrack by PlayerConnection.current.collectAsState()
-    LaunchedEffect(nowTrack?.id) {
-        val t = nowTrack ?: return@LaunchedEffect
-        if (t.source != org.nyao.music.data.SOURCE_LIVE) return@LaunchedEffect
-        while (true) {
-            runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { org.nyao.music.data.YandexRadio.refreshRecent(t.srcId.substringBefore('/'), t.srcId.substringAfter('/')) } }
-            delay(20_000)
-        }
-    }
+    // эфир Яндекс Радио: «что звучит» опрашивает сервис воспроизведения (PlaybackService) — и для шторки, и для экрана
     LaunchedEffect(settings.onboarded) { if (settings.onboarded) { delay(1200); Hundred.maybeFirstRun(org.nyao.music.BuildConfig.VERSION_CODE) } }
     LaunchedEffect(Unit) {
         Repo.refreshAccounts()
