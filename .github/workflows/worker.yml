@@ -1,0 +1,44 @@
+# Ретранслятор на Cloudflare (server/cloudflare-worker.js → воркер nyao-tg-relay): вход через Telegram и картинки /img.
+# Выкатывается сам при изменении файла в main. Нужны секреты (один раз):
+#   CLOUDFLARE_API_TOKEN  — токен с правом «Workers Scripts: Edit» (Cloudflare → My Profile → API Tokens → шаблон «Edit Cloudflare Workers»)
+#   CLOUDFLARE_ACCOUNT_ID — ID аккаунта (Workers & Pages → справа «Account ID»)
+# Без секретов шаг пропускается с подсказкой — можно по-старому вставить файл в панели Cloudflare.
+name: Worker deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ['server/cloudflare-worker.js', '.github/workflows/worker.yml']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Проверка секретов
+        id: s
+        env:
+          T: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$T" ]; then
+            echo "::warning::Нет CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID — воркер не выкачен. Добавь секреты или вставь server/cloudflare-worker.js в панели Cloudflare."
+            echo "ok=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=1" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Выкатить nyao-tg-relay
+        if: steps.s.outputs.ok == '1'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          for i in 1 2 3; do
+            npx --yes wrangler@4 deploy server/cloudflare-worker.js --name nyao-tg-relay \
+              --compatibility-date 2026-10-01 --no-bundle && exit 0
+            sleep $((i*30))
+          done
+          exit 1
+      - name: Проверка /img
+        if: steps.s.outputs.ok == '1'
+        run: echo "Готово. Проверь: <адрес воркера>/img?u=https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg"
