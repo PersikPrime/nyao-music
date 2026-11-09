@@ -115,8 +115,23 @@ WaveMixer (src/main/wave.js)            WavePolicy (src/main/wave-policy.js)
 - Код: `server/src/wave-mix.js` (`waveMixer({ lastfmKey })`, кэш ответов на сутки), маршрут в `server/src/app.js`,
   клиент — `WaveMixer.nyaoCandidates()`; в `main.js` миксеру передаётся `nyao: { mix: body => cloud.request("POST", "/wave/mix", body) }` (вход в аккаунт Nyao не нужен).
 - Ключ Last.fm — `LASTFM_KEY` на сервере (секрет `NYAO_LASTFM_KEY`). Пользователям ничего подключать не нужно.
-- Настройка `waveNyao` (по умолчанию `true`). При выбранном настроении своя волна не используется.
-- Сервер, задеплоенный из main, этого маршрута не знает — приложение тогда просто не получает кандидатов.
+- Настройка `waveNyao` (по умолчанию `true`, синхронизируется). Есть и на Android (`WaveMixer.nyaoCandidates`, `NyaoCloud.waveMix`).
+- С 0.8 (113) всё это в main: сервер из main знает и `/wave/mix`, и `/wave/mood`.
+
+## Настроение для всех сервисов (0.8.113)
+
+«Моя волна» Яндекса знает настроение сама: её треки (`s.rotorIds`) сразу `moodOk`, и обратно в неё уходят только они.
+Остальных кандидатов (лайки, рекомендации, своя волна) размечает сервер:
+
+```
+WaveMixer.tagMoods(): до 80 непроверенных кандидатов  ──►  POST /wave/mood { tracks:[{artist,title}] }
+сервер: Last.fm track.getTopTags (мало тегов — + artist.getTopTags × 0.6) → active | fun | calm | sad | null
+приложение: совпало с выбранным — moodOk; в волну с настроением идут только moodOk
+```
+
+- Код: `server/src/wave-mood.js` (словарь тег → настроение, `pickMood`: победитель ≥ 30 и не меньше 1/0.7 второго, иначе `null`),
+  кэш тегов 7 дней. Клиенты: `src/main/wave.js` и `android/…/WaveMixer.kt`, у каждого трека проверка один раз за сессию (`moodChecked`).
+- Не размечен — в волну с настроением не попадает: лучше меньше, чем хардтек при «Спокойном».
 
 ## Как отлаживать волну
 
