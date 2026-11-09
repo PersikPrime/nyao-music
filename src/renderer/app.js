@@ -1792,13 +1792,31 @@ function saveEq(next, rerender = true) {
 }
 
 // ---------- Техработы и сбои сервисов (статус с сервера Nyao) ----------
-const SVC_NAMES = { ya: 'Яндекс Музыка', yt: 'YouTube Music', sc: 'SoundCloud', vk: 'VK Музыка' };
-let svcStatus = { maintenance: { active: false }, outages: [] };
+const SVC_NAMES = { ya: 'Яндекс Музыка', yt: 'YouTube Music', sc: 'SoundCloud', vk: 'VK Музыка', sp: 'Spotify' };
+let svcStatus = { maintenance: { active: false }, outages: [], blocked: [] };
 const hiddenOutages = new Set();
+let whitelistHidden = false;
+
+/** Белые списки: интернет есть, но открыта только часть сервисов — что из подключённого работает, а что закрыто */
+function injectWhitelist(box) {
+  const blocked = svcStatus.blocked || [];
+  const mine = ['ya', 'vk', 'yt', 'sc', 'sp'].filter((id) => state.status && state.status[id]);
+  if (whitelistHidden || !blocked.length || !mine.some((id) => blocked.includes(id))) return;
+  const works = mine.filter((id) => !blocked.includes(id));
+  const chips = [...works, ...mine.filter((id) => blocked.includes(id))].map((id) => {
+    const ok = !blocked.includes(id);
+    return `<span class="wl-chip ${ok ? 'ok' : 'off'}">${badge(id)}<span><i></i>${ok ? 'работает' : 'закрыт'}</span></span>`;
+  }).join('');
+  box.insertAdjacentHTML('afterbegin', `<div class="outage wl" role="status">
+    <span class="outage-txt"><b>Похоже, белые списки</b><span>${works.length ? 'Играем из того, что открывается. Остальное подключим сами, когда сеть станет обычной.' : 'Из твоих сервисов сейчас ничего не открывается — играет скачанное.'}</span><span class="wl-chips">${chips}</span></span>
+    <button class="ic" data-action="whitelist-hide" aria-label="Скрыть"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>`);
+}
 
 function injectOutage() {
   const box = $('.scroll', view);
   if (!box) return;
+  injectWhitelist(box);
   const list = svcStatus.outages.filter((id) => !hiddenOutages.has(id));
   if (!list.length) return;
   const names = list.map((id) => SVC_NAMES[id] || id);
@@ -1812,7 +1830,9 @@ function injectOutage() {
 
 function applyStatus(s) {
   const was = svcStatus.maintenance && svcStatus.maintenance.active;
-  svcStatus = { maintenance: (s && s.maintenance) || { active: false }, outages: (s && s.outages) || [] };
+  const wasBlocked = (svcStatus.blocked || []).join();
+  svcStatus = { maintenance: (s && s.maintenance) || { active: false }, outages: (s && s.outages) || [], blocked: (s && s.blocked) || [] };
+  if (wasBlocked !== svcStatus.blocked.join()) { $('.outage.wl', view)?.remove(); const box = $('.scroll', view); if (box) injectWhitelist(box); }
   const m = svcStatus.maintenance;
   let el = $('#mt');
   if (m.active) {
@@ -2813,6 +2833,10 @@ async function handleAction(el, e) {
       break;
     case 'fullscreen':
       fullscreen.show();
+      break;
+    case 'whitelist-hide':
+      whitelistHidden = true;
+      el.closest('.outage')?.remove();
       break;
     case 'outage-hide':
       svcStatus.outages.forEach((id) => hiddenOutages.add(id));

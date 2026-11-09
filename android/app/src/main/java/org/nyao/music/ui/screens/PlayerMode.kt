@@ -155,6 +155,7 @@ fun PlayerHome(model: AppModel, name: String?) {
             }
         }
         item(key = "outage") { OutageBanner(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) }
+        item(key = "whitelist") { WhitelistBanner(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) }
         model.others.firstOrNull()?.let { r ->
             item(key = "continue-" + r.deviceId) { ContinueCard(model, r, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) }
         }

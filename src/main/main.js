@@ -140,14 +140,35 @@ async function pollStatus() {
     if (!res.ok) return svcStatus;
     const s = await res.json();
     svcStatus = { maintenance: s.maintenance || { active: false }, outages: Array.isArray(s.outages) ? s.outages : [] };
-    if (win && !win.isDestroyed()) win.webContents.send('status', svcStatus);
+    sendStatus();
   } catch {
     // сервер недоступен — работаем как обычно
   }
   return svcStatus;
 }
-const up = (id) => !svcStatus.outages.includes(id);
+// Белые списки (или «глобальный шатдаун»): интернет есть, но открыта только часть сервисов. Обычная сеть — Google
+// отвечает, и мы ничего не проверяем. Не отвечает — смотрим каждый сервис: закрытые пропускаем в волне и поиске,
+// в окне — плашка «что работает». Совсем нет сети — это не белые списки, список пустой.
+let netBlocked = [];
+const SERVICE_PROBES = { ya: 'https://api.music.yandex.net/', vk: 'https://api.vk.com/', yt: 'https://music.youtube.com/', sc: 'https://api-v2.soundcloud.com/', sp: 'https://api.spotify.com/' };
+async function opens(url) {
+  try { await net.fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(4500), redirect: 'manual' }); return true; } catch { return false; }
+}
+async function probeServices() {
+  let blocked = [];
+  if (!(await opens('https://www.gstatic.com/generate_204'))) {
+    const res = await Promise.all(Object.entries(SERVICE_PROBES).map(async ([id, url]) => [id, await opens(url)]));
+    if (res.some(([, ok]) => ok)) blocked = res.filter(([, ok]) => !ok).map(([id]) => id);
+  }
+  if (blocked.join() !== netBlocked.join()) { netBlocked = blocked; sendStatus(); }
+}
+function sendStatus() {
+  if (win && !win.isDestroyed()) win.webContents.send('status', { ...svcStatus, blocked: netBlocked });
+}
+const up = (id) => !svcStatus.outages.includes(id) && !netBlocked.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
+setInterval(probeServices, 60_000).unref?.();
+setTimeout(probeServices, 8_000).unref?.();
 let ya, yt, sc, vk, sp, spEngine, wave, streams, catalog, win, cloud, lastfm, radio, live;
 let spExperiment, nativePermission = false;
 const onAir = new LiveRadio();
@@ -447,11 +468,11 @@ function initProviders() {
   });
   setInterval(() => lastfm.flush().catch(() => {}), 10 * 60_000).unref?.();
 
-  radio = new Radio({ ya, yt, sc, vk, isDown: (id) => svcStatus.outages.includes(id) });
+  radio = new Radio({ ya, yt, sc, vk, isDown: (id) => !up(id) });
 
   wave = new WaveMixer({
     ya, yt, sc, vk, sp,
-    isDown: (id) => svcStatus.outages.includes(id),
+    isDown: (id) => !up(id),
     getSettings: () => settings.get(),
     getRecent: () => cloud.recentIds(),
     getHistory: () => cloud.history(),

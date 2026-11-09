@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -112,6 +113,49 @@ fun MaintenanceScreen(model: AppModel) {
             ) { Text(if (checking) "Проверяю…" else "Проверить снова") }
         }
         Text("Лайки, плейлисты и входы в сервисы в порядке", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Outline, textAlign = TextAlign.Center)
+    }
+}
+
+/**
+ * Белые списки: интернет есть, но открыта только часть сервисов (обычно Яндекс и VK).
+ * Показываем, что работает, а что нет — по подключённым сервисам. Пропадает сама, когда сеть снова обычная.
+ */
+@Composable
+fun WhitelistBanner(modifier: Modifier = Modifier) {
+    val blocked by org.nyao.music.data.Net.blocked.collectAsState()
+    val accounts by Repo.accounts.collectAsState()
+    var hidden by remember { mutableStateOf(false) }
+    val mine = accounts.filterValues { it != null }.keys.toList()
+    if (blocked.isEmpty() || hidden || mine.none { it in blocked }) return
+    val works = mine.filter { it !in blocked }
+    val off = mine.filter { it in blocked }
+    Column(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(NyaoColors.S2).padding(start = 16.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Похоже, белые списки", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (works.isEmpty()) "Из твоих сервисов сейчас ничего не открывается — играет скачанное."
+                    else "Играем из того, что открывается. Остальное подключим сами, когда сеть станет обычной.",
+                    style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted,
+                )
+            }
+            IconButton(onClick = { hidden = true }) { Icon(NyaoIcons.Close, "Скрыть", tint = NyaoColors.Muted) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            (works + off).forEach { s ->
+                val ok = s !in blocked
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.graphicsLayer { alpha = if (ok) 1f else 0.35f }) { ServiceLogo(s, 36) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(Modifier.size(6.dp).clip(CircleShape).background(if (ok) Color(0xFF3DD68C) else Color(0xFFFF6A5C)))
+                        Text(if (ok) "работает" else "закрыт", style = MaterialTheme.typography.labelSmall, color = NyaoColors.Muted)
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -57,6 +58,17 @@ object Net {
     }
     /** Любой ответ этих серверов (даже 404) значит, что до сервиса достучались */
     private val PROBES = listOf("https://api.music.yandex.net/", "https://api.vk.com/", "https://music.yandex.ru/")
+    /** Адрес каждого сервиса — на белых списках проверяем все: что открыто, а что нет */
+    private val SERVICES = linkedMapOf(
+        SOURCE_YA to "https://api.music.yandex.net/", SOURCE_VK to "https://api.vk.com/", SOURCE_YT to "https://music.youtube.com/",
+        SOURCE_SC to "https://api-v2.soundcloud.com/", SOURCE_SP to "https://api.spotify.com/",
+    )
+    private val _blocked = MutableStateFlow<Set<String>>(emptySet())
+    /**
+     * Сервисы, до которых сейчас не достучаться, хотя интернет есть (белые списки: Яндекс и VK открыты, остальное — нет).
+     * Пусто, когда сеть обычная или её нет совсем. Волна и поиск такие сервисы пропускают, на главной — плашка.
+     */
+    val blocked: StateFlow<Set<String>> = _blocked
 
     fun init(context: Context) {
         if (cm != null) return
@@ -78,20 +90,30 @@ object Net {
         if (validated || !hasNet) {
             probing?.cancel(); probing = null
             _online.value = validated
+            _blocked.value = emptySet()
             return
         }
         // сеть есть, но система её не подтвердила — проверяем сами и повторяем, пока так
         if (probing?.isActive == true) return
         probing = probeScope.launch {
             while (true) {
-                _online.value = reachable()
+                val open = services()
+                val on = open.isNotEmpty() || reachable()
+                _online.value = on
+                _blocked.value = if (on) SERVICES.keys - open else emptySet()
                 kotlinx.coroutines.delay(30_000)
             }
         }
     }
 
-    private fun reachable(): Boolean = PROBES.any { url ->
+    private fun open(url: String): Boolean =
         runCatching { probeClient.newCall(Request.Builder().url(url).head().build()).execute().use { true } }.getOrDefault(false)
+
+    private fun reachable(): Boolean = PROBES.any { open(it) }
+
+    /** Какие сервисы открываются — все сразу, параллельно */
+    private suspend fun services(): Set<String> = kotlinx.coroutines.coroutineScope {
+        SERVICES.map { (id, url) -> async { id.takeIf { open(url) } } }.map { it.await() }.filterNotNull().toSet()
     }
 }
 

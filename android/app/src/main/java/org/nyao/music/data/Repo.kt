@@ -87,7 +87,8 @@ object Repo {
 
     /** Техработы и сбои сервисов — опрашивается раз в 2 минуты из NyaoRoot */
     val status = MutableStateFlow(SvcStatus())
-    fun up(source: String) = source !in status.value.outages
+    /** Сервис работает: нет сбоя по данным сервера и до него можно достучаться (белые списки закрывают часть сервисов) */
+    fun up(source: String) = source !in status.value.outages && source !in Net.blocked.value
 
     suspend fun refreshStatus(): SvcStatus? {
         val s = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cloud.status() } }.getOrNull() ?: return null
