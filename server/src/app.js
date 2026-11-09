@@ -103,7 +103,7 @@ export function clientBuild(req) {
 }
 
 /** minBuild — минимальная разрешённая сборка: старее — сервер просит обновиться (426) */
-export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [], devIds = [], yaCatalog = null, adminIds = new Map(), github = null, logs = null, dataDir = '/data', images = null, waveMix = null }) {
+export function createApp({ db, tg, mirror = null, log = console.log, minBuild = 0, status = null, hub = new Hub(), push = null, publicUrl = '', webUrl = '', webHosts = [], androidCerts = [], lyricsHosts = [], lyricsApiHosts = [], lyricsAdmins = [], devIds = [], yaCatalog = null, adminIds = new Map(), github = null, logs = null, dataDir = '/data', images = null, waveMix = null, waveMood = null }) {
   // минимальная сборка: из переменной окружения, но Automator может поменять её на лету (хранится в app_settings)
   const cfg = { minBuild, minBuildEnv: minBuild };
   const logins = new Map(); // state → { verifier, device, platform, at, status, token?, user?, error? }
@@ -115,6 +115,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
   const apiLimit = limiter(600);
   const imgLimit = limiter(900);
   const waveLimit = limiter(40);
+  const moodLimit = limiter(60);
 
   const q = (sql, params) => db.query(sql, params);
 
@@ -191,6 +192,14 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       const diversity = ['any', 'favorite', 'discover', 'popular'].includes(body.diversity) ? body.diversity : 'any';
       const size = Math.max(1, Math.min(40, Number(body.size) || 20));
       return { tracks: await waveMix({ seeds, recent, diversity, size }) };
+    }],
+    // настроение треков по тегам Last.fm: под выбранное настроение в волну идут треки всех сервисов, не только Яндекса
+    ['POST', /^\/wave\/mood$/, async ({ req, ip }) => {
+      moodLimit(ip);
+      if (!waveMood) throw new HttpError(503, 'Настроения на сервере выключены');
+      const body = await readJson(req);
+      const tracks = (Array.isArray(body.tracks) ? body.tracks : []).slice(0, 80).map((x) => ({ artist: clip(x && x.artist, 200), title: clip(x && x.title, 200) }));
+      return { moods: await waveMood(tracks) };
     }],
     // картинки, которые в РФ без VPN не грузятся (аватарки Telegram, обложки YouTube, SoundCloud, VK) — через сервер
     ['GET', /^\/img$/, async ({ url, ip, res }) => {

@@ -56,15 +56,23 @@ import org.nyao.music.playback.PlayerConnection
 import org.nyao.music.ui.AppModel
 import org.nyao.music.ui.components.Cover
 import org.nyao.music.ui.components.Hint
-import org.nyao.music.ui.components.Loading
 import org.nyao.music.ui.components.NyaoIcons
 import org.nyao.music.ui.components.PillChip
 import org.nyao.music.ui.components.bouncy
 import org.nyao.music.ui.theme.NyaoColors
+import org.nyao.music.ui.theme.Look
+import org.nyao.music.ui.components.RowsSkeleton
+import org.nyao.music.ui.components.Silhouette
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 
 /**
  * Радио: прямой эфир станций Яндекс Радио (как на ПК, src/renderer/app.js → renderRadio).
- * Цвета — только из темы (NyaoColors / MaterialTheme), поэтому экран сам подстраивается под Expressive, Mono и Glass.
+ * Цвета — только из темы (NyaoColors / MaterialTheme). Сверх того у тем своё лицо:
+ *  • Mono — большой заголовок на градиенте (как «Моя волна» в Mono), логотипы станций в оттенках серого, белые кнопки;
+ *  • Glass — станции плитками на стекле, карточка эфира с тонкой обводкой.
  */
 @Composable
 fun RadioScreen(model: AppModel) {
@@ -108,8 +116,12 @@ fun RadioScreen(model: AppModel) {
         PlayerConnection.playLive(list, list.indexOfFirst { it.slug == st.slug })
     }
 
+    val look = Look.current
     LazyColumn(Modifier.fillMaxSize(), contentPadding = BottomInset) {
-        item {
+        if (look.mono) item {
+            MonoRadioHero(if (all != null) "Прямой эфир ${all.size} станций" else "Прямой эфир из Яндекс Радио", searching) { searching = !searching; if (!searching) query = "" }
+        }
+        if (!look.mono) item {
             Row(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -165,7 +177,8 @@ fun RadioScreen(model: AppModel) {
                     PillChip("Ещё раз", false, { reload++ })
                 }
             }
-            shown == null -> item { Loading() }
+            // силуэты, пока грузится список: плитки в Glass, строки в остальных
+            shown == null -> item { if (look.glass) StationTilesSkeleton() else RowsSkeleton(Modifier.padding(top = 8.dp), count = 8) }
             shown.isEmpty() -> item { Hint("Ничего не нашлось") }
             else -> {
                 item {
@@ -174,7 +187,13 @@ fun RadioScreen(model: AppModel) {
                         Text("по слушателям", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
                     }
                 }
-                items(shown, key = { it.slug }) { st -> StationRow(st, st.slug == liveSlug) { play(st) } }
+                if (look.glass) items(shown.chunked(2), key = { row -> row.joinToString { it.slug } }) { row ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        row.forEach { st -> StationTile(st, st.slug == liveSlug, Modifier.weight(1f)) { play(st) } }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+                else items(shown, key = { it.slug }) { st -> StationRow(st, st.slug == liveSlug) { play(st) } }
             }
         }
     }
@@ -182,11 +201,14 @@ fun RadioScreen(model: AppModel) {
 
 @Composable
 private fun StationLogo(st: YandexRadio.Station, size: Int, ring: Boolean = false) {
-    val mod = if (ring) Modifier.size(size.dp).clip(CircleShape).background(NyaoColors.Lavender).padding(3.dp).clip(CircleShape).background(NyaoColors.Bg).padding(3.dp)
+    val mono = Look.current.mono
+    val mod = if (ring) Modifier.size(size.dp).clip(CircleShape).background(if (mono) NyaoColors.Text else NyaoColors.Lavender).padding(3.dp).clip(CircleShape).background(NyaoColors.Bg).padding(3.dp)
     else Modifier.size(size.dp)
-    Box(mod.clip(CircleShape).background(Color(st.bg)), contentAlignment = Alignment.Center) {
+    // Mono: без цветных подложек станций — логотип в оттенках серого на поверхности темы
+    val bg = if (mono) NyaoColors.S3 else Color(st.bg)
+    Box(mod.clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
         // логотип прозрачный — буквы под ним просвечивали; буквы только у станций без логотипа
-        if (st.logo.isNotBlank()) Cover(st.logo, Modifier.fillMaxSize(), CircleShape, bg = Color(st.bg))
+        if (st.logo.isNotBlank()) Cover(st.logo, Modifier.fillMaxSize(), CircleShape, bg = bg, filter = if (mono) GRAYSCALE else null)
         else Text(st.name.removePrefix("Радио ").take(2), color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size / 4).sp)
     }
 }
@@ -201,11 +223,74 @@ private fun StationRow(st: YandexRadio.Station, current: Boolean, onClick: () ->
         StationLogo(st, 48)
         Column(Modifier.weight(1f)) {
             Text(st.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(if (current) "Играет сейчас" else st.desc, style = MaterialTheme.typography.bodySmall, color = if (current) NyaoColors.Lavender else NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (current) "Играет сейчас" else st.desc, style = MaterialTheme.typography.bodySmall, color = if (current) accent() else NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (st.listeners > 0) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF3DD68C)))
-            Text("%,d".format(st.listeners).replace(',', ' '), style = MaterialTheme.typography.labelSmall, color = NyaoColors.Muted)
+            Text(listeners(st.listeners), style = MaterialTheme.typography.labelSmall, color = NyaoColors.Muted)
+        }
+    }
+}
+
+private val GRAYSCALE = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+
+/** Акцент экрана: в Mono — белый текст вместо лавандового */
+@Composable
+private fun accent(): Color = if (Look.current.mono) NyaoColors.Text else NyaoColors.Lavender
+
+private fun listeners(n: Int) = "%,d".format(n).replace(',', ' ')
+
+/** Mono: заголовок «Радио» на градиенте — родня «Моей волны» в Mono */
+@Composable
+private fun MonoRadioHero(sub: String, searching: Boolean, onSearch: () -> Unit) {
+    val bg = NyaoColors.Bg
+    Box(Modifier.fillMaxWidth().height(260.dp).background(Brush.verticalGradient(listOf(Color(0xFF2B2B2E), Color(0xFF161618), bg)))) {
+        Column(Modifier.statusBarsPadding().padding(start = 22.dp, top = 30.dp)) {
+            Text("Радио", style = MaterialTheme.typography.displayLarge.copy(fontSize = 66.sp, lineHeight = 62.sp), color = Color.White)
+            Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFF4D4D)))
+                Text(sub, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.7f))
+            }
+        }
+        Box(
+            Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 16.dp, end = 16.dp).size(44.dp).bouncy().clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.08f)).clickable(onClick = onSearch),
+            contentAlignment = Alignment.Center,
+        ) { Icon(if (searching) NyaoIcons.Close else NyaoIcons.Search, if (searching) "Закрыть поиск" else "Поиск станции", tint = Color.White) }
+    }
+}
+
+/** Glass: станция плиткой на стекле */
+@Composable
+private fun StationTile(st: YandexRadio.Station, current: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Column(
+        modifier.bouncy().clip(RoundedCornerShape(24.dp)).background(if (current) NyaoColors.S3 else NyaoColors.S1)
+            .border(1.dp, if (current) NyaoColors.Lavender.copy(alpha = 0.7f) else NyaoColors.OutlineVariant, RoundedCornerShape(24.dp))
+            .clickable(onClick = onClick).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StationLogo(st, 52)
+            Spacer(Modifier.weight(1f))
+            if (st.listeners > 0) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF3DD68C)))
+                Text(listeners(st.listeners), style = MaterialTheme.typography.labelSmall, color = NyaoColors.Muted)
+            }
+        }
+        Column {
+            Text(st.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (current) "Играет сейчас" else st.desc.ifBlank { " " }, style = MaterialTheme.typography.bodySmall, color = if (current) NyaoColors.Lavender else NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun StationTilesSkeleton() {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        repeat(3) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                repeat(2) { Silhouette(Modifier.weight(1f).height(124.dp), RoundedCornerShape(24.dp)) }
+            }
         }
     }
 }
@@ -224,8 +309,12 @@ private fun OnAirCard(model: AppModel, t: Track, playing: Boolean) {
     val stream = YandexRadio.streamOf(t)
     val now = YandexRadio.nowOf(recent)
     val fav = slug in settings.radioFavs
+    val look = Look.current
+    // Expressive — цветная «геройская» подложка, Mono — тёмная поверхность, Glass — стекло с обводкой
+    val card = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp))
+        .let { m -> when { look.mono -> m.background(NyaoColors.S2); look.glass -> m.background(NyaoColors.S2).border(1.dp, NyaoColors.OutlineVariant, RoundedCornerShape(28.dp)); else -> m.background(NyaoColors.Hero) } }
     Column(
-        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(NyaoColors.Hero).padding(16.dp),
+        card.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -240,9 +329,9 @@ private fun OnAirCard(model: AppModel, t: Track, playing: Boolean) {
             IconButton(onClick = {
                 Repo.prefs.setRadioFavs(if (fav) settings.radioFavs - slug else listOf(slug) + settings.radioFavs)
                 model.message(if (fav) "Убрал из «Моих станций»" else "Станция в «Моих станциях»")
-            }) { Icon(if (fav) NyaoIcons.StarFilled else NyaoIcons.Star, if (fav) "Убрать из моих станций" else "В мои станции", tint = if (fav) NyaoColors.Lavender else NyaoColors.Muted) }
-            Box(Modifier.size(48.dp).bouncy().clip(CircleShape).background(NyaoColors.Primary).clickable { PlayerConnection.toggle() }, contentAlignment = Alignment.Center) {
-                Icon(if (playing) NyaoIcons.Stop else NyaoIcons.PlayArrow, if (playing) "Остановить эфир" else "Слушать", tint = NyaoColors.OnPrimary)
+            }) { Icon(if (fav) NyaoIcons.StarFilled else NyaoIcons.Star, if (fav) "Убрать из моих станций" else "В мои станции", tint = if (fav) accent() else NyaoColors.Muted) }
+            Box(Modifier.size(48.dp).bouncy().clip(org.nyao.music.ui.theme.smallButtonShape()).background(if (look.mono) Color.White else NyaoColors.Primary).clickable { PlayerConnection.toggle() }, contentAlignment = Alignment.Center) {
+                Icon(if (playing) NyaoIcons.Stop else NyaoIcons.PlayArrow, if (playing) "Остановить эфир" else "Слушать", tint = if (look.mono) Color.Black else NyaoColors.OnPrimary)
             }
         }
         if (st != null && st.streams.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -259,7 +348,7 @@ private fun OnAirCard(model: AppModel, t: Track, playing: Boolean) {
                 }
                 if (track != null) {
                     IconButton(onClick = { model.like(track, !isLiked) }) {
-                        Icon(if (isLiked) NyaoIcons.Favorite else NyaoIcons.FavoriteBorder, if (isLiked) "Убрать из лайков" else "В лайки Яндекс Музыки", tint = if (isLiked) NyaoColors.Lavender else NyaoColors.Muted)
+                        Icon(if (isLiked) NyaoIcons.Favorite else NyaoIcons.FavoriteBorder, if (isLiked) "Убрать из лайков" else "В лайки Яндекс Музыки", tint = if (isLiked) accent() else NyaoColors.Muted)
                     }
                     IconButton(onClick = { PlayerConnection.playList(listOf(track), 0, "Из эфира «${t.title}»") }) {
                         Icon(NyaoIcons.PlayArrow, "Слушать трек целиком", tint = NyaoColors.Muted)
@@ -280,7 +369,7 @@ private fun OnAirCard(model: AppModel, t: Track, playing: Boolean) {
                         Text(x.artist, style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (tr != null) IconButton(onClick = { model.like(tr, !on) }) {
-                        Icon(if (on) NyaoIcons.Favorite else NyaoIcons.FavoriteBorder, if (on) "Убрать из лайков" else "В лайки Яндекс Музыки", tint = if (on) NyaoColors.Lavender else NyaoColors.Muted, modifier = Modifier.size(20.dp))
+                        Icon(if (on) NyaoIcons.Favorite else NyaoIcons.FavoriteBorder, if (on) "Убрать из лайков" else "В лайки Яндекс Музыки", tint = if (on) accent() else NyaoColors.Muted, modifier = Modifier.size(20.dp))
                     }
                 }
             }

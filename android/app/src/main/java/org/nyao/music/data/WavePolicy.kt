@@ -6,7 +6,9 @@ import kotlin.math.exp
 import kotlin.math.ln
 
 /** Pure counterpart of src/main/wave-policy.js; providers never own final queue order. */
-data class WaveCandidate(val track: Track, val liked: Boolean = false, val recency: Double = 0.0, val affinity: Double = 0.0, val reason: String = "По твоим интересам")
+data class WaveCandidate(val track: Track, val liked: Boolean = false, val recency: Double = 0.0, val affinity: Double = 0.0, val reason: String = "По твоим интересам",
+    /** подходит под выбранное настроение («Моя волна» Яндекса или теги Last.fm) */
+    val moodOk: Boolean = false)
 
 class WavePolicy(private val random: () -> Double = { Math.random() }) {
     companion object {
@@ -73,6 +75,9 @@ class WavePolicy(private val random: () -> Double = { Math.random() }) {
         repeat(size) {
             var options = candidates.filter { c -> c.track.available && !selectedIndex.has(c.track) &&
                 !blockedIndex.has(c.track) && !(diversity == "discover" && likedIndex.has(c.track)) }
+            // баланс в крайних положениях — жёсткий: 0% других сервисов значит только Яндекс, 100% — без Яндекса (как на ПК)
+            if (share <= 0 && options.any { it.track.source == SOURCE_YA }) options = options.filter { it.track.source == SOURCE_YA }
+            else if (share >= 100 && options.any { it.track.source != SOURCE_YA }) options = options.filter { it.track.source != SOURCE_YA }
             if (options.isEmpty()) return out
 
             val groups = ArrayList<MutableList<WaveCandidate>>()

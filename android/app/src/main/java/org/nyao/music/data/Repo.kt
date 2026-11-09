@@ -87,7 +87,8 @@ object Repo {
 
     /** Техработы и сбои сервисов — опрашивается раз в 2 минуты из NyaoRoot */
     val status = MutableStateFlow(SvcStatus())
-    fun up(source: String) = source !in status.value.outages
+    /** Сервис работает: нет сбоя по данным сервера и до него можно достучаться (белые списки закрывают часть сервисов) */
+    fun up(source: String) = source !in status.value.outages && source !in Net.blocked.value
 
     suspend fun refreshStatus(): SvcStatus? {
         val s = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cloud.status() } }.getOrNull() ?: return null
@@ -130,7 +131,7 @@ object Repo {
         mixStore.onChange = { bg.launch { runCatching { cloud.pushState("mixes", mixStore.toJson()) } } }
         radio = Radio(ya, yt, sc, vk) { !up(it) }
         _favArtists.value = FavArtist.listFromJson(runCatching { org.json.JSONArray(prefs.favArtists) }.getOrNull())
-        wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) }, favorites = { _favArtists.value }, sp = sp, historyProvider = { cloud.waveHistory() })
+        wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) }, favorites = { _favArtists.value }, sp = sp, historyProvider = { cloud.waveHistory() }, cloud = cloud)
         seedAccounts()
     }
 
@@ -178,7 +179,7 @@ object Repo {
     private fun stateData(key: String): Any {
         val s = prefs.settings.value
         return when (key) {
-            "wave" -> org.json.JSONObject().put("ytmShare", s.ytmShare).put("waveDiversity", s.diversity).put("waveMood", s.mood ?: org.json.JSONObject.NULL).put("waveFresh", s.waveFresh)
+            "wave" -> org.json.JSONObject().put("ytmShare", s.ytmShare).put("waveDiversity", s.diversity).put("waveMood", s.mood ?: org.json.JSONObject.NULL).put("waveFresh", s.waveFresh).put("waveNyao", s.waveNyao)
             "prefs" -> org.json.JSONObject().put("layout", s.layout ?: org.json.JSONObject.NULL).put("splitLiked", s.splitLiked).put("waveTab", s.waveTab)
                 .put("radioTab", s.radioTab).put("radioFavs", org.json.JSONArray(s.radioFavs))
                 .put("lyricsWordsFirst", s.lyricsWordsFirst)
@@ -221,6 +222,7 @@ object Repo {
                     o.str("waveDiversity")?.let { putString("diversity", it) }
                     if (o.has("waveMood")) { val m = o.str("waveMood"); if (m == null) remove("mood") else putString("mood", m) }
                     if (o.has("waveFresh")) putInt("waveFresh", o.optInt("waveFresh", 60).coerceIn(0, 100))
+                    if (o.has("waveNyao")) putBoolean("waveNyao", o.optBoolean("waveNyao", true))
                 }
             }),
             "prefs" to NyaoCloud.StateHandler({ stateData("prefs") }, { d ->

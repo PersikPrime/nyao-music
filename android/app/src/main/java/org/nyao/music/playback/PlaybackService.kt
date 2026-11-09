@@ -10,6 +10,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -34,6 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.nyao.music.MainActivity
@@ -149,6 +151,30 @@ class PlaybackService : MediaSessionService() {
             .setSessionActivity(open)
             .build()
 
+        // эфир Яндекс Радио: что звучит — опрашиваем отсюда (работает и при выключенном экране) и показываем в шторке,
+        // на часах и в машине: название трека, «исполнитель · станция», обложка трека вместо логотипа станции
+        scope.launch {
+            var polling: Job? = null
+            var pollingId: String? = null
+            while (isActive) {
+                val t = currentTrack()?.takeIf { it.source == org.nyao.music.data.SOURCE_LIVE }
+                if (t?.id != pollingId) {
+                    polling?.cancel()
+                    pollingId = t?.id
+                    polling = t?.let { live ->
+                        launch(Dispatchers.IO) {
+                            while (isActive) {
+                                runCatching { org.nyao.music.data.YandexRadio.refreshRecent(live.srcId.substringBefore('/'), live.srcId.substringAfter('/')) }
+                                delay(20_000)
+                            }
+                        }
+                    }
+                }
+                delay(2_000)
+            }
+        }
+        scope.launch { org.nyao.music.data.YandexRadio.recent.collect { applyLiveMeta() } }
+
         val notifications = DefaultMediaNotificationProvider.Builder(this).build()
         notifications.setSmallIcon(R.drawable.ic_notification)
         setMediaNotificationProvider(notifications)
@@ -232,6 +258,21 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /** Метаданные эфира в MediaItem: тот же адрес и настройки — ExoPlayer меняет только описание, поток не прерывается */
+    private fun applyLiveMeta() {
+        val item = player.currentMediaItem ?: return
+        val station = Repo.track(item.mediaId)?.takeIf { it.source == org.nyao.music.data.SOURCE_LIVE } ?: return
+        val now = org.nyao.music.data.YandexRadio.nowOf(org.nyao.music.data.YandexRadio.recent.value)
+        val title = now?.title ?: station.title
+        val artist = now?.let { if (it.artist.isBlank()) station.title else "${it.artist} · ${station.title}" } ?: station.artist
+        val art = (now?.cover ?: station.cover)?.let { Uri.parse(it) }
+        val old = item.mediaMetadata
+        if (old.title?.toString() == title && old.artist?.toString() == artist && old.artworkUri == art) return
+        val meta = old.buildUpon().setTitle(title).setArtist(artist).setAlbumTitle(station.title).setStation(station.title).setArtworkUri(art).build()
+        player.replaceMediaItem(player.currentMediaItemIndex, item.buildUpon().setMediaMetadata(meta).build())
+        updateWidget()
+    }
+
     // ---------- Виджет ----------
     private var widgetCoverUrl: String? = null
     private var widgetCover: android.graphics.Bitmap? = null
@@ -248,8 +289,9 @@ class PlaybackService : MediaSessionService() {
         val t = item?.mediaId?.let { Repo.track(it) }
         val dur = player.duration
         return WidgetState(
-            title = t?.title ?: item?.mediaMetadata?.title?.toString() ?: "Nyao Music",
-            artist = t?.artist ?: item?.mediaMetadata?.artist?.toString() ?: "",
+            // эфир: в метаданных — что звучит сейчас (applyLiveMeta), у «трека» — только станция
+            title = (if (t?.source == org.nyao.music.data.SOURCE_LIVE) item?.mediaMetadata?.title?.toString() else null) ?: t?.title ?: item?.mediaMetadata?.title?.toString() ?: "Nyao Music",
+            artist = (if (t?.source == org.nyao.music.data.SOURCE_LIVE) item?.mediaMetadata?.artist?.toString() else null) ?: t?.artist ?: item?.mediaMetadata?.artist?.toString() ?: "",
             playing = player.isPlaying,
             cover = widgetCover.takeIf { t?.cover == widgetCoverUrl },
             live = true,
