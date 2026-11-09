@@ -248,7 +248,7 @@ function waveControlsHtml(compact = false) {
   </div>
   <div class="card">
     <span class="eyebrow">Настроение</span>
-    ${s.waveMood && !compact ? '<span class="hint" style="display:block;margin-bottom:10px">Под настроение пока подбирает только Яндекс: лайки и другие сервисы на это время не подмешиваются.</span>' : ''}
+    ${s.waveMood && !compact ? '<span class="hint" style="display:block;margin-bottom:10px">Под настроение подбирают «Моя волна» Яндекса и теги Last.fm — так подходят треки всех сервисов. Если трек не размечен, он в волну с настроением не попадёт.</span>' : ''}
     <div class="moods">${MOODS.map(([v, l, c, g]) => `<button class="drop ${s.waveMood === v ? 'on' : ''}" style="--c:${c}" aria-pressed="${s.waveMood === v}" data-action="wave-mood" data-v="${v}"><span class="ball"><svg viewBox="0 0 44 44" fill="none"><path d="${g}" stroke="#000" stroke-width="2.6" stroke-linecap="round"/></svg></span>${l}</button>`).join('')}</div>
   </div>
   <div class="card">

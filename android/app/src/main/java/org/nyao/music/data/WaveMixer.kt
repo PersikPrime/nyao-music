@@ -24,6 +24,8 @@ class WaveMixer(
     private val favorites: () -> List<FavArtist> = { emptyList() },
     private val sp: SpotifyApi? = null,
     private val historyProvider: suspend () -> List<Track> = { emptyList() },
+    /** сервер Nyao: своя волна (/wave/mix) и настроение по тегам Last.fm (/wave/mood) */
+    private val cloud: NyaoCloud? = null,
 ) {
     companion object {
         const val DAY = 86400000L
@@ -40,7 +42,9 @@ class WaveMixer(
     private data class Session(val generation: Int, val policy: WavePolicy = WavePolicy(),
         val candidates: MutableList<WaveCandidate> = ArrayList(), var libraries: List<WaveCandidate> = emptyList(),
         var recent: Set<String> = emptySet(), val history: MutableList<Track> = ArrayList(),
-        var loads: Int = 0, var hydrated: Boolean = false, val excludedIds: MutableSet<String> = HashSet(), val seedHistory: MutableList<Track> = ArrayList())
+        var loads: Int = 0, var hydrated: Boolean = false, val excludedIds: MutableSet<String> = HashSet(), val seedHistory: MutableList<Track> = ArrayList(),
+        /** треки «Моей волны» Яндекса — только их отправляем ей обратно, иначе подмешанное уводит её от настроения */
+        val rotorIds: MutableSet<String> = HashSet(), val moodChecked: MutableSet<String> = HashSet())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Mutex()
     private val feedbackLock = Any()
@@ -50,9 +54,9 @@ class WaveMixer(
     private val libraryCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<Track>>>()
     private val state: JSONObject = runCatching { JSONObject(prefs.waveProfile) }.getOrDefault(JSONObject())
 
-    private suspend fun <T> bounded(fallback: T, work: suspend () -> T): T {
+    private suspend fun <T> bounded(fallback: T, timeout: Long = 8000, work: suspend () -> T): T {
         val task = scope.async { try { work() } catch (e: CancellationException) { throw e } catch (_: Exception) { fallback } }
-        return try { withTimeoutOrNull(8000) { task.await() } ?: fallback } finally { task.cancel() }
+        return try { withTimeoutOrNull(timeout) { task.await() } ?: fallback } finally { task.cancel() }
     }
     private fun sources(): List<String> = listOfNotNull(
         SOURCE_YA.takeIf { ya.loggedIn && !isDown(it) }, SOURCE_YT.takeIf { yt.loggedIn && !isDown(it) },
@@ -118,7 +122,12 @@ class WaveMixer(
         for (c in candidates) {
             if (!c.track.available || c.track.id in s.excludedIds) continue
             val i = s.candidates.indexOfFirst { it.track.id == c.track.id }
-            if (i < 0) s.candidates += c else if (c.liked) s.candidates[i] = c
+            if (i < 0) s.candidates += c
+            else {
+                val old = s.candidates[i]
+                if (c.liked) s.candidates[i] = c.copy(moodOk = c.moodOk || old.moodOk)
+                else if (c.moodOk && !old.moodOk) s.candidates[i] = old.copy(moodOk = true)
+            }
         }
         s.candidates.removeAll { c -> s.policy.selected.any { WavePolicy.sameRecording(it, c.track) } }
         while (s.candidates.size > 1600) s.candidates.removeAt(0)
@@ -138,7 +147,11 @@ class WaveMixer(
             val tasks = ArrayList<kotlinx.coroutines.Deferred<List<Track>>>()
             fun task(load: suspend () -> List<Track>) { tasks += async { bounded(emptyList(), load) } }
             when (source) {
-                SOURCE_YA -> task { if (first) ya.waveStart(settings.diversity, settings.mood) else ya.waveMore(s.policy.selected.map { it.id }, settings.diversity, settings.mood) }
+                SOURCE_YA -> task {
+                    val rotorIds = synchronized(feedbackLock) { s.policy.selected.filter { it.id in s.rotorIds }.map { it.id } }
+                    (if (first) ya.waveStart(settings.diversity, settings.mood) else ya.waveMore(rotorIds, settings.diversity, settings.mood))
+                        .also { list -> synchronized(feedbackLock) { list.forEach { s.rotorIds += it.id } } }
+                }
                 SOURCE_VK -> task { vk.recommendations() }
                 SOURCE_YT -> if (seed?.source == source) task { yt.radio(seed.srcId) }
                 SOURCE_SC -> if (seed?.source == source) task { sc.related(seed.srcId) }
@@ -152,11 +165,57 @@ class WaveMixer(
                 val liked = s.libraries.filter { WavePolicy.sameRecording(it.track, track) }
                 val related = seed != null && WavePolicy.artistKey(track) == WavePolicy.artistKey(seed)
                 val affinity = (if (related) 0.8 else 0.2) + (if (WavePolicy.artistKey(track) in favoriteNames) 0.2 else 0.0) + synchronized(feedbackLock) { (state.optJSONObject("taste")?.optDouble(WavePolicy.artistKey(track), 0.0) ?: 0.0) / 5 }
+                // «Моя волна» Яндекса сама подбирает под настроение — её треки подходят сразу, остальные проверим по тегам
+                val rotor = !settings.mood.isNullOrEmpty() && synchronized(feedbackLock) { track.id in s.rotorIds }
                 WaveCandidate(track, liked.isNotEmpty(), liked.maxOfOrNull { it.recency } ?: 0.0, affinity,
-                    if (related) "Исполнитель из твоих лайков: ${seed?.artist}" else "Рекомендация сервиса")
+                    if (rotor) "Моя волна Яндекса · по настроению" else if (related) "Исполнитель из твоих лайков: ${seed?.artist}" else "Рекомендация сервиса",
+                    moodOk = rotor)
             }
         } }.awaitAll() }
-        ensure(s); add(s, lists.flatten()); s.loads++
+        // своя волна Nyao: похожее по открытым данным (Last.fm, Deezer) — находим эти треки в своих сервисах
+        val own = if (cloud != null && settings.waveNyao) bounded(emptyList(), 15000) { nyaoCandidates(s, settings) } else emptyList()
+        ensure(s); add(s, lists.flatten() + own); s.loads++
+    }
+    /** Ответ сервера «исполнитель — трек» → трек в подключённом сервисе: сначала Яндекс и VK (полные треки), потом SoundCloud и YouTube */
+    private suspend fun resolve(wanted: List<Triple<String, String, String>>, s: Session): List<WaveCandidate> {
+        val order = listOf(SOURCE_YA, SOURCE_VK, SOURCE_SC, SOURCE_YT).filter { it in sources() }
+        if (order.isEmpty()) return emptyList()
+        return coroutineScope { wanted.map { (artist, title, reason) -> async {
+            val probe = Track(id = "", source = "", srcId = "", title = title, artist = artist)
+            for (source in order) {
+                val t = bounded(null as Track?, 6000) { Match.find(probe, 0.72) { q -> search(source, q) } } ?: continue
+                return@async WaveCandidate(t, s.libraries.any { WavePolicy.sameRecording(it.track, t) }, 0.0,
+                    0.5 + synchronized(feedbackLock) { (state.optJSONObject("taste")?.optDouble(WavePolicy.artistKey(t), 0.0) ?: 0.0) / 5 }, reason)
+            }
+            null
+        } }.awaitAll().filterNotNull() }
+    }
+    /** Затравка — свежие лайки и дослушанное */
+    private suspend fun nyaoCandidates(s: Session, settings: Settings): List<WaveCandidate> {
+        val liked = s.libraries.filter { it.track.available }.sortedByDescending { it.recency }
+        val seeds = Freshness.recencyPick(liked.take(120), 14, settings.waveFresh).map { it.track } + s.history.takeLast(8)
+        if (seeds.isEmpty()) return emptyList()
+        val recent = (s.history + synchronized(feedbackLock) { s.policy.selected.toList() }).takeLast(400)
+        return resolve(cloud!!.waveMix(seeds, recent, settings.diversity, 14), s)
+    }
+    /**
+     * Настроение для треков всех сервисов: сервер смотрит теги Last.fm («chill», «sad», «energetic»…).
+     * Подходящие получают moodOk и могут попасть в волну. Каждый трек проверяем один раз.
+     */
+    private suspend fun tagMoods(s: Session, mood: String) {
+        val c = cloud ?: return
+        val todo = s.candidates.filter { !it.moodOk && it.track.id !in s.moodChecked && it.track.artist.isNotBlank() && it.track.title.isNotBlank() }
+            .sortedWith(compareByDescending<WaveCandidate> { it.liked }.thenByDescending { it.recency }.thenByDescending { it.affinity }).take(80)
+        if (todo.isEmpty()) return
+        todo.forEach { s.moodChecked += it.track.id }
+        val moods = bounded(emptyList<String?>(), 12000) { c.waveMood(todo.map { it.track }) }
+        ensure(s)
+        val ok = todo.filterIndexed { i, _ -> moods.getOrNull(i) == mood }.map { it.track.id }.toSet()
+        if (ok.isEmpty()) return
+        for (i in s.candidates.indices) {
+            val x = s.candidates[i]
+            if (x.track.id in ok) s.candidates[i] = x.copy(moodOk = true, reason = if (x.liked) x.reason else "По настроению · теги Last.fm")
+        }
     }
     /**
      * Волна иссякла (всё подходящее уже сыграно): максимально похожее на последние треки — те же исполнители
@@ -183,27 +242,37 @@ class WaveMixer(
             WaveCandidate(track, s.libraries.any { WavePolicy.sameRecording(it.track, track) }, 0.0, if (same) 0.9 else 0.6,
                 if (same) "Ещё от ${track.artist}" else "Похоже на «${anchors[0].title}»")
         }
-        ensure(s); add(s, found)
+        val settings = prefs.settings.value
+        val own = if (cloud != null && settings.waveNyao) bounded(emptyList(), 20000) {
+            val recent = synchronized(feedbackLock) { s.policy.selected.toList() }.takeLast(200)
+            resolve(cloud.waveMix(anchors, recent, "any", 14).take(10), s)
+        } else emptyList()
+        ensure(s); add(s, found + own)
     }
     private suspend fun batch(s: Session, first: Boolean = false): List<Track> {
         ensure(s)
         if (!s.hydrated) { libraries(s); s.hydrated = true }
         if (first || s.candidates.count { !it.liked } < 12 || s.loads % 3 == 0) recommendations(s, first)
         ensure(s)
-        fun select(): List<Track> {
+        // настроение: в волну идут только треки, подобранные под него — «Моя волна» Яндекса и размеченные по тегам Last.fm
+        val mood = prefs.settings.value.mood?.takeIf { it.isNotEmpty() }
+        suspend fun select(): List<Track> {
             val connected = sources().toSet()
             s.candidates.removeAll { it.track.source !in connected }
+            if (mood != null) tagMoods(s, mood)
             val settings = prefs.settings.value
-            return synchronized(feedbackLock) { s.policy.select(s.candidates, settings.diversity, settings.waveFresh, settings.ytmShare, recentIds = s.recent, history = s.history) }
+            val pool = if (mood != null) s.candidates.filter { it.moodOk } else s.candidates
+            return synchronized(feedbackLock) { s.policy.select(pool, settings.diversity, settings.waveFresh, settings.ytmShare, recentIds = s.recent, history = s.history) }
         }
         var result = select()
         if (result.isEmpty()) { recommendations(s, false); result = select() }
         // всё подходящее сыграно — похожее на последние треки; не нашлось — разрешаем давно сыгранное (кроме последних 40)
-        if (result.isEmpty() && prefs.settings.value.mood.isNullOrEmpty()) { similarToRecent(s); result = select() }
+        if (result.isEmpty()) { similarToRecent(s); result = select() }
         if (result.isEmpty() && s.policy.selected.size > 40) {
             synchronized(feedbackLock) { val keep = s.policy.selected.takeLast(40); s.policy.selected.clear(); s.policy.selected.addAll(keep) }
             result = select()
         }
+        if (result.isEmpty() && mood != null) throw ApiException("Под это настроение пока ничего не нашлось — попробуй другое или выключи настроение")
         if (result.isEmpty()) throw ApiException(if (sources().isEmpty()) "Войди хотя бы в один сервис для волны" else "Новых подходящих треков пока нет. Измени настройки волны или добавь лайки.")
         add(s, emptyList())
         if (first && ya.loggedIn) bounded(Unit) { ya.waveFeedback("radioStarted", null); Unit }

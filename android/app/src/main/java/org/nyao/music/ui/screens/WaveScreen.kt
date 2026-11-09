@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -362,6 +363,16 @@ fun WaveSettings(onChanged: () -> Unit, modifier: Modifier = Modifier, showMood:
                 color = NyaoColors.Muted,
                 modifier = Modifier.padding(start = 4.dp),
             )
+        }
+        // своя волна Nyao — как на ПК
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Своя волна Nyao · бета", style = MaterialTheme.typography.labelMedium, color = NyaoColors.Muted)
+                Text("Похожее по открытым данным (Last.fm, Deezer) — для всех сервисов сразу. Мы находим эти треки в твоих сервисах.",
+                    style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+            }
+            Spacer(Modifier.width(12.dp))
+            androidx.compose.material3.Switch(checked = settings.waveNyao, onCheckedChange = { Repo.prefs.setWaveNyao(it); onChanged() })
         }
     }
 }

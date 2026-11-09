@@ -461,7 +461,7 @@ function initProviders() {
     },
     getFavorites: async () => readFav(),
     // своя волна Nyao (nightly): похожее с сервера, без входа в аккаунт Nyao тоже работает
-    nyao: { mix: (body) => cloud.request('POST', '/wave/mix', body) }
+    nyao: { mix: (body) => cloud.request('POST', '/wave/mix', body), mood: (body) => cloud.request('POST', '/wave/mood', body) }
   });
   streams = new StreamService({ ya, yt, sc, vk, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch, vk: vkSessionFetch } });
   catalog = new Catalog({ ya, yt });

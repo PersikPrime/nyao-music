@@ -188,3 +188,17 @@ test('волна иссякла: дальше — похожее на после
   const more = await m.more(first.map(t => t.id));
   assert.deepEqual(more.map(t => t.srcId).sort(), ['c', 'sim']);
 });
+test('настроение: треки других источников подходят, если теги Last.fm говорят то же настроение', async () => {
+  const ya = {
+    loggedIn: true, likedTracks: async () => [track('Calm1'), track('Loud1'), track('Calm2')],
+    waveStart: async () => [track('R1')], waveMore: async () => [], similarTracks: async () => [], search: async () => [], waveFeedback: async () => {}
+  };
+  const asked = [];
+  const w = new WaveMixer({ ya, yt: null, sc: null, vk: null, getSettings: () => ({ waveDiversity: 'any', waveMood: 'calm', ytmShare: 0 }),
+    nyao: { mix: async () => ({ tracks: [] }), mood: async ({ tracks }) => { asked.push(...tracks); return { moods: tracks.map((t) => (/Calm/.test(t.title) ? 'calm' : 'active')) }; } } });
+  const out = await w.start();
+  const ids = out.map((t) => t.id);
+  assert.ok(ids.includes('ya:Calm1') || ids.includes('ya:Calm2'), ids.join(','));
+  assert.ok(!ids.includes('ya:Loud1'), ids.join(','));
+  assert.ok(!asked.some((t) => t.title === 'R1'), 'треки «Моей волны» не проверяем — они уже под настроение');
+});

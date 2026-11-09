@@ -80,6 +80,27 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         return json
     }
 
+    // ---------- Своя волна Nyao (без входа тоже работает) ----------
+
+    /** Похожее по открытым данным: сервер отдаёт «исполнитель — трек — почему», найти трек в сервисах — наша задача */
+    suspend fun waveMix(seeds: List<Track>, recent: List<Track>, diversity: String, size: Int): List<Triple<String, String, String>> {
+        fun arr(list: List<Track>) = JSONArray().apply { list.forEach { put(JSONObject().put("artist", it.artist).put("title", it.title)) } }
+        val r = request("POST", "/wave/mix", JSONObject().put("seeds", arr(seeds.take(40))).put("recent", arr(recent.takeLast(400)))
+            .put("diversity", if (diversity in listOf("any", "favorite", "discover", "popular")) diversity else "any").put("size", size))
+        val a = r.optJSONArray("tracks") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.mapNotNull { o ->
+            val artist = o.optString("artist"); val title = o.optString("title")
+            if (artist.isBlank() || title.isBlank()) null else Triple(artist, title, o.optString("reason").ifBlank { "Своя волна Nyao" })
+        }
+    }
+
+    /** Настроение треков по тегам Last.fm: active | fun | calm | sad | null («не понять») — в том же порядке */
+    suspend fun waveMood(tracks: List<Track>): List<String?> {
+        val body = JSONObject().put("tracks", JSONArray().apply { tracks.take(80).forEach { put(JSONObject().put("artist", it.artist).put("title", it.title)) } })
+        val a = request("POST", "/wave/mood", body).optJSONArray("moods") ?: return tracks.map { null }
+        return tracks.indices.map { i -> if (i < a.length() && !a.isNull(i)) a.optString(i).ifBlank { null } else null }
+    }
+
     /** Статус сервиса: техработы и сбои музыкальных сервисов (без входа) */
     suspend fun status(): SvcStatus {
         val o = request("GET", "/status")

@@ -11,6 +11,8 @@ data class Settings(
     val waveFresh: Int = 60,
     val diversity: String = "any",
     val mood: String? = null,
+    /** Своя волна Nyao: похожее с сервера (Last.fm, Deezer) для всех сервисов */
+    val waveNyao: Boolean = true,
     val onboarded: Boolean = false,
     /** Вид приложения: "player" (своя музыка на первом плане) или "wave" (акцент на волну); null — ещё не выбран */
     val layout: String? = null,
@@ -71,6 +73,7 @@ class Prefs(context: Context) {
         waveFresh = sp.getInt("waveFresh", 60).coerceIn(0, 100),
         diversity = sp.getString("diversity", "any") ?: "any",
         mood = sp.getString("mood", null),
+        waveNyao = sp.getBoolean("waveNyao", true),
         onboarded = sp.getBoolean("onboarded", false),
         layout = sp.getString("layout", null),
         splitLiked = sp.getBoolean("splitLiked", false),
@@ -115,6 +118,7 @@ class Prefs(context: Context) {
     fun setFresh(v: Int) = update { putInt("waveFresh", v.coerceIn(0, 100)) }.also { onSyncChange?.invoke("wave") }
     fun setShare(v: Int) = update { putInt("ytmShare", v.coerceIn(0, 100)) }.also { onSyncChange?.invoke("wave") }
     fun setDiversity(v: String) = update { putString("diversity", v) }.also { onSyncChange?.invoke("wave") }
+    fun setWaveNyao(v: Boolean) = update { putBoolean("waveNyao", v) }.also { onSyncChange?.invoke("wave") }
     fun setMood(v: String?) = update { if (v == null) remove("mood") else putString("mood", v) }.also { onSyncChange?.invoke("wave") }
     fun setLayout(v: String) = update { putString("layout", if (v == "wave") "wave" else "player") }.also { onSyncChange?.invoke("prefs") }
     fun setSplitLiked(v: Boolean) = update { putBoolean("splitLiked", v) }.also { onSyncChange?.invoke("prefs") }
