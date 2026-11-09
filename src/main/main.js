@@ -27,7 +27,9 @@ import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
 import { NyaoCloud, API_BASE } from './cloud.js';
 import { LastFm } from './lastfm.js';
 import { Radio } from './radio.js';
+import { LiveRadio } from './live-radio.js';
 import { LiveEvents } from './live.js';
+import { ControlServer } from './control-server.js';
 import { Popups, popupFor } from './popup.js';
 import { mergeArtists as mergeFavArtists } from './freshness.js';
 import { transferPlaylist, TARGETS } from './transfer.js';
@@ -148,6 +150,8 @@ const up = (id) => !svcStatus.outages.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
 let ya, yt, sc, vk, sp, spEngine, wave, streams, catalog, win, cloud, lastfm, radio, live;
 let spExperiment, nativePermission = false;
+const onAir = new LiveRadio();
+let onAirError = '';
 const LIBRESPOT_REDIRECT = 'http://127.0.0.1:43820/spotify-callback';
 const nativeAllowed = () => nativePermission && readVersion().channel === 'nightly' && cloud?.loggedIn && cloud.user?.dev === true;
 async function requireNativeDeveloper() {
@@ -200,10 +204,52 @@ function configureRpc() {
   rpc.configure({ enabled: settings.get().discordRpc, clientId: DISCORD_APP_ID });
 }
 
+// Пульт для других программ (мод Nyao MinePlay для Minecraft): только этот компьютер, по токену
+let controlSrv = null;
+let controlLyrics = null; // (track) → текст песни той же цепочкой, что в окне; задаётся ниже, где есть lyricsDeps
+async function controlCover(url, size) {
+  // nativeImage понимает только PNG и JPEG: просим JPEG и убираем webp из известных ссылок
+  const urls = [url];
+  const jpg = url.replace(/-rw(?=[-=]|$)/, '').replace('/vi_webp/', '/vi/').replace(/\.webp(\?|$)/, '.jpg$1');
+  if (jpg !== url) urls.unshift(jpg);
+  let img = null;
+  for (const u of urls) {
+    try {
+      const r = await net.fetch(u, { headers: { accept: 'image/jpeg,image/png;q=0.9,*/*;q=0.1' } });
+      if (!r.ok) { console.warn('[nyao] пульт: обложка HTTP', r.status); continue; }
+      const type = r.headers.get('content-type') || '';
+      const im = nativeImage.createFromBuffer(Buffer.from(await r.arrayBuffer()));
+      if (!im.isEmpty()) { img = im; break; }
+      console.warn('[nyao] пульт: обложка не читается:', type);
+    } catch (e) {
+      console.warn('[nyao] пульт: обложка не скачалась:', safeDiagnostic(e.message));
+    }
+  }
+  if (!img) return null;
+  const { width, height } = img.getSize();
+  const m = Math.min(width, height); // YouTube отдаёт 16:9 — режем по центру в квадрат
+  if (width !== height) img = img.crop({ x: Math.floor((width - m) / 2), y: Math.floor((height - m) / 2), width: m, height: m });
+  return img.resize({ width: size, height: size, quality: 'best' }).toPNG();
+}
+function configureControl() {
+  if (!controlSrv) {
+    controlSrv = new ControlServer({
+      dir: app.getPath('userData'),
+      version: versionLabel(readVersion()),
+      cover: controlCover,
+      lyrics: (track) => (controlLyrics ? controlLyrics(track) : null),
+      onCommand: (cmd, value) => { if (win && !win.isDestroyed()) win.webContents.send('control', { cmd, value }); },
+      log: (m) => console.log('[nyao]', m),
+    });
+  }
+  if (settings.get().controlServer) controlSrv.start();
+  else controlSrv.stop();
+}
+
 // Что из настроек едет на другие устройства (остальное — своё у каждого компьютера)
-const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood', 'waveFresh'];
+const WAVE_KEYS = ['ytmShare', 'waveDiversity', 'waveMood', 'waveFresh', 'waveNyao'];
 // вид приложения и «Мне нравится» по сервисам — тоже общие для всех устройств
-const PREF_KEYS = ['layout', 'splitLiked', 'waveTab', 'accent', 'lyricsOrder', 'lyricsWordsFirst'];
+const PREF_KEYS = ['layout', 'splitLiked', 'waveTab', 'radioTab', 'radioFavs', 'accent', 'lyricsOrder', 'lyricsWordsFirst'];
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -413,7 +459,9 @@ function initProviders() {
       get: () => { try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'wave-profile.json'), 'utf8')); } catch { return {}; } },
       set: (value) => { const file = path.join(app.getPath('userData'), 'wave-profile.json'); fs.writeFileSync(file + '.tmp', JSON.stringify(value)); fs.renameSync(file + '.tmp', file); }
     },
-    getFavorites: async () => readFav()
+    getFavorites: async () => readFav(),
+    // своя волна Nyao (nightly): похожее с сервера, без входа в аккаунт Nyao тоже работает
+    nyao: { mix: (body) => cloud.request('POST', '/wave/mix', body) }
   });
   streams = new StreamService({ ya, yt, sc, vk, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch, vk: vkSessionFetch } });
   catalog = new Catalog({ ya, yt });
@@ -750,12 +798,15 @@ function registerIpc() {
   handle('settings:set', (patch) => {
     const next = settings.set(patch);
     if ('discordRpc' in patch) configureRpc();
+    if ('controlServer' in patch) configureControl();
     if ('globalKeys' in patch) applyShortcuts();
     if (WAVE_KEYS.some((k) => k in patch) && cloud) cloud.pushState('wave', pick(next, WAVE_KEYS)).catch(() => {});
     if (PREF_KEYS.some((k) => k in patch) && cloud) cloud.pushState('prefs', pick(next, PREF_KEYS)).catch(() => {});
     return next;
   });
   handle('rpc:update', (info) => rpc.update(info));
+  handle('control:state', (st) => { if (controlSrv && controlSrv.running) controlSrv.setState(st || {}); });
+  handle('control:info', () => ({ running: !!(controlSrv && controlSrv.running), port: controlSrv ? controlSrv.port : 0 }));
   handle('rpc:status', () => rpc.status);
   handle('sc:pending', () => scLikes.list());
   handle('yt:openLog', () => {
@@ -820,6 +871,11 @@ function registerIpc() {
     if (track.source === 'sc') return sc.trackDetails(track.srcId);
     return {};
   });
+  // Яндекс Радио: эфир станций (см. live-radio.js). Вход не нужен
+  handle('onair:stations', () => onAir.stations());
+  handle('onair:genres', () => onAir.genres());
+  handle('onair:recent', (station, stream) => onAir.recent(station, stream));
+  handle('onair:error', () => onAirError);
   handle('radio:start', (track) => radio.start(track));
   handle('radio:more', (ids) => radio.more(ids));
   handle('radio:feedback', (type, track, played) => radio.feedback(type, track, played));
@@ -1010,6 +1066,13 @@ function registerIpc() {
     ].join('\n');
   });
 
+  // Сразу, без сети: кто вошёл — по сохранённым входам, имена — с прошлого раза.
+  // Главная не показывает «Подключи сервисы», пока сервисы отвечают на запрос имени.
+  handle('auth:quick', () => {
+    const cache = settings.get().accountsCache || {};
+    const has = { ya: ya.loggedIn, yt: yt.loggedIn, sc: sc.loggedIn, vk: vk.loggedIn || !!secrets.get('vkUid') };
+    return Object.fromEntries(Object.entries(has).map(([k, on]) => [k, on ? { name: '', ...(cache[k] || {}), cached: true } : null]));
+  });
   handle('auth:status', async () => {
     await vk.refresh();
     const [yaAcc, ytAcc, scAcc, vkAcc] = await Promise.all([
@@ -1018,7 +1081,17 @@ function registerIpc() {
       sc.loggedIn ? safe(sc.getAccount(), { name: 'SoundCloud', error: true }) : null,
       vk.loggedIn ? safe(vk.getAccount(), { name: 'VK', error: true }) : null
     ]);
-    return { ya: yaAcc, yt: ytAcc, sc: scAcc, vk: vkAcc };
+    const out = { ya: yaAcc, yt: ytAcc, sc: scAcc, vk: vkAcc };
+    // в кеш — только принятые ответы; при сбое сети остаётся имя с прошлого раза
+    const old = settings.get().accountsCache || {};
+    const cache = {};
+    for (const [k, a] of Object.entries(out)) {
+      if (!a) continue;
+      if (!a.error && a.name) cache[k] = { name: a.name, ...(a.avatar ? { avatar: a.avatar } : {}), ...(a.plus !== undefined ? { plus: a.plus } : {}) };
+      else if (old[k]) cache[k] = old[k];
+    }
+    if (JSON.stringify(cache) !== JSON.stringify(old)) settings.set({ accountsCache: cache });
+    return out;
   });
   handle('auth:login', async (service) => {
     if (service === 'ya') {
@@ -1239,6 +1312,7 @@ function registerIpc() {
     ...lyricsDeps(),
     exclude: Array.isArray(opts && opts.exclude) ? opts.exclude.map(String) : []
   }));
+  controlLyrics = (track) => findLyricsChain(track, { ...lyricsDeps(), log: () => {} });
   // Разработчик: каждый источник текста отдельно — что вернул и за сколько
   handle('dev:lyricsProbe', async (track) => {
     const deps = lyricsDeps();
@@ -1372,6 +1446,16 @@ app.whenReady().then(() => {
   protocol.handle('nyao', async (request) => {
     const u = new URL(request.url);
     // шаблонная обложка для треков без картинки (см. cover-art.js)
+    // эфир Яндекс Радио: nyao://live/<станция>/<поток> — бесконечный аудиопоток
+    if (u.host === 'live') {
+      const [station, stream] = u.pathname.slice(1).split('/').map(decodeURIComponent);
+      try {
+        return await onAir.response(station, stream);
+      } catch (e) {
+        onAirError = e.message;
+        return new Response(e.message, { status: 502, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+      }
+    }
     if (u.host === 'cover') {
       const key = decodeURIComponent(u.pathname.slice(1)).replace(/\.png$/, '');
       return new Response(renderCover(key), { headers: { 'content-type': 'image/png', 'cache-control': 'max-age=31536000', 'access-control-allow-origin': '*' } });
@@ -1397,6 +1481,7 @@ app.whenReady().then(() => {
   });
   registerIpc();
   configureRpc();
+  configureControl();
   createWindow();
   // отложенные лайки SoundCloud: через минуту после запуска и потом раз в 10 минут
   setTimeout(flushScLikes, 60_000);
@@ -1440,7 +1525,8 @@ function trayMenu() {
 }
 function updateTray() {
   if (!tray) return;
-  tray.setToolTip(nowInfo.title ? `Nyao Music — ${nowInfo.title}` : 'Nyao Music');
+  const appName = readVersion().channel === 'nightly' ? 'Nyao Music Red' : 'Nyao Music';
+  tray.setToolTip(nowInfo.title ? `${appName} — ${nowInfo.title}` : appName);
   tray.setContextMenu(trayMenu());
 }
 function setupTray() {
@@ -1462,7 +1548,7 @@ function applyShortcuts() {
     }
   }
 }
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => { globalShortcut.unregisterAll(); controlSrv?.stop(); });
 app.on('before-quit', () => { quitting = true; spExperiment?.nativeEngine.release(); });
 
 app.on('window-all-closed', () => {

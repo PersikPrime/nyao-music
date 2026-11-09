@@ -43,6 +43,13 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   trackDetails: (track) => call('track:details', track),
   onControl: (cb) => ipcRenderer.on('control', (_e, cmd) => cb(cmd)),
+  control: { state: (s) => call('control:state', s), info: () => call('control:info') },
+  onair: {
+    stations: () => call('onair:stations'),
+    genres: () => call('onair:genres'),
+    recent: (station, stream) => call('onair:recent', station, stream),
+    error: () => call('onair:error')
+  },
   radio: {
     start: (track) => call('radio:start', track),
     more: (ids) => call('radio:more', ids),
@@ -105,6 +112,7 @@ contextBridge.exposeInMainWorld('nyao', {
   },
   auth: {
     status: () => call('auth:status'),
+    quick: () => call('auth:quick'),
     login: (service) => call('auth:login', service),
     setManual: (service, value) => call('auth:setManual', service, value),
     logout: (service) => call('auth:logout', service)

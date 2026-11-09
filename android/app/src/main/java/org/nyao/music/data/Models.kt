@@ -63,6 +63,8 @@ const val SOURCE_VK = "vk"
 const val SOURCE_SP = "sp"
 /** Внутренний адрес nyao://spx/… — трек Spotify, который играет копией из другого сервиса */
 const val SOURCE_SPX = "spx"
+/** Прямой эфир Яндекс Радио: srcId = "<станция>/<поток>" (см. YandexRadio) */
+const val SOURCE_LIVE = "live"
 
 val ALL_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC, SOURCE_VK)
 

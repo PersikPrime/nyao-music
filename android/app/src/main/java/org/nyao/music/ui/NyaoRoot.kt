@@ -117,6 +117,7 @@ private fun routeOrder(r: Route): Int = when (r) {
     is Route.SettingsPage -> 9
     is Route.UserPage -> 10
     Route.AppSettings -> 11
+    Route.Radio -> 12
 }
 
 /** icon — обычная (контурная), iconOn — залитая для выбранной вкладки, как в Material 3 Expressive */
@@ -124,6 +125,7 @@ private data class Tab(val route: Route, val label: String, val icon: ImageVecto
 
 private val HOME_TAB = Tab(Route.Home, "Главная", NyaoIcons.Home, NyaoIcons.HomeFilled)
 private val WAVE_TAB = Tab(Route.Wave, "Волна", NyaoIcons.Waves, NyaoIcons.WavesFilled)
+private val RADIO_TAB = Tab(Route.Radio, "Радио", NyaoIcons.Radio, NyaoIcons.RadioFilled)
 private val LIBRARY_TAB = Tab(Route.Library, "Медиатека", NyaoIcons.LibraryMusic, NyaoIcons.LibraryMusicFilled)
 private val SEARCH_TAB = Tab(Route.Search, "Поиск", NyaoIcons.Search)
 private val PROFILE_TAB = Tab(Route.Settings, "Профиль", NyaoIcons.Person, NyaoIcons.PersonFilled)
@@ -133,7 +135,7 @@ private val PREFS_TAB = Tab(Route.AppSettings, "Настройки", NyaoIcons.S
 
 /** Основная панель: Главная · (Волна) · Медиатека · Поиск · (Друзья) · (Настройки) · аватар профиля */
 private fun tabsFor(s: org.nyao.music.data.Settings): List<Tab> =
-    listOf(HOME_TAB) + (if (s.isWaveLayout || s.waveTab) listOf(WAVE_TAB) else emptyList()) + listOf(LIBRARY_TAB, SEARCH_TAB) +
+    listOf(HOME_TAB) + (if (s.isWaveLayout || s.waveTab) listOf(WAVE_TAB) else emptyList()) + (if (s.radioTab) listOf(RADIO_TAB) else emptyList()) + listOf(LIBRARY_TAB, SEARCH_TAB) +
         (if (s.navFriends) listOf(FRIENDS_TAB) else emptyList()) + (if (s.navPrefs) listOf(PREFS_TAB) else emptyList()) + PROFILE_TAB
 
 /** Разделы, которые относятся к профилю, а не к настройкам (когда настройки вынесены отдельно) */
@@ -168,6 +170,16 @@ fun NyaoRoot() {
     var requiredUpdate by remember { mutableStateOf<org.nyao.music.data.UpdateInfo?>(null) }
     val outdated by Repo.cloud.outdated.collectAsState()
 
+    // эфир Яндекс Радио: что звучит сейчас — раз в 20 секунд, пока играет станция
+    val nowTrack by PlayerConnection.current.collectAsState()
+    LaunchedEffect(nowTrack?.id) {
+        val t = nowTrack ?: return@LaunchedEffect
+        if (t.source != org.nyao.music.data.SOURCE_LIVE) return@LaunchedEffect
+        while (true) {
+            runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { org.nyao.music.data.YandexRadio.refreshRecent(t.srcId.substringBefore('/'), t.srcId.substringAfter('/')) } }
+            delay(20_000)
+        }
+    }
     LaunchedEffect(settings.onboarded) { if (settings.onboarded) { delay(1200); Hundred.maybeFirstRun(org.nyao.music.BuildConfig.VERSION_CODE) } }
     LaunchedEffect(Unit) {
         Repo.refreshAccounts()
@@ -399,6 +411,7 @@ private fun Content(model: AppModel, wide: Boolean) {
         when (r) {
             Route.Home -> HomeScreen(model, wide)
             Route.Wave -> WaveScreen(model)
+            Route.Radio -> org.nyao.music.ui.screens.RadioScreen(model)
             Route.Search -> SearchScreen(model)
             Route.Library -> LibraryScreen(model, wide)
             Route.Settings -> org.nyao.music.ui.screens.ProfileScreen(model, if (Repo.prefs.settings.collectAsState().value.navPrefs) "profile" else "all")

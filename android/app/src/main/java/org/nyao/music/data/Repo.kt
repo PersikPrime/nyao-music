@@ -48,7 +48,7 @@ object Repo {
     private val LIBRARY_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC, SOURCE_VK, SOURCE_SP)
     private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
-    enum class Mode { LIST, WAVE, RADIO }
+    enum class Mode { LIST, WAVE, RADIO, LIVE }
 
     /** Что сейчас играет: «Моя волна» (сама подгружает треки) или обычный список */
     val mode = MutableStateFlow(Mode.LIST)
@@ -131,6 +131,7 @@ object Repo {
         radio = Radio(ya, yt, sc, vk) { !up(it) }
         _favArtists.value = FavArtist.listFromJson(runCatching { org.json.JSONArray(prefs.favArtists) }.getOrNull())
         wave = WaveMixer(ya, yt, sc, vk, prefs, recentProvider = { cloud.recentIds() }, isDown = { !up(it) }, favorites = { _favArtists.value }, sp = sp, historyProvider = { cloud.waveHistory() })
+        seedAccounts()
     }
 
     fun track(id: String): Track? = tracks[id]
@@ -179,6 +180,7 @@ object Repo {
         return when (key) {
             "wave" -> org.json.JSONObject().put("ytmShare", s.ytmShare).put("waveDiversity", s.diversity).put("waveMood", s.mood ?: org.json.JSONObject.NULL).put("waveFresh", s.waveFresh)
             "prefs" -> org.json.JSONObject().put("layout", s.layout ?: org.json.JSONObject.NULL).put("splitLiked", s.splitLiked).put("waveTab", s.waveTab)
+                .put("radioTab", s.radioTab).put("radioFavs", org.json.JSONArray(s.radioFavs))
                 .put("lyricsWordsFirst", s.lyricsWordsFirst)
                 .apply { if (s.lyricsOrder.isNotEmpty()) put("lyricsOrder", org.json.JSONArray(s.lyricsOrder.map { org.json.JSONObject().put("id", it.first).put("on", it.second) })) }
             else -> mixStore.toJson()
@@ -227,6 +229,8 @@ object Repo {
                     o.str("layout")?.let { putString("layout", if (it == "wave") "wave" else "player") }
                     if (o.has("splitLiked")) putBoolean("splitLiked", o.optBoolean("splitLiked"))
                     if (o.has("waveTab")) putBoolean("waveTab", o.optBoolean("waveTab"))
+                    if (o.has("radioTab")) putBoolean("radioTab", o.optBoolean("radioTab", true))
+                    o.optJSONArray("radioFavs")?.let { a -> putString("radioFavs", (0 until a.length()).mapNotNull { a.optString(it).takeIf { s -> s.isNotBlank() } }.joinToString(",")) }
                     if (o.has("lyricsWordsFirst")) putBoolean("lyricsWordsFirst", o.optBoolean("lyricsWordsFirst", true))
                     o.optJSONArray("lyricsOrder")?.let { a ->
                         putString("lyricsOrder", a.objects().mapNotNull { x -> x.str("id")?.let { "$it:${if (x.optBoolean("on", true)) 1 else 0}" } }.joinToString(","))
@@ -259,13 +263,58 @@ object Repo {
 
     // ---------- Аккаунты ----------
 
-    suspend fun refreshAccounts() {
-        val a = if (ya.loggedIn) runCatching { ya.account() }.getOrElse { Account("Яндекс (токен не принят)") } else null
-        val b = if (yt.loggedIn) runCatching { yt.account() }.getOrElse { Account("YouTube Music") } else null
-        val c = if (sc.loggedIn) runCatching { sc.account() }.getOrElse { Account("SoundCloud (токен не принят)") } else null
-        val d = if (vk.loggedIn) vk.account() else null
-        val e = if (sp.loggedIn) runCatching { sp.account() }.getOrElse { Account(if (sp.regionBlocked) "Spotify (нужен VPN)" else "Spotify (вход не принят)") } else null
-        _accounts.value = mapOf(SOURCE_YA to a, SOURCE_YT to b, SOURCE_SC to c, SOURCE_VK to d, SOURCE_SP to e)
+    private val ACCOUNT_SOURCES = listOf(SOURCE_YA, SOURCE_YT, SOURCE_SC, SOURCE_VK, SOURCE_SP)
+
+    private fun loggedIn(source: String): Boolean = when (source) {
+        SOURCE_YA -> ya.loggedIn
+        SOURCE_YT -> yt.loggedIn
+        SOURCE_SC -> sc.loggedIn
+        SOURCE_VK -> vk.loggedIn
+        SOURCE_SP -> sp.loggedIn
+        else -> false
+    }
+
+    private fun readAccountsCache(): Map<String, Account> = runCatching {
+        val o = org.json.JSONObject(prefs.accountsCache ?: return emptyMap())
+        o.keys().asSequence().associateWith { k ->
+            val a = o.getJSONObject(k)
+            Account(a.optString("name"), if (a.has("plus")) a.getBoolean("plus") else null, a.str("uid"))
+        }
+    }.getOrDefault(emptyMap())
+
+    private fun writeAccountsCache(m: Map<String, Account>) {
+        val o = org.json.JSONObject()
+        m.forEach { (k, a) -> o.put(k, org.json.JSONObject().put("name", a.name).apply { a.plus?.let { put("plus", it) }; a.uid?.let { put("uid", it) } }) }
+        prefs.accountsCache = o.toString()
+    }
+
+    /**
+     * Аккаунты сразу при запуске, без сети: токены лежат в телефоне, имена — с прошлого раза.
+     * Так главная не показывает «Подключи сервисы», пока сервисы отвечают на запрос имени.
+     */
+    private fun seedAccounts() {
+        val cache = readAccountsCache()
+        _accounts.value = ACCOUNT_SOURCES.associateWith { s -> if (loggedIn(s)) cache[s] ?: Account("") else null }
+    }
+
+    suspend fun refreshAccounts() = kotlinx.coroutines.coroutineScope {
+        // все сервисы спрашиваем разом: ждём самый медленный, а не сумму всех
+        fun <T> io(block: suspend () -> T) = async(kotlinx.coroutines.Dispatchers.IO) { block() }
+        val a = io { if (ya.loggedIn) runCatching { ya.account() } else null }
+        val b = io { if (yt.loggedIn) runCatching { yt.account() } else null }
+        val c = io { if (sc.loggedIn) runCatching { sc.account() } else null }
+        val d = io { if (vk.loggedIn) runCatching { vk.account() } else null }
+        val e = io { if (sp.loggedIn) runCatching { sp.account() } else null }
+        val got = mapOf(SOURCE_YA to a.await(), SOURCE_YT to b.await(), SOURCE_SC to c.await(), SOURCE_VK to d.await(), SOURCE_SP to e.await())
+        val fallback = mapOf(
+            SOURCE_YA to "Яндекс (токен не принят)", SOURCE_YT to "YouTube Music", SOURCE_SC to "SoundCloud (токен не принят)",
+            SOURCE_VK to "VK", SOURCE_SP to if (sp.regionBlocked) "Spotify (нужен VPN)" else "Spotify (вход не принят)",
+        )
+        _accounts.value = ACCOUNT_SOURCES.associateWith { s -> got[s]?.let { r -> r.getOrNull() ?: Account(fallback[s] ?: s) } }
+        // в кеш — только принятые ответы; при сбое сети остаётся имя с прошлого раза
+        val cache = readAccountsCache().filterKeys { got[it] != null }.toMutableMap()
+        got.forEach { (s, r) -> r?.getOrNull()?.let { cache[s] = it } }
+        writeAccountsCache(cache)
     }
 
     /** Удаляет cookie только указанных сайтов (выход из одного сервиса не выкидывает из остальных) */
@@ -633,7 +682,9 @@ object Repo {
             .setMediaMetadata(meta)
             // SoundCloud играет через HLS: тип нужно знать заранее, до получения ссылки
             // VK тоже отдаёт HLS (.m3u8, куски с AES-128 — ExoPlayer расшифровывает сам)
-            .apply { if (t.source == SOURCE_SC || t.source == SOURCE_VK) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            .apply { if (t.source == SOURCE_SC || t.source == SOURCE_VK || t.source == SOURCE_LIVE) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            // эфир: живой поток, ExoPlayer держится у живого края
+            .apply { if (t.source == SOURCE_LIVE) setLiveConfiguration(MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(12_000).build()) }
             .apply { if (t.source == SOURCE_SP && spotifyPlayable()) setMimeType(MimeTypes.AUDIO_WAV) }
             .build()
     }
@@ -647,6 +698,10 @@ object Repo {
     fun resolve(uri: Uri): Resolved {
         val source = uri.host ?: throw ApiException("Плохая ссылка $uri")
         val id = uri.pathSegments.firstOrNull() ?: throw ApiException("Плохая ссылка $uri")
+        if (source == SOURCE_LIVE) {
+            // эфир Яндекс Радио: ссылка подписана на время — каждый раз свежая
+            return Resolved(YandexRadio.streamUrl(id.substringBefore('/'), id.substringAfter('/')), null, -1)
+        }
         if (source == SOURCE_SPX) {
             val sub = substituteFor(id)
             return resolve(Uri.parse("nyao://${sub.source}/${Uri.encode(sub.srcId)}"))
@@ -672,7 +727,7 @@ object Repo {
             SOURCE_YA -> yaStreamCache.remove(id)
             SOURCE_SC -> sc.forget(id)
             SOURCE_VK -> vk.forget(id)
-            SOURCE_SP -> {}
+            SOURCE_SP, SOURCE_LIVE -> {}
             SOURCE_SPX -> _substitutes.value["$SOURCE_SP:$id"]?.let { forgetStream(Uri.parse("nyao://${it.source}/${Uri.encode(it.srcId)}"), blocked) }
             else -> ytStreams.invalidate(id, blocked)
         }

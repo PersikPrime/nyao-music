@@ -12,6 +12,7 @@ import { GitHub } from './github.js';
 import { parseAdminIds } from './admin.js';
 import tls from 'node:tls';
 import { imageProxy, proxied, proxyable } from './img-proxy.js';
+import { waveMixer } from './wave-mix.js';
 
 // Провайдер в РФ режет исходящий TLS с постквантовым обменом ключами (X25519MLKEM768), который OpenSSL 3.5
 // включает по умолчанию: соединение с ретранслятором Telegram на Cloudflare просто висит. Обычные кривые проходят.
@@ -93,7 +94,7 @@ try {
 } catch (e) {
   console.log(`[img] аватарки: ${e.message}`);
 }
-const app = createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS, devIds: DEV_IDS, yaCatalog: new YaCatalog({ log: console.log }), adminIds: ADMIN_IDS, github, logs, dataDir: env.DATA_DIR || '/data', images });
+const app = createApp({ db: pool, tg, mirror, minBuild, status, push, publicUrl: PUBLIC_URL, webUrl: WEB_URL, webHosts: WEB_HOSTS, androidCerts: ANDROID_CERTS, lyricsHosts: LYRICS_HOSTS, lyricsApiHosts: LYRICS_API_HOSTS, lyricsAdmins: LYRICS_ADMINS, devIds: DEV_IDS, yaCatalog: new YaCatalog({ log: console.log }), adminIds: ADMIN_IDS, github, logs, dataDir: env.DATA_DIR || '/data', images, waveMix: waveMixer({ lastfmKey: env.LASTFM_KEY || '', log: console.log }) });
 await app.admin.init();
 setInterval(() => app.admin.tick(), 30_000).unref();
 const server = http.createServer(app);

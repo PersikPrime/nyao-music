@@ -33,7 +33,7 @@ object Updates {
     }
 
     /** Каналы обновлений — как в центре обновлений macOS: обычные релизы, бета (dev), ночные сборки */
-    val CHANNELS = listOf("stable" to "Обычные релизы", "dev" to "Бета (dev)", "nightly" to "Ночные сборки")
+    val CHANNELS = listOf("stable" to "Обычные релизы", "dev" to "Бета (dev)", "nightly" to "Red")
 
     /** Зеркало релизов на сервере Nyao: из РФ качается быстрее, чем с GitHub */
     const val MIRROR = "https://api.music.withnyao.app/updates/latest"
@@ -84,7 +84,8 @@ object Updates {
         return UpdateInfo(
             required = minBuild > 0 && currentBuild < minBuild && tag != null && tag.second >= minBuild && apk != null,
             available = tag != null && tag.second > currentBuild && apk != null,
-            label = tag?.let { "${it.first} (${it.second})" + (channelOf(rel.str("tag_name"))?.let { c -> " $c" } ?: "") },
+            // канал nightly для людей — Nyao Music Red: «Red · 107»
+            label = tag?.let { t -> channelOf(rel.str("tag_name")).let { c -> if (c == "nightly") "Red · ${t.second}" else "${t.first} (${t.second})" + (c?.let { " $it" } ?: "") } },
             build = tag?.second ?: 0,
             apkUrl = apk?.str("browser_download_url"),
             apkSize = apk?.optLong("size") ?: 0,

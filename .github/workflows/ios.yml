@@ -26,6 +26,12 @@ jobs:
       - name: Проект
         run: |
           brew install xcodegen
+          # канал nightly — Nyao Music Red: своё имя на экране «Домой» и красные волны на иконке
+          if [ "$(jq -r '.channel // empty' version.json)" = "nightly" ]; then
+            cp build/red/ios-icon-1024.png ios/NyaoMusic/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+            sed -i '' 's/CFBundleDisplayName: Nyao Music$/CFBundleDisplayName: Nyao Music Red/' ios/project.yml
+            grep -q 'CFBundleDisplayName: Nyao Music Red' ios/project.yml
+          fi
           cd ios && xcodegen generate
       - name: Сборка
         run: |
@@ -56,15 +62,17 @@ jobs:
           N=$(jq -r '.name' version.json); B=$(jq -r '.build' version.json); CH=$(jq -r '.channel // empty' version.json)
           TAG="v$N.$B${CH:+-$CH}"
           SIZE=$(stat -f%z "dist/NyaoMusic-$N-$B.ipa")
-          jq -n --arg v "$N.$B" --arg b "$B" --arg tag "$TAG" --arg size "$SIZE" --arg date "$(date -u +%Y-%m-%d)" \
+          APP="Nyao Music"; ICON="https://raw.githubusercontent.com/${{ github.repository }}/main/build/icon.png"
+          if [ "$CH" = "nightly" ]; then APP="Nyao Music Red"; ICON="https://raw.githubusercontent.com/${{ github.repository }}/nightly/build/red/icon.png"; fi
+          jq -n --arg v "$N.$B" --arg b "$B" --arg tag "$TAG" --arg size "$SIZE" --arg date "$(date -u +%Y-%m-%d)" --arg app "$APP" --arg icon "$ICON" \
             --arg url "https://github.com/${{ github.repository }}/releases/download/$TAG/NyaoMusic-$N-$B.ipa" '{
-            name: "Nyao Music", identifier: "app.withnyao.source", subtitle: "Яндекс, VK и SoundCloud в одном плеере",
-            iconURL: "https://raw.githubusercontent.com/${{ github.repository }}/main/build/icon.png",
+            name: $app, identifier: "app.withnyao.source", subtitle: "Яндекс, VK и SoundCloud в одном плеере",
+            iconURL: $icon,
             website: "https://music.withnyao.app", tintColor: "#C6B8FF",
-            apps: [{ name: "Nyao Music", bundleIdentifier: "app.withnyao.music", developerName: "Nyao",
+            apps: [{ name: $app, bundleIdentifier: "app.withnyao.music", developerName: "Nyao",
               subtitle: "Один плеер для Яндекса, VK и SoundCloud",
               localizedDescription: "Неофициальный клиент: Моя волна из нескольких сервисов, тексты песен, друзья и «сейчас играет».",
-              iconURL: "https://raw.githubusercontent.com/${{ github.repository }}/main/build/icon.png", tintColor: "#C6B8FF",
+              iconURL: $icon, tintColor: "#C6B8FF",
               category: "entertainment",
               versions: [{ version: $v, buildVersion: $b, date: $date, downloadURL: $url, size: ($size|tonumber), minOSVersion: "17.0" }],
               appPermissions: { entitlements: [], privacy: {} } }],

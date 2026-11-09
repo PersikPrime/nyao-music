@@ -171,7 +171,7 @@ private fun Welcome() {
         textAlign = TextAlign.Center,
     )
     Spacer(Modifier.height(16.dp))
-    Text("версия ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+    Text(BuildConfig.DISPLAY_NAME, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
 }
 
 @Composable
@@ -232,5 +232,5 @@ private fun Done(any: Boolean, onWave: () -> Unit, onSkip: () -> Unit) {
         Button(onClick = onSkip, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Перейти в плеер") }
     }
     Spacer(Modifier.height(16.dp))
-    Text("версия ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+    Text(BuildConfig.DISPLAY_NAME, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
 }

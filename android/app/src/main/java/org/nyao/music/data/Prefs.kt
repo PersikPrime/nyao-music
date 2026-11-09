@@ -18,6 +18,10 @@ data class Settings(
     val splitLiked: Boolean = false,
     /** Вкладка «Волна» в панели в режиме «Плеер» */
     val waveTab: Boolean = false,
+    /** Вкладка «Радио» (эфир Яндекс Радио) в панели */
+    val radioTab: Boolean = true,
+    /** «Мои станции» Яндекс Радио (slug) — синхронизируются с ПК */
+    val radioFavs: List<String> = emptyList(),
     /** Эквалайзер: 10 полос (31 Гц … 16 кГц), дБ от -12 до 12 — как на ПК */
     val eqOn: Boolean = false,
     val eqPreset: String = "flat",
@@ -71,6 +75,8 @@ class Prefs(context: Context) {
         layout = sp.getString("layout", null),
         splitLiked = sp.getBoolean("splitLiked", false),
         waveTab = sp.getBoolean("waveTab", false),
+        radioTab = sp.getBoolean("radioTab", true),
+        radioFavs = (sp.getString("radioFavs", null) ?: "").split(",").map { it.trim() }.filter { it.isNotEmpty() },
         eqOn = sp.getBoolean("eqOn", false),
         eqPreset = sp.getString("eqPreset", "flat") ?: "flat",
         eqGains = (sp.getString("eqGains", null) ?: "").split(",").mapNotNull { it.trim().toIntOrNull() }
@@ -146,6 +152,8 @@ class Prefs(context: Context) {
     fun setWidgetStyle(v: String) = update { putString("widgetStyle", v) }
     fun setLookNavLabels(v: Boolean) = update { putBoolean("lookNavLabels", v) }
     fun setWaveTab(v: Boolean) = update { putBoolean("waveTab", v) }.also { onSyncChange?.invoke("prefs") }
+    fun setRadioTab(v: Boolean) = update { putBoolean("radioTab", v) }.also { onSyncChange?.invoke("prefs") }
+    fun setRadioFavs(v: List<String>) = update { putString("radioFavs", v.distinct().take(50).joinToString(",")) }.also { onSyncChange?.invoke("prefs") }
 
     /** Когда ключ синхронизации («wave», «prefs», «mixes») последний раз менялся на этом устройстве */
     fun cloudStamp(key: String): Long = sp.getLong("cloudAt_$key", 0L)
@@ -200,6 +208,11 @@ class Prefs(context: Context) {
     var nyaoUser: String?
         get() = sp.getString("nyaoUser", null)
         set(v) = sp.edit().apply { if (v == null) remove("nyaoUser") else putString("nyaoUser", v) }.apply()
+
+    /** Последние известные аккаунты сервисов (имя, Плюс, uid) — показать сразу при запуске, пока сеть отвечает */
+    var accountsCache: String?
+        get() = sp.getString("accountsCache", null)
+        set(v) = sp.edit().apply { if (v == null) remove("accountsCache") else putString("accountsCache", v) }.apply()
 
     /** С каких треков начинались последние запуски волны — чтобы не начинать с одного и того же */
     var waveProfile: String

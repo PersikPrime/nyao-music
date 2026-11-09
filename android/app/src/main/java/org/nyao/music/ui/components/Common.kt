@@ -74,15 +74,22 @@ fun sourceShort(source: String): String = when (source) {
 }
 
 @Composable
-fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(16.dp)) {
-    Box(modifier.clip(shape).background(NyaoColors.S3), contentAlignment = Alignment.Center) {
+fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(16.dp), bg: Color? = null) {
+    // bg — подложка под прозрачной картинкой (логотипы радиостанций — на цвете станции)
+    Box(modifier.clip(shape).background(bg ?: NyaoColors.S3), contentAlignment = Alignment.Center) {
         if (org.nyao.music.ui.Pranks.has("cat")) {
             // прикол «Котики вместо обложек»
             androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(org.nyao.music.R.drawable.prank_cat), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else if (url == null) {
             NyaoWaves(Modifier.fillMaxSize().padding(14.dp), animate = false, strokeDp = 3f, alpha = 0.5f)
         } else {
-            AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            // пока картинка грузится — силуэт с бликом, а не пустой квадрат
+            var loaded by remember(url) { mutableStateOf(false) }
+            if (!loaded) Box(Modifier.fillMaxSize().shimmer(androidx.compose.ui.graphics.RectangleShape))
+            AsyncImage(
+                model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                onSuccess = { loaded = true }, onError = { loaded = true },
+            )
         }
     }
 }

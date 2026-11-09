@@ -104,7 +104,12 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
     val mode by Repo.mode.collectAsState()
     val sleep by PlayerConnection.sleep.collectAsState()
     val t = current ?: return
-    val pal = rememberCoverPalette(t.cover)
+    // эфир Яндекс Радио: вместо трека — станция, сверху то, что звучит сейчас (если станция сообщает)
+    val live = t.source == org.nyao.music.data.SOURCE_LIVE
+    val onAirList by org.nyao.music.data.YandexRadio.recent.collectAsState()
+    val onAir = if (live) org.nyao.music.data.YandexRadio.nowOf(onAirList) else null
+    val onAirYa = onAir?.let { onAirTrack(it) }
+    val pal = rememberCoverPalette(onAir?.cover ?: t.cover)
     var showLyrics by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     val repeat by PlayerConnection.repeat.collectAsState()
@@ -124,7 +129,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
             delay(250)
         }
     }
-    val isLiked = t.id in liked
+    val isLiked = (if (live) onAirYa?.id else t.id)?.let { it in liked } == true
     val upNext = nextList.take(40)
     val played = playedList.filter { it.id != t.id }.take(40)
     val wave = mode == Repo.Mode.WAVE
@@ -160,7 +165,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     contentKey = { it.id },
                     label = "cover",
                 ) { tr ->
-                    Cover(tr.cover, Modifier.fillMaxSize().graphicsLayer { scaleX = coverScale; scaleY = coverScale }, if (mono) coverShape(32.dp) else PolarShape(12, 0.035f))
+                    Cover(if (live) onAir?.cover ?: tr.cover else tr.cover, Modifier.fillMaxSize().graphicsLayer { scaleX = coverScale; scaleY = coverScale }, if (mono) coverShape(32.dp) else PolarShape(12, 0.035f))
                 }
             }
         }
@@ -168,7 +173,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
             Row(Modifier.fillMaxWidth().widthIn(max = 520.dp).padding(start = 24.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 // длинное название бежит строкой; нажатие — «О треке» со всеми данными
                 Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { showInfo = true }) {
-                    AnimatedContent(t.title, transitionSpec = { (slideInVertically { it / 2 } + fadeIn()) togetherWith (slideOutVertically { -it / 2 } + fadeOut()) }, label = "title") { title ->
+                    AnimatedContent(if (live) onAir?.title ?: t.title else t.title, transitionSpec = { (slideInVertically { it / 2 } + fadeIn()) togetherWith (slideOutVertically { -it / 2 } + fadeOut()) }, label = "title") { title ->
                         Text(
                             title,
                             style = MaterialTheme.typography.headlineMedium,
@@ -178,7 +183,8 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                         )
                     }
                     Text(
-                        t.artist + if (t.album.isNotEmpty()) " · ${t.album}" else "",
+                        if (live) onAir?.let { "${it.artist} · ${t.title}" } ?: t.artist
+                        else t.artist + if (t.album.isNotEmpty()) " · ${t.album}" else "",
                         style = MaterialTheme.typography.bodyLarge,
                         color = pal.accent,
                         fontWeight = FontWeight.SemiBold,
@@ -186,7 +192,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                         modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2500, velocity = 30.dp),
                     )
                 }
-                LikeCookie(isLiked, pal) { model.like(t, !isLiked) }
+                LikeCookie(isLiked, pal) { (if (live) onAirYa else t)?.let { model.like(it, !isLiked) } ?: model.message("Станция не сообщает, что играет") }
             }
         }
         item {
@@ -198,8 +204,11 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                 ) {
                     val subs by org.nyao.music.data.Repo.substitutes.collectAsState()
                     val sub = subs[t.id]
-                    org.nyao.music.ui.components.TrackSourceTag(t)
-                    Text(
+                    if (live) {
+                        Box(Modifier.padding(start = 8.dp).size(7.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Color(0xFFFF4D4D)))
+                        Text("Прямой эфир · ${t.album.removePrefix("Эфир · ")}", style = MaterialTheme.typography.bodySmall, color = pal.onContainer)
+                    } else org.nyao.music.ui.components.TrackSourceTag(t)
+                    if (!live) Text(
                         if (sub != null) "из ${org.nyao.music.data.sourceName(t.source, genitive = true)} → ${org.nyao.music.data.sourceName(sub.source)}"
                         else "из ${org.nyao.music.data.sourceName(t.source, genitive = true)}",
                         style = MaterialTheme.typography.bodySmall, color = pal.onContainer,
@@ -208,7 +217,10 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
             }
         }
         item {
-            Column(Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(horizontal = 20.dp, vertical = 14.dp)) {
+            if (live) Row(Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(horizontal = 24.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("В эфире", style = MaterialTheme.typography.labelLarge, color = pal.accent, modifier = Modifier.weight(1f))
+                Text("‹ › листают станции", style = MaterialTheme.typography.bodySmall, color = pal.sub)
+            } else Column(Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(horizontal = 20.dp, vertical = 14.dp)) {
                 WavyProgress(
                     progress = if (dur > 0) pos.toFloat() / dur else 0f,
                     playing = playing,
@@ -270,14 +282,14 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
         // Панель инструментов
         item {
             Row(Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(horizontal = 12.dp, vertical = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Tool(NyaoIcons.FormatQuote, "Текст", showLyrics, pal) {
+                Tool(NyaoIcons.FormatQuote, "Текст", showLyrics, pal, enabled = !live) {
                     showLyrics = !showLyrics
                 }
                 // очередь всегда ниже — кнопка просто прокручивает к ней
                 Tool(NyaoIcons.QueueMusic, "Очередь", false, pal) {
                     scope.launch { listState.animateScrollToItem(queueItem) }
                 }
-                Tool(NyaoIcons.Shuffle, if (shuffle) "Перемешивание включено" else "Перемешать", shuffle, pal, enabled = !wave) { PlayerConnection.toggleShuffle() }
+                Tool(NyaoIcons.Shuffle, if (shuffle) "Перемешивание включено" else "Перемешать", shuffle, pal, enabled = !wave && !live) { PlayerConnection.toggleShuffle() }
                 Tool(
                     if (repeat == Player.REPEAT_MODE_ONE) NyaoIcons.RepeatOne else NyaoIcons.Repeat,
                     when (repeat) {
@@ -288,7 +300,7 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     repeat != Player.REPEAT_MODE_OFF,
                     pal,
                 ) { PlayerConnection.cycleRepeat() }
-                Tool(NyaoIcons.Block, "Не нравится", false, pal, enabled = wave || mode == Repo.Mode.RADIO) { model.dislike() }
+                Tool(NyaoIcons.Block, "Не нравится", false, pal, enabled = !live && (wave || mode == Repo.Mode.RADIO)) { model.dislike() }
                 Tool(NyaoIcons.Bedtime, if (sleep) "Таймер сна: 30 мин" else "Таймер сна", sleep, pal) {
                     PlayerConnection.toggleSleep()
                     model.message(if (!sleep) "Пауза через 30 минут" else "Таймер сна выключен")

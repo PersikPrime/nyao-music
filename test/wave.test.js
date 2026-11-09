@@ -134,3 +134,57 @@ test('desktop and Android share a deterministic selection fixture', () => {
   const input=Array.from({length:120},(_,i)=>({track:track(i,sources[i%5],{artist:'Артист '+i%8}),liked:i<80,recency:i<40?0.9:0.05,affinity:0}));
   assert.deepEqual(new WavePolicy({random}).select(input,{diversity:'favorite',fresh:100,share:40,size:20}).map(t=>t.id),["sp:9","ya:5","ya:75","vk:23","ya:0","yt:81","ya:30","sc:2","ya:40","ya:15","sc:22","ya:35","yt:66","ya:25","ya:20","ya:80","sp:19","vk:18","ya:45","vk:38"]);
 });
+test('своя волна Nyao: затравка уходит на сервер, ответ находится в подключённом сервисе', async () => {
+  let body = null;
+  const liked = [track('L1'), track('L2')];
+  const found = { id: 'vk:9_9', source: 'vk', srcId: '9_9', title: 'Song C', artist: 'Band C', duration: 180, available: true };
+  const vk = { loggedIn: true, likedTracks: async () => [], recommendations: async () => [], search: async (q) => (/band c/i.test(q) ? [found] : []) };
+  const ya = { loggedIn: true, likedTracks: async () => liked, waveStart: async () => [], waveMore: async () => [], similarTracks: async () => [], search: async () => [], waveFeedback: async () => {} };
+  const w = new WaveMixer({
+    ya, yt: null, sc: null, vk, getSettings: () => ({ waveDiversity: 'any' }),
+    nyao: { mix: async (b) => { body = b; return { tracks: [{ artist: 'Band C', title: 'Song C', reason: 'Похоже на «Song L1»' }] }; } }
+  });
+  const out = await w.start();
+  assert.ok(body && body.seeds.length >= 1, 'затравка отправлена');
+  assert.ok(body.seeds.every((s) => s.artist && s.title));
+  const s = w.session;
+  assert.ok(s.candidates.some((c) => c.track.id === 'vk:9_9') || out.some((t) => t.id === 'vk:9_9'), 'трек найден во VK');
+});
+test('баланс 100% Яндекса — жёсткий: треки других сервисов не попадают, даже если «нужнее» по категории', () => {
+  const p = new WavePolicy({ random: seeded(3) });
+  const input = [...candidates(20, 'library', 'ya'), ...candidates(20, 'related', 'vk'), ...candidates(20, 'related', 'yt')];
+  const out = p.select(input, { diversity: 'popular', share: 0, size: 20 });
+  assert.ok(out.length > 0);
+  assert.ok(out.every((t) => t.source === 'ya'), out.map((t) => t.source).join(','));
+});
+test('настроение: в волну идут только треки «Моей волны» Яндекса, в неё уходят только её треки', async () => {
+  const rotor = [track('R1'), track('R2'), track('R3')];
+  const sent = [];
+  const ya = {
+    loggedIn: true, likedTracks: async () => [track('Liked1'), track('Liked2')],
+    waveStart: async () => rotor, waveMore: async (ids) => { sent.push(ids); return [track('R4')]; },
+    similarTracks: async () => [track('Sim1')], search: async () => [track('Art1')], waveFeedback: async () => {}
+  };
+  const w = new WaveMixer({ ya, yt: null, sc: null, vk: null, getSettings: () => ({ waveDiversity: 'popular', waveMood: 'calm', ytmShare: 0 }),
+    nyao: { mix: async () => { throw new Error('при настроении своя волна не нужна'); } } });
+  const out = await w.start();
+  assert.ok(out.length > 0);
+  assert.ok(out.every((t) => /^ya:R\d$/.test(t.id)), out.map((t) => t.id).join(','));
+  await w.more(out.map((t) => t.id));
+  for (const ids of sent) assert.ok(ids.every((id) => /^ya:R\d$/.test(id)), 'в Яндекс уходят только его треки: ' + ids.join(','));
+});
+test('волна иссякла: дальше — похожее на последние треки и те же исполнители, а не ошибка', async () => {
+  // две песни в лайках, обычные рекомендации пусты — раньше после них была ошибка «Новых подходящих треков пока нет»
+  const likes = [track('a', 'ya', { artist: 'Same Band', likedAt: Date.now() }), track('b', 'ya', { artist: 'Same Band', likedAt: Date.now() - 1000 })];
+  const ya = provider('ya', likes);
+  let fallback = false;
+  ya.similarTracks = async () => (fallback ? [track('sim', 'ya', { artist: 'Similar Band' })] : []);
+  ya.search = async (q) => (fallback && q === 'Same Band' ? [track('c', 'ya', { artist: 'Same Band' })] : []);
+  const m = new WaveMixer({ ya, getSettings: () => ({ waveDiversity: 'favorite', waveFresh: 100, ytmShare: 0 }) });
+  const orig = m.similarToRecent.bind(m);
+  m.similarToRecent = async (s) => { fallback = true; try { return await orig(s); } finally { fallback = false; } };
+  const first = await m.start();
+  assert.deepEqual(first.map(t => t.srcId).sort(), ['a', 'b']);
+  const more = await m.more(first.map(t => t.id));
+  assert.deepEqual(more.map(t => t.srcId).sort(), ['c', 'sim']);
+});

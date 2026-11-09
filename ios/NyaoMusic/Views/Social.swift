@@ -291,6 +291,9 @@ struct SettingsView: View {
     var version: String {
         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.8"
         let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "100"
+        // сборки канала nightly называются Nyao Music Red (имя ставит CI): «Red · 106»
+        let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? ""
+        if name.hasSuffix("Red") { return "Red · \(b)" }
         return "\(v) (\(b))"
     }
 

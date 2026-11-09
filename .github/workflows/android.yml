@@ -46,6 +46,8 @@ jobs:
         run: |
           chmod +x gradlew
           set -o pipefail
+          # GitHub/Gradle иногда отвечают 504 на скачивание Gradle — пробуем несколько раз, дальше он в кеше
+          for i in 1 2 3 4 5; do ./gradlew --version --no-daemon >/dev/null 2>&1 && break; echo "::warning::Gradle не скачался (попытка $i), жду"; sleep $((i*30)); done
           # ошибки компиляции — в аннотации запуска, чтобы их было видно без скачивания лога
           ./gradlew testReleaseUnitTest assembleRelease --no-daemon 2>&1 | tee "$RUNNER_TEMP/gradle.log" || { grep -E '^e: ' "$RUNNER_TEMP/gradle.log" | head -20 | sed 's/^/::error::/'; exit 1; }
           # проверка: каким сертификатом подписан APK (отпечаток SHA-256 должен быть одинаковым у всех сборок)

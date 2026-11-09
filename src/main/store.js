@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   waveFresh: 60,         // свежесть волны: 0 — всё время одинаково, 100 — почти только недавние лайки
   waveDiversity: 'any', // any | favorite | discover | popular
   waveMood: null,        // null | active | fun | calm | sad
+  waveNyao: true,        // своя волна Nyao (бета, nightly): похожее с сервера для всех сервисов
   autoplay: true,
   quality: 'high',
   sourcePref: 'auto',
@@ -20,6 +21,8 @@ const DEFAULT_SETTINGS = {
   layout: null,          // 'player' | 'wave'; null — ещё не выбран (предложим выбрать при запуске)
   splitLiked: false,     // «Мне нравится» отдельно по сервисам
   waveTab: false,        // вкладка «Моя волна» в меню в режиме «Плеер»
+  radioTab: true,        // вкладка «Радио» (эфир Яндекс Радио) в меню
+  radioFavs: [],         // «Мои станции»: slug станций Яндекс Радио
   eq: null,              // эквалайзер { on, preset, gains[10] }; null — выключен
   normalize: false,      // выравнивать громкость треков (по данным Яндекса и YouTube)
   fade: 0,               // плавные переходы между треками, секунд (0 — выкл)
@@ -27,6 +30,7 @@ const DEFAULT_SETTINGS = {
   accent: 'lavender',     // акцентный цвет: lavender | coral | mint | sun | cover     // полноэкранный режим: прятать кнопки, если мышь не двигается
   continueSimilar: true, // список доиграл — продолжать похожим (радио по последнему треку)
   searchPlay: 'similar', // трек из поиска: 'similar' — дальше похожее, 'list' — остальные результаты
+  controlServer: false, // пульт для других программ на этом ПК (мод Nyao MinePlay)
   globalKeys: true,      // сочетания Ctrl+Alt+… работают, даже когда окно свёрнуто
   closeToTray: false     // крестик прячет окно в трей, музыка играет дальше
 };

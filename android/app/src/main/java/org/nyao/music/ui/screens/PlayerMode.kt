@@ -1,5 +1,7 @@
 package org.nyao.music.ui.screens
 
+import org.nyao.music.ui.components.QuickGridSkeleton
+import org.nyao.music.ui.components.ShelfSkeleton
 import org.nyao.music.ui.components.NyaoIcons
 
 import androidx.compose.foundation.BorderStroke
@@ -166,6 +168,8 @@ fun PlayerHome(model: AppModel, name: String?) {
                     Text("Войди в Яндекс Музыку, YouTube Music или SoundCloud — здесь появятся лайки, плейлисты и волна.", color = NyaoColors.Muted, style = MaterialTheme.typography.bodyMedium)
                 }
             }
+        } else if (model.liked == null && model.playlists == null) {
+            item { QuickGridSkeleton() }
         } else {
             item {
                 FlowRow(
@@ -191,6 +195,9 @@ fun PlayerHome(model: AppModel, name: String?) {
             }
         }
         val recent = model.recent
+        if (recent == null && model.recentLoading) {
+            item { ShelfSkeleton(Modifier.padding(top = 24.dp)) }
+        }
         if (!recent.isNullOrEmpty()) {
             item { Text("Недавно слушал", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 24.dp, bottom = 12.dp)) }
             item { TrackShelf(recent) { i -> PlayerConnection.playList(recent, i, "Недавно слушал") } }
@@ -289,10 +296,11 @@ fun ViewSettingsCard() {
         LayoutChoice(s.layout ?: "player", { Repo.prefs.setLayout(it) })
         SwitchRow("«Мне нравится» по сервисам", "Отдельные плейлисты лайков Яндекса, YouTube Music и SoundCloud", s.splitLiked) { Repo.prefs.setSplitLiked(it) }
         if (!s.isWaveLayout) SwitchRow("Вкладка «Волна» в панели", "В режиме «Плеер» волна — плитка на главной", s.waveTab) { Repo.prefs.setWaveTab(it) }
+        SwitchRow("Вкладка «Радио» в панели", "Прямой эфир 300+ станций из Яндекс Радио, вход не нужен", s.radioTab) { Repo.prefs.setRadioTab(it) }
         SwitchRow("«Друзья» отдельной кнопкой", "Друзья и комнаты — в панели, а не внутри профиля", s.navFriends) { Repo.prefs.setNavFriends(it) }
         SwitchRow("«Настройки» отдельной кнопкой", "В профиле остаются аккаунт, статистика и устройства, остальное — на своей странице", s.navPrefs) { Repo.prefs.setNavPrefs(it) }
-        val count = 4 + (if (s.isWaveLayout || s.waveTab) 1 else 0) + (if (s.navFriends) 1 else 0) + (if (s.navPrefs) 1 else 0)
-        if (count > 6) Text("В панели $count кнопок — на узком телефоне она станет плотной. Можно убрать вкладку «Волна».", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
+        val count = 4 + (if (s.isWaveLayout || s.waveTab) 1 else 0) + (if (s.radioTab) 1 else 0) + (if (s.navFriends) 1 else 0) + (if (s.navPrefs) 1 else 0)
+        if (count > 6) Text("В панели $count кнопок — на узком телефоне она станет плотной. Можно убрать вкладку «Волна» или «Радио».", style = MaterialTheme.typography.bodySmall, color = NyaoColors.Muted)
     }
 }
 
@@ -467,7 +475,7 @@ fun OutdatedDialog(apkUrl: String?) {
         onDismissRequest = {},
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
         title = { Text("Нужно обновиться") },
-        text = { Text("Эта версия Nyao Music (${org.nyao.music.BuildConfig.VERSION_NAME}) больше не поддерживается. Скачай свежую — обновление встанет поверх, входы сохранятся.") },
+        text = { Text("Эта версия (${org.nyao.music.BuildConfig.DISPLAY_NAME}) больше не поддерживается. Скачай свежую — обновление встанет поверх, входы сохранятся.") },
         confirmButton = {
             Button(onClick = {
                 val url = apkUrl ?: "https://github.com/PersikPrime/nyao-music/releases/latest"

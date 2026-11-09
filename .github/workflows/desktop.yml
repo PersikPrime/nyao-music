@@ -32,6 +32,18 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Electron и инструменты electron-builder — в кеше между запусками: меньше скачиваний с GitHub Releases
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -79,17 +91,40 @@ jobs:
       # совместимость для быстрых обновлений: пакет кода подходит только установке с тем же Electron и библиотеками
       - name: Совместимость быстрых обновлений
         run: node scripts/hot-bundle.mjs --compat
+      # канал nightly — Nyao Music Red: красные волны на иконке. После --compat: иконки на совместимость не влияют.
+      # productName не меняем — от него зависит папка с настройками и входами (userData)
+      - name: Иконка Nyao Music Red
+        shell: bash
+        run: |
+          if [ "$(node -p "require('./version.json').channel || ''")" = "nightly" ]; then
+            cp build/red/icon.png build/icon.png
+            cp build/red/icon-mac.png build/icon-mac.png
+          fi
       - name: "Сборка Windows: EXE → VMP → NSIS/ZIP"
         if: runner.os == 'Windows'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run dist
+        shell: bash
+        # Electron (сборка castLabs) качается с GitHub Releases, а там бывают 504 — повторяем; удачная загрузка остаётся в кеше
+        run: |
+          for i in 1 2 3; do
+            npm run dist && exit 0
+            echo "::warning::сборка не удалась (попытка $i), повторяю"
+            sleep $((i*90))
+          done
+          exit 1
       - name: Сборка macOS
         if: runner.os == 'macOS'
         env:
           # Подписи разработчика нет — сборка неподписанная (на Mac — ad-hoc подпись)
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder ${{ matrix.args }} --publish never
+        run: |
+          for i in 1 2 3; do
+            npx electron-builder ${{ matrix.args }} --publish never && exit 0
+            echo "::warning::сборка не удалась (попытка $i), повторяю"
+            sleep $((i*90))
+          done
+          exit 1
       - name: Проверка финальных VMP-подписей macOS
         if: runner.os == 'macOS'
         run: |

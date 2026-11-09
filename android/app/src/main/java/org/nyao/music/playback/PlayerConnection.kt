@@ -188,6 +188,7 @@ object PlayerConnection {
     private var ticker: Job? = null
 
     private fun reportLeave(t: Track, posMs: Long, durMs: Long) {
+        if (t.source == org.nyao.music.data.SOURCE_LIVE) return // эфир станции — не трек, в историю и Last.fm не пишем
         val listened = (posMs / 1000).toInt()
         val dur = if (durMs > 0) (durMs / 1000).toInt() else t.duration
         // «пропущен» — переключили в первые полминуты (или до середины короткого трека)
@@ -328,6 +329,36 @@ object PlayerConnection {
     }
 
     // ---------- Команды ----------
+
+    /** Эфир Яндекс Радио: очередь — станции (‹ › листают их), играет выбранная */
+    fun playLive(stations: List<org.nyao.music.data.YandexRadio.Station>, index: Int) {
+        if (stations.isEmpty()) return
+        queueGeneration++
+        val list = stations.map { org.nyao.music.data.YandexRadio.track(it) }
+        list.forEach { Repo.rememberTrack(it) }
+        Repo.mode.value = Repo.Mode.LIVE
+        Repo.queueLabel.value = "Радио"
+        org.nyao.music.data.YandexRadio.clearRecent()
+        withController { c ->
+            c.setMediaItems(list.map { Repo.mediaItem(it) }, index.coerceIn(0, list.lastIndex), 0L)
+            c.prepare()
+            c.play()
+        }
+    }
+
+    /** Другой поток той же станции (Москва / Россия / регион) */
+    fun switchLiveStream(st: org.nyao.music.data.YandexRadio.Station, stream: String) {
+        val t = org.nyao.music.data.YandexRadio.track(st, stream)
+        Repo.rememberTrack(t)
+        org.nyao.music.data.YandexRadio.clearRecent()
+        withController { c ->
+            val i = c.currentMediaItemIndex
+            if (i < 0) return@withController
+            c.replaceMediaItem(i, Repo.mediaItem(t))
+            c.prepare()
+            c.play()
+        }
+    }
 
     fun playList(list: List<Track>, start: Int, label: String) {
         val playable = list.filter { it.available }

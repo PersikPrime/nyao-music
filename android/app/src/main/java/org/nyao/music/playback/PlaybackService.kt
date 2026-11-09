@@ -479,6 +479,14 @@ class PlaybackService : MediaSessionService() {
         // Продолжаем с того же места.
         val now = android.os.SystemClock.elapsedRealtime()
         if (retryStartedAt == 0L) retryStartedAt = now
+        // эфир станции: отстали от живого окна или оборвалась сеть — подключаемся заново к живому краю
+        if (item.mediaId.startsWith("${org.nyao.music.data.SOURCE_LIVE}:") && retries < 4 && now - retryStartedAt < 60_000) {
+            retries++
+            player.seekToDefaultPosition()
+            player.prepare()
+            player.play()
+            return
+        }
         if ((code == 403 || code == 410 || code == 404) && retries < 4 && now - retryStartedAt < 30_000) {
             retries++
             val pos = player.currentPosition

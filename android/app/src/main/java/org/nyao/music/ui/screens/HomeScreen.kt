@@ -1,5 +1,6 @@
 package org.nyao.music.ui.screens
 
+import org.nyao.music.ui.components.ShelfSkeleton
 import org.nyao.music.ui.components.NyaoIcons
 
 import androidx.compose.foundation.background
@@ -157,7 +158,10 @@ fun HomeScreen(model: AppModel, wide: Boolean) {
                 }
             }
         }
-        if (anyAccount && home == null) item { Loading() }
+        if (anyAccount && home == null) {
+            item { ShelfSkeleton(Modifier.padding(top = 22.dp)) }
+            item { ShelfSkeleton(Modifier.padding(top = 26.dp)) }
+        }
 
         home?.let { h ->
             val continueLists = (h.yaPlaylists + h.ytSections.flatMap { it.playlists }).take(12)

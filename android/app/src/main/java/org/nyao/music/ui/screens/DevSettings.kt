@@ -203,7 +203,7 @@ fun DevSettings() {
                 "Скопировать диагностику" to {
                     val s = Repo.prefs.settings.value
                     val text = buildString {
-                        appendLine("Nyao Music ${BuildConfig.VERSION_NAME} · канал ${BuildConfig.CHANNEL}")
+                        appendLine("${BuildConfig.DISPLAY_NAME} · канал ${BuildConfig.CHANNEL}")
                         appendLine("${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
                         appendLine("Статус: ${Repo.status.value}")
                         appendLine("Тема: ${s.theme} · акцент ${s.accent} · виджеты ${s.widgetStyle} · обновления ${s.updateChannel.ifEmpty { "как у сборки" }}")
