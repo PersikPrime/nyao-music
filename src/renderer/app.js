@@ -897,6 +897,18 @@ function renderLibrary() {
       </div>` : '<div class="empty lib-empty">Выбери плейлист слева</div>'}
     </section>
   </div>`;
+  // фигура укатывается, пока листаешь к трекам: 0 — на месте, 1 — ушла (полностью к 280 px прокрутки)
+  const libScroll = $('.lib-main-scroll', view);
+  if (libScroll) {
+    const main = libScroll.parentElement;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; main.style.setProperty('--lib-p', Math.min(1, libScroll.scrollTop / 280).toFixed(3)); });
+    };
+    libScroll.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  }
   // цвет фигуры из обложки плейлиста: считаем один раз на плейлист и подставляем без перерисовки
   if (sel && !isLiked(sel) && sel.cover && !(lib.glow && lib.glow.id === sel.id)) {
     const id = sel.id;

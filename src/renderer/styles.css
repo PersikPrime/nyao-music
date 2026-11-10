@@ -209,6 +209,8 @@ h2.sec { margin: 0; font-size: 20px; font-weight: 600; }
 .lib-split { align-self: flex-start; }
 .lib-main { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; display: flex; transition: --lib-glow .6s ease; }
 .lib-cookie { position: absolute; z-index: 0; right: -110px; top: -150px; width: 420px; height: 420px; background: var(--lib-glow); clip-path: var(--cookie); pointer-events: none; animation: lib-cookie-in .7s cubic-bezier(.2, .9, .25, 1.06) both; }
+/* при прокрутке к трекам фигура укатывается вверх-вправо и тает (--lib-p от 0 до 1 ставит app.js), чтобы не ложиться под строки */
+.lib-cookie { --p: var(--lib-p, 0); translate: calc(var(--p) * 38%) calc(var(--p) * -62%); rotate: calc(var(--p) * 140deg); scale: calc(1 - var(--p) * .5); opacity: calc(1 - var(--p) * 1.15); transform-origin: 70% 30%; transition: translate .25s var(--ease-out, ease), rotate .25s var(--ease-out, ease), scale .25s var(--ease-out, ease), opacity .2s ease; }
 @keyframes lib-cookie-in { from { transform: rotate(-70deg) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
 .lib-main-scroll { position: relative; z-index: 1; flex: 1; min-width: 0; overflow-y: auto; padding: 0 40px 40px 36px; }
 .lib-head { display: flex; flex-direction: column; gap: 10px; padding: 82px 300px 26px 0; }
@@ -219,7 +221,7 @@ h2.sec { margin: 0; font-size: 20px; font-weight: 600; }
 .lib-head .icbtn { width: 52px; height: 52px; border-radius: 50%; }
 .lib-main .trow { min-height: 60px; border-radius: 18px; }
 .lib-empty { margin: auto; }
-@media (prefers-reduced-motion: reduce) { .lib-cookie { animation: none; } .lib-row { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .lib-cookie { animation: none; transition: none; rotate: none; } .lib-row { transition: none; } }
 @media (max-width: 1100px) { .lib-side { width: 300px; padding-left: 24px; } .lib-cookie { width: 300px; height: 300px; right: -90px; top: -110px; } .lib-head { padding-right: 190px; } }
 
 /* ---------- Дополнения: список слева, карточка справа (та же раскладка, что у медиатеки) ---------- */
