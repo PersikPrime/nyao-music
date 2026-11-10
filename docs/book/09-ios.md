@@ -55,7 +55,7 @@ NyaoMusic/
     NowPlaying.swift полноэкранный плеер, текст песни
     Social.swift     друзья и профили
     LoginView.swift  входы в сервисы (WKWebView) и в аккаунт Nyao
-    Theme.swift      цвета и стили; Hundred.swift — пасхалка сотой сборки
+    Theme.swift      цвета и стили
 ```
 
 ## Как устроено

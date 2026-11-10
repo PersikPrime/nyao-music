@@ -8,7 +8,6 @@ import { layoutChoiceHtml } from './layouts.js';
 import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain } from './eq.js';
 import { FullScreen } from './fullscreen.js';
 import { PRANKS, createPranks, fakeWords } from './pranks.js';
-import { createHundred } from './hundred.js';
 import { coverOf, templateCover, installImageFallback } from './covers.js';
 import { ACCENTS, paletteFor, applyAccent } from './accent.js';
 import { releaseAgo } from './releases.js';
@@ -1552,7 +1551,7 @@ function renderSettingsSection(sec) {
   else if (sec === 'discord') body = discordCardHtml();
   else if (sec === 'updates') body = updateCardHtml();
   else if (sec === 'about') body = `<section class="card">
-      <div class="hint"><span class="ver-tap" data-action="hundred-tap">Nyao Music ${esc(state.version || '0.2')}</span> · оформление ${IS_MAC ? 'Liquid Glass' : 'Nyao'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
+      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · оформление ${IS_MAC ? 'Liquid Glass' : 'Nyao'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
       <div><button class="btn" data-action="onboarding">Показать приветствие снова</button></div>
     </section>`;
   view.innerHTML = `<div class="scroll settings psec">
@@ -3062,8 +3061,6 @@ async function handleAction(el, e) {
     case 'dev-prank-reset':
       pranks.resetAll();
       break;
-    case 'hundred-tap':
-      hundred.tapVersion();
       break;
     case 'dev-open':
       try {
@@ -3801,7 +3798,6 @@ const pranks = createPranks({
 });
 player.addEventListener('like', renderBar);
 player.addEventListener('like', refreshOnAirPanel);
-const hundred = createHundred({ player, toast, build: () => (state.versionInfo && state.versionInfo.build) || 0 });
 player.addEventListener('track', () => fullscreen.update());
 player.addEventListener('track', applyTrackSound);
 player.addEventListener('time', checkFadeOut);
@@ -4261,7 +4257,6 @@ function openMixBuilder() {
       if (brand) brand.innerHTML = 'Nyao Music <b class="brand-red">Red</b>';
     }
     if (isSettingsRoute()) renderSettings();
-    hundred.maybeFirstRun();
   }).catch(() => {});
   if (api.onOutdated) api.onOutdated((min) => showOutdated(min));
   // трек Spotify заиграл копией из другого сервиса — показываем «SP → Я»

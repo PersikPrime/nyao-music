@@ -1286,15 +1286,6 @@ body.fs-on .toast { z-index: 1000; }
 .pf-acts .tag { align-self: center; }
 
 /* ---------- Пасхалка сотой сборки ---------- */
-.ver-tap { cursor: default; user-select: none; }
-.hundred { position: fixed; inset: 0; z-index: 9999; background: radial-gradient(120% 90% at 50% 30%, #17142A, #050507 70%); opacity: 0; transition: opacity .25s; display: flex; flex-direction: column; justify-content: flex-end; }
-.hundred.in { opacity: 1; }
-.hundred.out { opacity: 0; }
-.hundred canvas { position: absolute; inset: 0; }
-.hundred-cap { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0 24px 9vh; text-align: center; }
-.hundred-cap b { font-family: Unbounded, sans-serif; font-size: clamp(24px, 4vw, 40px); color: #fff; }
-.hundred-cap span { color: #c9c9ce; max-width: 520px; font-size: 15px; line-height: 1.5; }
-.hundred-cap .btn { margin-top: 8px; }
 
 /* ---------- Радио (эфир Яндекс Радио) ---------- */
 .st-logo { position: relative; display: grid; place-items: center; border-radius: 50%; overflow: hidden; flex-shrink: 0; color: #fff; font-weight: 700; width: 48px; height: 48px; font-size: 14px; }

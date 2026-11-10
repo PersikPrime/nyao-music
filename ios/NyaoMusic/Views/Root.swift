@@ -4,7 +4,6 @@ import SwiftUI
 struct NyaoMusicApp: App {
     @StateObject private var repo = Repo.shared
     @StateObject private var player = Player.shared
-    @StateObject private var hundred = Hundred.shared
     @Environment(\.scenePhase) private var phase
 
     var body: some Scene {
@@ -12,7 +11,6 @@ struct NyaoMusicApp: App {
             RootView()
                 .environmentObject(repo)
                 .environmentObject(player)
-                .environmentObject(hundred)
                 .preferredColorScheme(.dark)
                 .tint(Nyao.accent)
                 .task {
@@ -38,7 +36,6 @@ enum Route: Hashable {
 struct RootView: View {
     @EnvironmentObject var repo: Repo
     @EnvironmentObject var player: Player
-    @EnvironmentObject var hundred: Hundred
     @Environment(\.horizontalSizeClass) private var hsize
     @State private var tab: Tab = .home
     @State private var nowPlaying = false
@@ -63,11 +60,6 @@ struct RootView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: repo.toast)
-        .fullScreenCover(item: $hundred.scene) { s in HundredView(scene: s) { hundred.scene = nil } }
-        .task {
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            if repo.anyService { hundred.maybeFirstRun() }
-        }
     }
 }
 

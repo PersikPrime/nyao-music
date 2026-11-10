@@ -253,7 +253,6 @@ final class Player: ObservableObject {
         // 30 секунд — трек засчитан (для пасхалки «сотый трек»)
         if sec >= 30, let t = current, counted != t.id {
             counted = t.id
-            Hundred.countPlay()
         }
         sendNow()
     }
