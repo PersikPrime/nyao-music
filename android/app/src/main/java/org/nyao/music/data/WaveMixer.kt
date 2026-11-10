@@ -44,7 +44,9 @@ class WaveMixer(
         var recent: Set<String> = emptySet(), val history: MutableList<Track> = ArrayList(),
         var loads: Int = 0, var hydrated: Boolean = false, val excludedIds: MutableSet<String> = HashSet(), val seedHistory: MutableList<Track> = ArrayList(),
         /** треки «Моей волны» Яндекса — только их отправляем ей обратно, иначе подмешанное уводит её от настроения */
-        val rotorIds: MutableSet<String> = HashSet(), val moodChecked: MutableSet<String> = HashSet())
+        val rotorIds: MutableSet<String> = HashSet(), val moodChecked: MutableSet<String> = HashSet(),
+        /** «Похожее на этот трек»: волна держится рядом с треком — каждая порция из похожего на последние */
+        var anchored: Boolean = false, val similarIds: MutableSet<String> = HashSet())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Mutex()
     private val feedbackLock = Any()
@@ -67,10 +69,12 @@ class WaveMixer(
     fun invalidateLikes() { libraryCache.clear(); session?.hydrated = false }
     private fun profileTracks(key: String): List<Track> = state.optJSONArray(key).objects().mapNotNull { trackFromJson(it) }
 
-    suspend fun start(queueIds: List<String> = emptyList()): List<Track> {
+    /** seed — «Похожее на этот трек»: трек уже играет, волна продолжает похожим на него */
+    suspend fun start(queueIds: List<String> = emptyList(), seed: Track? = null): List<Track> {
         val generation = epoch.incrementAndGet()
         return lock.withLock {
             val s = Session(generation); s.excludedIds += queueIds; session = s
+            if (seed != null) { s.anchored = true; s.excludedIds += seed.id; synchronized(feedbackLock) { s.policy.selected += seed } }
             synchronized(feedbackLock) { profileTracks("disliked").forEach { s.policy.block(it) } }
             s.recent = bounded(emptySet()) { recentProvider() }
             s.history += bounded(emptyList()) { historyProvider() }
@@ -82,6 +86,7 @@ class WaveMixer(
             ensure(s); batch(s, true)
         }
     }
+    suspend fun startFrom(seed: Track): List<Track> = start(listOf(seed.id), seed)
     private suspend fun libraries(s: Session) {
         val now = System.currentTimeMillis()
         val lists = coroutineScope { sources().map { source -> async {
@@ -248,11 +253,14 @@ class WaveMixer(
             resolve(cloud.waveMix(anchors, recent, "any", 14).take(10), s)
         } else emptyList()
         ensure(s); add(s, found + own)
+        (found + own).forEach { s.similarIds += it.track.id }
     }
     private suspend fun batch(s: Session, first: Boolean = false): List<Track> {
         ensure(s)
         if (!s.hydrated) { libraries(s); s.hydrated = true }
-        if (first || s.candidates.count { !it.liked } < 12 || s.loads % 3 == 0) recommendations(s, first)
+        // «Похожее на этот трек»: свежая порция похожего на последние сыгранные — до обычных рекомендаций
+        if (s.anchored) similarToRecent(s)
+        if (!s.anchored && (first || s.candidates.count { !it.liked } < 12 || s.loads % 3 == 0)) recommendations(s, first)
         ensure(s)
         // настроение: в волну идут только треки, подобранные под него — «Моя волна» Яндекса и размеченные по тегам Last.fm
         val mood = prefs.settings.value.mood?.takeIf { it.isNotEmpty() }
@@ -261,7 +269,8 @@ class WaveMixer(
             s.candidates.removeAll { it.track.source !in connected }
             if (mood != null) tagMoods(s, mood)
             val settings = prefs.settings.value
-            val pool = if (mood != null) s.candidates.filter { it.moodOk } else s.candidates
+            var pool = if (mood != null) s.candidates.filter { it.moodOk } else s.candidates
+            if (s.anchored) pool.filter { it.track.id in s.similarIds }.takeIf { it.isNotEmpty() }?.let { pool = it }
             return synchronized(feedbackLock) { s.policy.select(pool, settings.diversity, settings.waveFresh, settings.ytmShare, recentIds = s.recent, history = s.history) }
         }
         var result = select()

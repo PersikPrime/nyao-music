@@ -614,6 +614,7 @@ object Repo {
     suspend fun radioStart(t: Track): List<Track> = remember(radio.start(t))
     suspend fun radioMore(queueIds: List<String>): List<Track> = remember(radio.more(queueIds))
     suspend fun waveStart(): List<Track> = remember(wave.start())
+    suspend fun waveFrom(seed: Track): List<Track> = remember(wave.startFrom(seed))
     suspend fun waveMore(queueIds: List<String>): List<Track> = remember(wave.more(queueIds))
 
     private val scLikes by lazy {

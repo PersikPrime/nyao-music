@@ -85,6 +85,7 @@ function badge(source, extra = '') {
   if (source === 'vk') return `<span class="badge vk ${extra}">VK</span>`;
   if (source === 'sp') return `<span class="badge sp ${extra}">SP</span>`;
   if (source === 'mix') return '<span class="badge mix">Я+YT</span>';
+  if (source === 'live') return `<span class="badge live ${extra}">FM</span>`;
   return '';
 }
 /** Значок трека; трек Spotify, играющий копией из другого сервиса, — «SP → Я» */
@@ -334,7 +335,9 @@ function srcName(source, gen = false) {
   if (source === 'vk') return 'VK Музыка';
   if (source === 'sp') return 'Spotify';
   if (source === 'mix') return gen ? 'моего микса' : 'Мой микс';
-  return 'YouTube Music';
+  if (source === 'live') return 'Яндекс Радио';
+  if (source === 'yt') return 'YouTube Music';
+  return 'Nyao';
 }
 const SERVICES = [
   { id: 'ya', short: 'Я', name: 'Яндекс Музыка', bg: 'var(--ya)', fg: '#000' },

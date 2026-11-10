@@ -248,6 +248,22 @@ class AppModel(private val scope: CoroutineScope) {
         }
     }
 
+    /** «Похожее на этот трек» — волна от одного трека */
+    fun startSimilar(t: Track) {
+        if (waveStarting) return
+        waveStarting = true
+        message("Собираю похожее на «${t.title}»…")
+        scope.launch {
+            try {
+                PlayerConnection.startSimilar(t)
+            } catch (e: Exception) {
+                message(e.message ?: "Не нашлось похожего")
+            } finally {
+                waveStarting = false
+            }
+        }
+    }
+
     /** Кнопка волны: если волна уже играет — пауза/продолжить, иначе запуск */
     fun waveButton() {
         if (Repo.mode.value == Repo.Mode.WAVE && PlayerConnection.current.value != null) PlayerConnection.toggle()

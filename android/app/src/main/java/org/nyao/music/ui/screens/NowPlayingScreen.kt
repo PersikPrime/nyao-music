@@ -20,6 +20,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -165,7 +166,10 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     contentKey = { it.id },
                     label = "cover",
                 ) { tr ->
-                    Cover(if (live) onAir?.cover ?: tr.cover else tr.cover, Modifier.fillMaxSize().graphicsLayer { scaleX = coverScale; scaleY = coverScale }, if (mono) coverShape(32.dp) else PolarShape(12, 0.035f))
+                    // эфир: обложка трека, который звучит; не загрузилась или трека нет — логотип станции на её цвете
+                    val station = if (live) org.nyao.music.data.YandexRadio.stationOf(tr) else null
+                    Cover(if (live) onAir?.cover ?: tr.cover else tr.cover, Modifier.fillMaxSize().graphicsLayer { scaleX = coverScale; scaleY = coverScale }, if (mono) coverShape(32.dp) else PolarShape(12, 0.035f),
+                        bg = station?.let { Color(it.bg) }, fallback = if (live) tr.cover else null)
                 }
             }
         }
@@ -410,85 +414,156 @@ private fun trackLink(t: org.nyao.music.data.Track): String = when (t.source) {
     else -> "https://music.youtube.com/watch?v=${t.srcId}"
 }
 
-/** «О треке»: всё, что известно о треке, плюс копирование, поиск исполнителя и переход в сервис */
+/** «О треке»: свойства трека и действия списком — как меню Android. Для эфира — свой набор: трек из эфира и станция */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun TrackInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClose: () -> Unit) {
+    if (t.source == org.nyao.music.data.SOURCE_LIVE) return StationInfoSheet(model, t, onClose)
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val clip = androidx.compose.ui.platform.LocalClipboardManager.current
     var details by remember(t.id) { mutableStateOf<org.nyao.music.data.TrackDetails?>(null) }
+    var showId by remember(t.id) { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(t.id) { details = Repo.trackDetails(t) }
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onClose) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding(),
+            Modifier.fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(bottom = 16.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Cover(t.cover, Modifier.size(88.dp), RoundedCornerShape(20.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(t.title, style = MaterialTheme.typography.titleLarge)
-                    Text(t.artist, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+            SheetHeader(t.cover, t.title, t.artist)
+            Column(Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoRow("Альбом", t.album)
+                InfoRow("Длительность", if (t.duration > 0) org.nyao.music.data.formatTime(t.duration) else "")
+                InfoRow("Сервис", org.nyao.music.data.sourceName(t.source))
+                InfoRow("Год", details?.year?.toString().orEmpty())
+                InfoRow("Жанр", details?.genre.orEmpty())
+                InfoRow("Лейбл", details?.label.orEmpty())
+                InfoRow("Номер в альбоме", details?.position.orEmpty())
+                InfoRow("Прослушиваний", details?.plays?.let { java.text.NumberFormat.getInstance(java.util.Locale("ru")).format(it) }.orEmpty())
+                InfoRow("Возраст", if (details?.explicit == true) "18+" else "")
+                // ID — для отладки: долгое нажатие на «Скопировать название»
+                if (showId) InfoRow("ID в сервисе", t.srcId)
+            }
+            androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 24.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            Column {
+                ActionRow(NyaoIcons.Waves, "Похожее на этот трек") { onClose(); model.nowPlayingOpen = false; model.startSimilar(t) }
+                ActionRow(NyaoIcons.Person, "Перейти к исполнителю") { onClose(); model.openArtist(t) }
+                model.albumOf(t)?.let { al ->
+                    ActionRow(NyaoIcons.Album, "Открыть альбом") { onClose(); model.nowPlayingOpen = false; model.go(org.nyao.music.ui.Route.PlaylistPage(al)) }
                 }
-            }
-            @Composable
-            fun Info(label: String, value: String) {
-                if (value.isBlank()) return
-                Row {
-                    Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(110.dp))
-                    Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                ActionRow(NyaoIcons.Share, "Поделиться ссылкой") {
+                    // ссылка на сайт: у кого есть Nyao — откроется сразу, нет нужного сервиса — найдёт копию
+                    shareText(ctx, "${t.artist} — ${t.title}\n${org.nyao.music.playback.Together.trackLink(t)}", "Поделиться треком")
                 }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Info("Название", t.title)
-                Info("Исполнители", t.artist)
-                Info("Альбом", t.album)
-                Info("Длительность", if (t.duration > 0) org.nyao.music.data.formatTime(t.duration) else "")
-                Info("Сервис", org.nyao.music.data.sourceName(t.source))
-                Info("Год", details?.year?.toString().orEmpty())
-                Info("Жанр", details?.genre.orEmpty())
-                Info("Лейбл", details?.label.orEmpty())
-                Info("Номер в альбоме", details?.position.orEmpty())
-                Info("Прослушиваний", details?.plays?.let { java.text.NumberFormat.getInstance(java.util.Locale("ru")).format(it) }.orEmpty())
-                Info("Возраст", if (details?.explicit == true) "18+" else "")
-                Info("ID в сервисе", t.srcId)
-            }
-            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.FilledTonalButton(onClick = {
+                if (Repo.cloud.loggedIn) ActionRow(NyaoIcons.Send, "Отправить другу в Nyao") { onClose(); org.nyao.music.playback.Friends.shareRequest.value = t }
+                ActionRow(NyaoIcons.ContentCopy, "Скопировать название", onLongClick = { showId = !showId }) {
                     clip.setText(androidx.compose.ui.text.AnnotatedString("${t.artist} — ${t.title}"))
                     model.message("Название скопировано")
-                }) { Text("Скопировать") }
-                androidx.compose.material3.OutlinedButton(onClick = {
-                    onClose()
-                    model.openArtist(t)
-                }) { Text("Исполнитель") }
-                if (Repo.cloud.loggedIn) androidx.compose.material3.OutlinedButton(onClick = {
-                    onClose()
-                    org.nyao.music.playback.Friends.shareRequest.value = t
-                }) { Text("Другу") }
-                androidx.compose.material3.OutlinedButton(onClick = {
-                    // ссылка на сайт: у кого есть Nyao — откроется сразу, нет нужного сервиса — найдёт копию
-                    val link = org.nyao.music.playback.Together.trackLink(t)
-                    runCatching {
-                        ctx.startActivity(android.content.Intent.createChooser(
-                            android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
-                                .putExtra(android.content.Intent.EXTRA_TEXT, "${t.artist} — ${t.title}\n$link"),
-                            "Поделиться треком",
-                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }
-                }) { Text("Ссылка") }
-                model.albumOf(t)?.let { al ->
-                    androidx.compose.material3.OutlinedButton(onClick = {
-                        onClose()
-                        model.nowPlayingOpen = false
-                        model.go(org.nyao.music.ui.Route.PlaylistPage(al))
-                    }) { Text("Альбом") }
                 }
-                androidx.compose.material3.OutlinedButton(onClick = {
-                    runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(trackLink(t))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                }) { Text("Открыть в ${if (t.source == org.nyao.music.data.SOURCE_YA) "Яндексе" else org.nyao.music.data.sourceName(t.source)}") }
+                ActionRow(NyaoIcons.OpenInNew, "Открыть в ${if (t.source == org.nyao.music.data.SOURCE_YA) "Яндекс Музыке" else org.nyao.music.data.sourceName(t.source)}") {
+                    openUrl(ctx, trackLink(t))
+                }
             }
         }
     }
+}
+
+/** Эфир: сверху — что звучит сейчас (если станция сообщает), ниже — станция; действия для трека и станции */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun StationInfoSheet(model: AppModel, t: org.nyao.music.data.Track, onClose: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    val recent by org.nyao.music.data.YandexRadio.recent.collectAsState()
+    val settings by Repo.prefs.settings.collectAsState()
+    val liked by Repo.liked.collectAsState()
+    val st = org.nyao.music.data.YandexRadio.stationOf(t)
+    val slug = t.srcId.substringBefore('/')
+    val now = org.nyao.music.data.YandexRadio.nowOf(recent)
+    val yaTrack = now?.let { onAirTrack(it) }
+    val fav = slug in settings.radioFavs
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onClose) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(bottom = 16.dp).navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            if (now != null) SheetHeader(now.cover ?: t.cover, now.title, now.artist.ifBlank { t.title })
+            else SheetHeader(t.cover, t.title, st?.desc.orEmpty(), bg = st?.let { Color(it.bg) })
+            Column(Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoRow("Станция", t.title)
+                InfoRow("Поток", st?.streams?.firstOrNull { it.slug == org.nyao.music.data.YandexRadio.streamOf(t) }?.name.orEmpty().ifBlank { t.album.removePrefix("Эфир · ") })
+                InfoRow("Сервис", org.nyao.music.data.sourceName(t.source))
+                if (st != null && st.listeners > 0) InfoRow("Слушают", "%,d".format(st.listeners).replace(',', ' '))
+            }
+            androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 24.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            Column {
+                if (yaTrack != null) {
+                    val on = yaTrack.id in liked
+                    ActionRow(NyaoIcons.PlayArrow, "Слушать трек целиком") {
+                        onClose()
+                        org.nyao.music.playback.PlayerConnection.playList(listOf(yaTrack), 0, "Из эфира «${t.title}»")
+                    }
+                    ActionRow(if (on) NyaoIcons.Favorite else NyaoIcons.FavoriteBorder, if (on) "Убрать из «Мне нравится»" else "Нравится — в Яндекс Музыку") { model.like(yaTrack, !on) }
+                    ActionRow(NyaoIcons.Waves, "Похожее на этот трек") { onClose(); model.nowPlayingOpen = false; model.startSimilar(yaTrack) }
+                }
+                if (now != null) ActionRow(NyaoIcons.ContentCopy, "Скопировать название трека") {
+                    clip.setText(androidx.compose.ui.text.AnnotatedString("${now.artist} — ${now.title}"))
+                    model.message("Название скопировано")
+                }
+                ActionRow(if (fav) NyaoIcons.StarFilled else NyaoIcons.Star, if (fav) "Убрать из моих станций" else "В мои станции") {
+                    Repo.prefs.setRadioFavs(if (fav) settings.radioFavs - slug else listOf(slug) + settings.radioFavs)
+                }
+                ActionRow(NyaoIcons.Share, "Поделиться станцией") {
+                    shareText(ctx, "Слушаю «${t.title}» в Nyao Music" + (now?.let { " — сейчас ${it.artist} — ${it.title}" } ?: ""), "Поделиться станцией")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetHeader(cover: String?, title: String, sub: String, bg: Color? = null) {
+    Row(Modifier.padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Cover(cover, Modifier.size(72.dp), RoundedCornerShape(18.dp), bg = bg)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (sub.isNotBlank()) Text(sub, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    if (value.isBlank()) return
+    Row {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(130.dp))
+        Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+    }
+}
+
+/** Строка действия: иконка и подпись во всю ширину — как пункт меню Android */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ActionRow(icon: ImageVector, label: String, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+private fun shareText(ctx: android.content.Context, text: String, title: String) {
+    runCatching {
+        ctx.startActivity(android.content.Intent.createChooser(
+            android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, text), title,
+        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+}
+
+private fun openUrl(ctx: android.content.Context, url: String) {
+    runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
 
 /** Лайк-«печенька»: заливается акцентом, когда трек нравится */

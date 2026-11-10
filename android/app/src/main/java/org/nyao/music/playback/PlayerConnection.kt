@@ -429,6 +429,31 @@ object PlayerConnection {
         }
     }
 
+    /** «Похожее на этот трек»: трек остаётся (или включается), дальше — волна похожего на него */
+    suspend fun startSimilar(seed: org.nyao.music.data.Track) {
+        val generation = ++queueGeneration
+        val tracks = withContext(Dispatchers.IO) { Repo.waveFrom(seed) }
+        if (queueGeneration != generation) return
+        Repo.mode.value = Repo.Mode.WAVE
+        Repo.queueLabel.value = "Похоже на «${seed.title}»"
+        withController { c ->
+            c.shuffleModeEnabled = false
+            if (c.repeatMode == Player.REPEAT_MODE_ALL) c.repeatMode = Player.REPEAT_MODE_OFF
+            val cur = c.currentMediaItem
+            if (cur?.mediaId == seed.id) {
+                // тот же трек играет — не прерываем, заменяем всё вокруг него
+                val i = c.currentMediaItemIndex
+                if (c.mediaItemCount > i + 1) c.removeMediaItems(i + 1, c.mediaItemCount)
+                if (i > 0) c.removeMediaItems(0, i)
+                c.addMediaItems(tracks.map { Repo.mediaItem(it) })
+            } else {
+                c.setMediaItems((listOf(seed) + tracks).map { Repo.mediaItem(it) }, 0, 0L)
+                c.prepare()
+                c.play()
+            }
+        }
+    }
+
     /** Настройки волны поменялись — заменяем всё, что после текущего трека */
     suspend fun refreshWave() {
         if (Repo.mode.value != Repo.Mode.WAVE) return

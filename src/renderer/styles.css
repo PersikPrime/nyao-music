@@ -102,6 +102,7 @@ h2.sec { margin: 0; font-size: 20px; font-weight: 600; }
 .badge.vk { background: var(--vk); color: #fff; }
 .badge.vk.dim { background: #0a1e36; color: #6fa8e6; }
 .badge.sp { background: var(--sp); color: #000; }
+.badge.live { background: #e5484d; color: #fff; }
 .badge.sp.dim { background: #0b2e1a; color: #7fe3a6; }
 .badge.mix { background: #2a2540; color: #e2daff; }
 .badge.ya.dim { background: #3a3410; color: #c9b44a; }
