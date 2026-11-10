@@ -84,7 +84,7 @@ src/
     fullscreen.js  полноэкранный режим
     friends.js     друзья и профили
     styles.css     все стили (тема Windows); theme-mac.css — Liquid Glass
-    …              covers, eq, social, search, onboarding, lyric-card, pranks
+    …              covers, eq, social, search, onboarding, lyric-card, pranks, qol
 android/           приложение Android (Gradle)
 ios/               приложение iOS (XcodeGen: ios/project.yml)
 legacy/            Nyao Legacy для Android 4.x
