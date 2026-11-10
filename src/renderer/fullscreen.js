@@ -1,15 +1,23 @@
-// Полноэкранный режим (макет «Полный экран 2.0»): фон — затемнённый цвет обложки, без подложек.
-// Слева обложка, название и прогресс; справа текст песни по высоте левого блока. Колёсико разворачивает текст
-// на весь экран, через 4 секунды без прокрутки он сжимается обратно. Кнопки прячутся, только если это включено.
-// Фон (макет 8 «Глубокий разворот»): зеркальный пол с отражением обложки, свет за текущей строкой и на полу под текстом.
-// Обложка в покое чуть повёрнута (левая грань ближе); открывается полуоборотом в полёте из плашки плеера,
-// из-за неё веером расходятся обложки соседних треков; при смене трека обложки проезжают как Cover Flow.
+// Полноэкранный режим (макет «Новый стиль · Сейчас играет»): обложка — большая «печенька», уходящая за левый
+// край; справа — откуда играет, крупное название, текст песни и управление внизу. Фон — затемнённый цвет обложки.
+// Колёсико над текстом разворачивает его на весь экран, через 4 секунды без прокрутки он сжимается обратно.
+// Печенька медленно катится, пока играет музыка (обложка внутри стоит ровно — крутится только кромка), за ней —
+// такая же фигура цвета обложки. Открывается перелётом из плашки плеера: обложка вкатывается на место,
+// название и текст поднимаются следом. При смене трека печенька перекатывается в сторону следующего.
 
 import { toggleLine, drawCard, ensureFonts, FORMATS, MAX_LINES } from './lyric-card.js';
 import { coverOf, templateCover } from './covers.js';
 
-/** Поворот обложки в покое, градусы */
-const TILT = 12;
+/** Кромка «печеньки» для clip-path: n зубцов, глубина amp (0…1). Проценты — фигура тянется за размером блока */
+export function cookiePolygon(n = 10, amp = 0.05, steps = 120) {
+  const pts = [];
+  for (let i = 0; i < steps; i++) {
+    const t = (2 * Math.PI * i) / steps;
+    const r = 50 * (1 - amp) + 50 * amp * Math.cos(n * t);
+    pts.push(`${(50 + r * Math.sin(t)).toFixed(2)}% ${(50 - r * Math.cos(t)).toFixed(2)}%`);
+  }
+  return `polygon(${pts.join(', ')})`;
+}
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const fmt = (sec) => {
@@ -70,38 +78,38 @@ export class FullScreen {
     el.className = 'fs';
     el.hidden = true;
     el.innerHTML = `
-      <div class="fs-floor" aria-hidden="true"><div class="fs-sweep"></div><div class="fs-pool"></div></div>
+      <div class="fs-art-wrap">
+        <div class="fs-halo" aria-hidden="true"></div>
+        <div class="fs-art"><div class="fs-roll"><img alt=""></div></div>
+      </div>
       <div class="fs-top">
         <button class="fs-round fs-sharebtn" data-fs="share" aria-label="Карточка со строками" title="Карточка со строками текста"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 7H6a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h2v3l3-3V9a2 2 0 0 0-1-2zM20 7h-4a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h2v3l3-3V9a2 2 0 0 0-1-2z"/></svg></button>
         <button class="fs-round fs-qbtn" data-fs="queue" aria-label="Очередь" title="Очередь" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h10M17 15v6l4-3z"/></svg></button>
         <button class="fs-round" data-fs="exit" aria-label="Выйти из полного экрана" title="Выйти из полного экрана (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
       </div>
       <div class="fs-stage">
-        <div class="fs-left">
-          <div class="fs-art-wrap">
-            <div class="fs-nb fs-nb-prev" aria-hidden="true"><img alt=""></div>
-            <div class="fs-nb fs-nb-next" aria-hidden="true"><img alt=""></div>
-            <div class="fs-art"><div class="fs-face"><img alt=""></div><div class="fs-face fs-back" aria-hidden="true"><img alt=""></div></div>
-            <div class="fs-refl" aria-hidden="true"><img alt=""></div>
-          </div>
-          <div class="fs-head">
-            <button class="fs-round fs-lyr" data-fs="lyrics" aria-label="Текст" title="Текст"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9"/></svg></button>
-            <div class="fs-meta"><h1 class="fs-title"></h1><div class="fs-artist"></div></div>
-            <button class="fs-round fs-like" data-fs="like" aria-label="Мне нравится"></button>
-          </div>
-          <div class="fs-progress" data-fs="seek"><div class="fs-fill"></div><span class="fs-knob fs-ctl"></span></div>
-          <div class="fs-times"><span class="fs-cur">0:00</span><span class="fs-left-time">0:00</span></div>
-          <div class="fs-controls fs-ctl">
-            <button class="fs-btn" data-fs="prev" aria-label="Предыдущий"></button>
-            <button class="fs-play" data-fs="play" aria-label="Играть"></button>
-            <button class="fs-btn" data-fs="next" aria-label="Следующий"></button>
-          </div>
+        <div class="fs-head">
+          <div class="fs-from"></div>
+          <h1 class="fs-title"></h1>
+          <div class="fs-artist"></div>
         </div>
         <div class="fs-right">
           <div class="fs-lyrics" aria-live="off"></div>
           <div class="fs-credit"></div>
           <div class="fs-pick" hidden><span class="fs-pick-n"></span><button class="fs-pill" data-fs="pick-cancel">Отмена</button><button class="fs-pill primary" data-fs="pick-make" disabled>Карточка</button></div>
           <button class="fs-now" data-fs="now"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>К текущей строке</button>
+        </div>
+        <div class="fs-bottom">
+          <div class="fs-seek"><span class="fs-cur">0:00</span><div class="fs-progress" data-fs="seek"><div class="fs-fill"></div><span class="fs-knob fs-ctl"></span></div><span class="fs-left-time">0:00</span></div>
+          <div class="fs-controls fs-ctl">
+            <button class="fs-btn" data-fs="prev" aria-label="Предыдущий"></button>
+            <button class="fs-play" data-fs="play" aria-label="Играть"></button>
+            <button class="fs-btn" data-fs="next" aria-label="Следующий"></button>
+            <span class="fs-gap"></span>
+            <button class="fs-round fs-like" data-fs="like" aria-label="Мне нравится"></button>
+            <button class="fs-round fs-lyr" data-fs="lyrics" aria-label="Текст" title="Текст"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9"/></svg></button>
+            <button class="fs-round" data-fs="more" aria-label="Ещё" title="Действия с треком"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18" cy="12" r="1.7"/></svg></button>
+          </div>
         </div>
       </div>
       <aside class="fs-queue" aria-label="Очередь">
@@ -125,6 +133,7 @@ export class FullScreen {
     this.el = el;
     const $ = (s) => el.querySelector(s);
     this.$ = $;
+    el.style.setProperty('--fs-cookie', cookiePolygon(10, 0.05));
     const { player } = this.d;
     $('[data-fs="prev"]').innerHTML = this.d.icons.prev;
     $('[data-fs="next"]').innerHTML = this.d.icons.next;
@@ -202,6 +211,10 @@ export class FullScreen {
       else if (a === 'exit') this.close();
       else if (a === 'queue') this.toggleQueue();
       else if (a === 'now') this.collapse();
+      else if (a === 'more') {
+        const r = b.getBoundingClientRect();
+        if (this.d.menu && player.current) this.d.menu(r.left, r.top - 8, player.current, player.index);
+      }
       else if (a === 'play') player.toggle();
       else if (a === 'prev') player.prev();
       else if (a === 'next') player.next(true);
@@ -275,28 +288,13 @@ export class FullScreen {
     }
   }
 
-  /** Высота текста = высота левого блока; отступы, чтобы текущая строка вставала посередине */
+  /** Отступы текста, чтобы текущая строка вставала посередине своего блока */
   layout() {
     if (!this.open || !this.el) return;
-    // линия «пола» — по нижнему краю обложки
-    const wrap = this.$('.fs-art-wrap');
-    if (wrap && wrap.getBoundingClientRect && this.el.getBoundingClientRect) {
-      const r = wrap.getBoundingClientRect();
-      const top = this.el.getBoundingClientRect().top || 0;
-      if (r.height) this.el.style.setProperty('--fs-horizon', `${Math.round(r.bottom - top)}px`);
-    }
-    const left = this.$('.fs-left');
-    if (left) this.el.style.setProperty('--fs-lh', `${left.offsetHeight}px`);
-    // без текста обложка встаёт по центру: сдвиг от её места в сетке до середины экрана
-    const stage = this.$('.fs-stage');
-    if (left && stage) {
-      const ls = left.offsetLeft + left.offsetWidth / 2;
-      this.el.style.setProperty('--fs-shift', `${Math.round(stage.clientWidth / 2 - ls)}px`);
-    }
     const box = this.$('.fs-lyrics');
     if (box && !box.classList.contains('plain')) {
       // меряем без старых отступов: блок не сжимается меньше своих отступов, и прежние (от развёрнутого
-      // на весь экран текста) не давали ему вернуться к высоте плеера
+      // на весь экран текста) не давали ему вернуться к прежней высоте
       box.style.paddingTop = '0px';
       box.style.paddingBottom = '0px';
       const pad = `${Math.round(box.clientHeight / 2)}px`;
@@ -610,23 +608,9 @@ export class FullScreen {
     return `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${s.toFixed(4)})`;
   }
 
-  /** Поворот обложки в покое: без текста она одна по центру и стоит прямо */
-  tilt() {
-    return this.el && this.el.classList.contains('nolyrics') ? 0 : TILT;
-  }
-
-  /** Место обложки без поворота в покое — от него считается перелёт */
-  artRect(art) {
-    const prev = art.style.transform;
-    art.style.transform = 'none';
-    const r = art.getBoundingClientRect();
-    art.style.transform = prev;
-    return r;
-  }
-
-  /** Всё, кроме обложки: кнопки, текст, прогресс — они просто проявляются */
+  /** Всё, кроме обложки, по порядку появления: откуда играет, название, исполнитель, текст, управление, кнопки */
   parts() {
-    return Array.from(this.el.querySelectorAll('.fs-top, .fs-right, .fs-queue, .fs-floor, .fs-left > :not(.fs-art-wrap)'));
+    return Array.from(this.el.querySelectorAll('.fs-from, .fs-title, .fs-artist, .fs-right, .fs-bottom, .fs-top, .fs-queue'));
   }
 
   animateOpen() {
@@ -637,38 +621,27 @@ export class FullScreen {
       const src = this.sourceEl();
       if (src) src.style.visibility = '';
     };
-    const to = art && art.getBoundingClientRect ? this.artRect(art) : null;
+    const to = art && art.getBoundingClientRect ? art.getBoundingClientRect() : null;
     if (!this.canAnimate() || !to || !to.width || !this.open) return done();
     this.el.getAnimations({ subtree: true }).forEach((a) => a.cancel());
     const src = this.sourceEl();
     if (src) src.style.visibility = 'hidden'; // обложка «улетела» из плашки — там её не показываем
     const bg = getComputedStyle(this.el).backgroundColor;
-    const ease = 'cubic-bezier(.2, .8, .2, 1)';
-    this.el.animate([{ backgroundColor: 'transparent' }, { backgroundColor: bg }], { duration: 420, easing: 'ease-out' });
-    const D = 980;
-    this.parts().forEach((p) => p.animate([{ opacity: 0 }, { opacity: 0, offset: 0.45 }, { opacity: 1 }], { duration: D, easing: 'ease-out' }));
-    // перелёт из плашки с полуоборотом: в плашке виден «задник» обложки, лицом она поворачивается к концу
-    // полёта и с пружинкой встаёт под углом покоя
+    const spring = 'cubic-bezier(.2, .9, .25, 1.06)';
+    const D = 860;
+    this.el.animate([{ backgroundColor: 'transparent' }, { backgroundColor: bg }], { duration: 380, easing: 'ease-out' });
+    // печенька вкатывается из плашки на место: растёт, проворачивается на треть оборота и чуть пружинит
     const fly = art.animate([
-      { transform: `${this.flight(from, to)} rotateY(180deg)` },
-      { transform: `${this.flight(from, to, 0.28)} rotateY(72deg)`, offset: 0.5 },
-      { transform: `translate(0px, 0px) scale(1.03) rotateY(${this.tilt() - 9}deg)`, offset: 0.78 },
-      { transform: `translate(0px, 0px) scale(1) rotateY(${this.tilt()}deg)` }
-    ], { duration: D, easing: ease });
-    // в момент приземления из-за обложки веером расходятся соседние треки (Cover Flow) и гаснут
-    const fan = (sel, dir) => {
-      const nb = this.$(sel);
-      if (!nb || !nb.animate || !nb.dataset.on) return;
-      nb.animate([
-        { opacity: 0, transform: `translateZ(-160px) rotateY(${dir * 40}deg) scale(.86)` },
-        { opacity: 0.85, offset: 0.3 },
-        { opacity: 0, transform: `translateX(${dir * -72}%) translateZ(-120px) rotateY(${dir * 72}deg) scale(.86)` }
-      ], { duration: 820, delay: D * 0.42, easing: ease, fill: 'backwards' });
-    };
-    fan('.fs-nb-prev', 1);
-    fan('.fs-nb-next', -1);
-    const refl = this.$('.fs-refl');
-    if (refl && refl.animate) refl.animate([{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 0.15 }], { duration: D, easing: 'ease-out' });
+      { transform: `${this.flight(from, to)} rotate(-130deg)` },
+      { transform: 'translate(0px, 0px) scale(1) rotate(0deg)' }
+    ], { duration: D, easing: spring });
+    const halo = this.$('.fs-halo');
+    if (halo && halo.animate) halo.animate([{ opacity: 0, transform: 'scale(.6) rotate(-60deg)' }, { opacity: 0, transform: 'scale(.7) rotate(-40deg)', offset: 0.4 }, { opacity: 1, transform: 'scale(1) rotate(0deg)' }], { duration: D + 240, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+    // остальное поднимается следом, по очереди сверху вниз
+    this.parts().forEach((p, i) => p.animate([
+      { opacity: 0, transform: 'translateY(26px)' },
+      { opacity: 1, transform: 'translateY(0)' }
+    ], { duration: 560, delay: 260 + i * 55, easing: 'cubic-bezier(.2, .8, .2, 1)', fill: 'backwards' }));
     fly.finished.then(done, done);
   }
 
@@ -681,17 +654,17 @@ export class FullScreen {
       if (src) src.style.visibility = '';
       if (!this.open) this.el.hidden = true;
     };
-    const from = art && art.getBoundingClientRect ? this.artRect(art) : null;
+    const from = art && art.getBoundingClientRect ? art.getBoundingClientRect() : null;
     if (!to || !from || !from.width) return finish();
     const src = this.sourceEl();
     if (src) src.style.visibility = 'hidden';
     const bg = getComputedStyle(this.el).backgroundColor;
-    this.el.animate([{ backgroundColor: bg }, { backgroundColor: 'transparent' }], { duration: 380, easing: 'ease-in', fill: 'forwards' });
-    this.parts().forEach((p) => p.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease-in', fill: 'forwards' }));
-    // обратно — без кувырков: поворот покоя распрямляется по пути в плашку
-    const fly = art.animate([{ transform: `translate(0px, 0px) scale(1) rotateY(${this.tilt()}deg)` }, { transform: `${this.flight(to, from)} rotateY(0deg)` }], { duration: 440, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
-    const refl = this.$('.fs-refl');
-    if (refl && refl.animate) refl.animate([{ opacity: 0.15 }, { opacity: 0 }], { duration: 160, easing: 'ease-in', fill: 'forwards' });
+    this.el.animate([{ backgroundColor: bg }, { backgroundColor: 'transparent' }], { duration: 360, easing: 'ease-in', fill: 'forwards' });
+    this.parts().forEach((p) => p.animate([{ opacity: 1, transform: 'translateY(0)' }, { opacity: 0, transform: 'translateY(14px)' }], { duration: 200, easing: 'ease-in', fill: 'forwards' }));
+    const halo = this.$('.fs-halo');
+    if (halo && halo.animate) halo.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: 'ease-in', fill: 'forwards' });
+    // обратно в плашку: сжимается и докатывается на четверть оборота
+    const fly = art.animate([{ transform: 'translate(0px, 0px) scale(1) rotate(0deg)' }, { transform: `${this.flight(to, from)} rotate(-90deg)` }], { duration: 440, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
     const end = () => {
       finish();
       // снимаем «замороженные» конечные кадры уже спрятанного слоя, иначе при следующем открытии всё останется прозрачным
@@ -728,43 +701,20 @@ export class FullScreen {
     }
   }
 
-  /** Обложки предыдущего и следующего трека за текущей (для веера и Cover Flow) */
-  setNeighbors() {
-    const { player } = this.d;
-    const q = player.queue || [];
-    const cur = player.current;
-    const set = (sel, t) => {
-      const nb = this.$(sel);
-      const img = this.$(`${sel} img`);
-      if (!nb || !img) return;
-      // у соседа без обложки — его шаблон, а не обложка текущего трека
-      const src = t ? coverOf(t) : '';
-      if (t) img.dataset.tpl = templateCover(t.id);
-      img.src = src;
-      nb.dataset.on = src ? '1' : '';
-    };
-    set('.fs-nb-prev', q[player.index - 1]);
-    set('.fs-nb-next', q[player.index + 1]);
-  }
-
-  /** Смена трека при открытом экране: новая обложка въезжает сбоку с разворота, прошлая уезжает в другую сторону */
+  /** Смена трека при открытом экране: печенька перекатывается в сторону следующего, название поднимается заново */
   coverFlow(dir) {
     const art = this.$('.fs-art');
     if (!art || typeof art.animate !== 'function' || this.closing) return;
     if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const ease = 'cubic-bezier(.2, .8, .2, 1)';
     art.animate([
-      { transform: `translateX(${dir * 34}%) scale(.88) rotateY(${this.tilt() - dir * 55}deg)`, opacity: 0.35 },
-      { transform: `translateX(0%) scale(1) rotateY(${this.tilt()}deg)`, opacity: 1 }
-    ], { duration: 560, easing: ease });
-    // прошлый трек теперь сосед с той стороны, куда уехал: показываем, как он уходит
-    const nb = this.$(dir > 0 ? '.fs-nb-prev' : '.fs-nb-next');
-    if (nb && nb.animate && nb.dataset.on) {
-      nb.animate([
-        { opacity: 0.9, transform: `translateX(0%) scale(1) rotateY(${this.tilt()}deg)` },
-        { opacity: 0, transform: `translateX(${dir * -64}%) scale(.86) rotateY(${dir * 70}deg)` }
-      ], { duration: 560, easing: ease });
-    }
+      { transform: `rotate(${dir * -80}deg) scale(.86)`, opacity: 0.2 },
+      { transform: 'rotate(0deg) scale(1)', opacity: 1 }
+    ], { duration: 640, easing: ease });
+    ['.fs-title', '.fs-artist'].forEach((sel, i) => {
+      const n = this.$(sel);
+      if (n && n.animate) n.animate([{ opacity: 0, transform: `translateY(${dir * 18}px)` }, { opacity: 1, transform: 'translateY(0)' }], { duration: 460, delay: 60 + i * 50, easing: ease, fill: 'backwards' });
+    });
   }
 
   /** Смена трека, паузы, лайка */
@@ -777,6 +727,7 @@ export class FullScreen {
     this.safe(() => {
       $('.fs-play').innerHTML = player.playing ? this.d.icons.pause : this.d.icons.play;
       $('.fs-play').setAttribute('aria-label', player.playing ? 'Пауза' : 'Играть');
+      this.el.classList.toggle('paused', !player.playing);
       const liked = player.liked.has(t.id);
       $('.fs-like').innerHTML = liked ? this.d.icons.heartOn : this.d.icons.heart;
       $('.fs-like').classList.toggle('on', liked);
@@ -800,14 +751,10 @@ export class FullScreen {
       img.dataset.tpl = templateCover(t.id);
       img.src = art;
       img.style.visibility = 'visible';
-      // задник и отражение — та же обложка
-      this.el.querySelectorAll('.fs-back img, .fs-refl img').forEach((i) => {
-        i.dataset.tpl = templateCover(t.id);
-        i.src = art;
-        i.style.visibility = 'visible';
-      });
-      this.setNeighbors();
       if (prevId) this.coverFlow(dir);
+      // откуда играет: волна, плейлист, альбом…
+      const from = player.mode === 'wave' ? 'Моя волна' : player.label || '';
+      $('.fs-from').textContent = from ? `Играет из · ${from}` : 'Сейчас играет';
       $('.fs-title').textContent = t.title || '';
       $('.fs-artist').textContent = (t.artist || '') + (t.album ? ` · ${t.album}` : '');
       this.el.style.setProperty('--fs-bg', backgroundFrom(null));

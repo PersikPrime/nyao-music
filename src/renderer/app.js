@@ -6,7 +6,7 @@ import { Ribbon } from './ribbon.js';
 import { Onboarding } from './onboarding.js';
 import { layoutChoiceHtml } from './layouts.js';
 import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain } from './eq.js';
-import { FullScreen } from './fullscreen.js';
+import { FullScreen, glowFrom, cookiePolygon } from './fullscreen.js';
 import { PRANKS, createPranks, fakeWords } from './pranks.js';
 import { coverOf, templateCover, installImageFallback } from './covers.js';
 import { ACCENTS, paletteFor, applyAccent } from './accent.js';
@@ -97,6 +97,8 @@ function trackBadge(t) {
   return `<span class="badge-sub" title="Spotify сам не играет — звучит копия из другого сервиса">${badge('sp')}<i>→</i>${badge(sub.source)}</span>`;
 }
 const RING = { ya: '#FFD60A', yt: '#FF6A5C', sc: '#FF8A3D', vk: '#5AA9FF', sp: '#1ED760', mix: '#C6B8FF' };
+// кромка «печеньки» для фигур интерфейса (clip-path: var(--cookie))
+document.documentElement.style.setProperty('--cookie', cookiePolygon(10, 0.05));
 function coverHtml(item, cls = '', withBadge = false) {
   const src = item && item.source;
   // станция эфира: логотип прозрачный — под ним цвет станции, а не шаблонный диск
@@ -530,7 +532,7 @@ function likedEntries() {
   const total = (c.ya || 0) + (c.yt || 0) + (c.sc || 0) + (c.vk || 0);
   const all = { id: 'liked', title: 'Мне нравится', source: 'mix', sub: state.lib.counts ? `Все сервисы · ${total}` : 'Все сервисы', count: total };
   if (!state.settings || !state.settings.splitLiked) return [all];
-  const per = SERVICES.filter((x) => state.status[x.id] || c[x.id]).map((x) => ({ id: `liked:${x.id}`, title: `Мне нравится · ${x.id === 'ya' ? 'Яндекс' : x.name}`, source: x.id, sub: `${c[x.id] || 0} треков`, count: c[x.id] || 0 }));
+  const per = SERVICES.filter((x) => state.status[x.id] || c[x.id]).map((x) => ({ id: `liked:${x.id}`, title: `Мне нравится · ${x.id === 'ya' ? 'Яндекс' : x.name}`, source: x.id, sub: `${c[x.id] || 0} ${pl(c[x.id] || 0, 'трек', 'трека', 'треков')}`, count: c[x.id] || 0 }));
   return per.length > 1 ? [all, ...per] : [all];
 }
 function quickTile(q) {
@@ -842,43 +844,59 @@ function renderLibrary() {
   const sel = all ? all.find((p) => p.id === lib.selected) : null;
   const f = (v, label, dot) => `<button class="chip solid ${lib.filter === v ? 'on' : ''}" data-action="lib-filter" data-v="${v}">${dot ? `<span class="d" style="background:${dot}"></span>` : ''}${label}</button>`;
   const heart = (size, src = 'mix') => `<div class="cover" style="background:${(SRC_TINT[src] || SRC_TINT.mix)[0]}">${ICONS.heartOn.replace('width="20" height="20"', `width="${size}" height="${size}" style="color:${(SRC_TINT[src] || SRC_TINT.mix)[1]}"`)}</div>`;
-  view.innerHTML = `<div class="split">
-    <div class="scroll">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+  const kind = (p) => (p.id === 'liked' ? 'Все лайки' : isLiked(p) ? 'Лайки сервиса' : p.source === 'mix' ? 'Микс' : p.source === 'ya' ? 'Плейлист · Яндекс' : p.source === 'sc' ? 'Плейлист · SoundCloud' : p.source === 'vk' ? 'Плейлист · VK' : p.source === 'sp' ? 'Плейлист · Spotify' : 'Плейлист · YouTube Music');
+  const row = (p) => `<button class="lib-row ${p.id === lib.selected ? 'sel' : ''}" data-action="lib-select" data-id="${esc(p.id)}">
+      ${isLiked(p) ? heart('44%', p.source) : coverHtml(p)}
+      <span class="lib-row-meta"><b>${esc(p.title)}</b><span>${isLiked(p) ? esc(p.sub) : esc(p.source === 'ya' ? 'Яндекс' : srcName(p.source)) + (p.count ? ' · ' + p.count : '')}</span></span>
+    </button>`;
+  const artists = state.favArtists.length ? `<div class="lib-list">${state.favArtists.map((x) => `<button class="lib-row" data-action="open-artist" data-ref="${esc((x.refs && (x.refs.ya || x.refs.yt)) || x.ref)}">
+      ${coverHtml({ cover: x.cover, source: String(x.ref).slice(0, 2) }, 'round')}<span class="lib-row-meta"><b>${esc(x.name)}</b><span>${x.at ? 'любимый исполнитель' : 'из Яндекса'}</span></span></button>`).join('')}</div>`
+    : '<div class="empty">Здесь будут любимые исполнители. Открой исполнителя и нажми ♥ рядом с «Слушать» — его треки станут чаще попадать в «Мою волну».</div>';
+  const tr = lib.tracks;
+  const count = (src) => (tr.some((t) => t.source === src) ? `<span class="dotsrc ${src}"></span>${tr.filter((t) => t.source === src).length}` : '');
+  // цвет фигуры в углу: у лайков — цвет сервиса, у плейлиста — из обложки (подставится, когда посчитается)
+  const tint = sel ? (isLiked(sel) ? (SRC_TINT[sel.source] || SRC_TINT.mix)[1] : lib.glow && lib.glow.id === sel.id ? lib.glow.color : 'var(--accent)') : 'var(--accent)';
+  view.innerHTML = `<div class="lib">
+    <div class="lib-side">
+      <div class="lib-side-head">
         <h1 class="page">Медиатека</h1>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <div class="pill-seg" role="radiogroup" aria-label="Как показывать «Мне нравится»">${[[true, 'Лайки по сервисам'], [false, 'Одним списком']].map(([v, l]) => `<button role="radio" aria-checked="${!!state.settings.splitLiked === v}" class="${!!state.settings.splitLiked === v ? 'on' : ''}" data-action="split-liked" data-v="${v ? 1 : 0}">${l}</button>`).join('')}</div>
-          <button class="btn" data-action="mix-builder">${ICONS.plus}Новый микс</button>
-        </div>
+        <button class="icbtn" data-action="mix-builder" aria-label="Новый микс" title="Новый микс">${ICONS.plus}</button>
       </div>
-      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс Музыка', 'var(--ya)')}${f('yt', 'YouTube Music', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${state.status.vk ? f('vk', 'VK', 'var(--vk)') : ''}${state.status.sp || c.sp ? f('sp', 'Spotify', 'var(--sp)') : ''}${f('mix', 'Мои миксы', 'var(--accent)')}${f('artists', `Исполнители${state.favArtists.length ? ' · ' + state.favArtists.length : ''}`)}</div>
-      ${lib.filter === 'artists' ? (state.favArtists.length ? `<div class="tiles">${state.favArtists.map((x) => `<button class="tile fav-tile" data-action="open-artist" data-ref="${esc((x.refs && (x.refs.ya || x.refs.yt)) || x.ref)}">
-          ${coverHtml({ cover: x.cover, source: String(x.ref).slice(0, 2) }, 'round')}<div class="t">${esc(x.name)}</div><div class="s">${x.at ? 'любимый исполнитель' : 'из Яндекса'}</div></button>`).join('')}</div>`
-        : '<div class="empty">Здесь будут любимые исполнители. Открой исполнителя и нажми ♥ рядом с «Слушать» — его треки станут чаще попадать в «Мою волну».</div>') : shown ? `<div class="tiles">${shown.map((p) => `<button class="tile ${p.id === lib.selected ? 'sel' : ''}" data-action="lib-select" data-id="${esc(p.id)}">
-          ${isLiked(p) ? heart('40%', p.source) : coverHtml(p, '', true)}
-          <div class="t">${esc(p.title)}</div><div class="s">${isLiked(p) ? esc(p.sub) : esc(p.source === 'ya' ? 'Яндекс' : srcName(p.source)) + (p.count ? ' · ' + p.count : '')}</div>
-        </button>`).join('')}</div>` : '<div class="tiles">' + '<div class="skeleton" style="aspect-ratio:1"></div>'.repeat(8) + '</div>'}
+      <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс', 'var(--ya)')}${f('yt', 'YouTube', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${state.status.vk ? f('vk', 'VK', 'var(--vk)') : ''}${state.status.sp || c.sp ? f('sp', 'Spotify', 'var(--sp)') : ''}${f('mix', 'Миксы', 'var(--accent)')}${f('artists', `Исполнители${state.favArtists.length ? ' · ' + state.favArtists.length : ''}`)}</div>
+      <div class="lib-side-scroll">
+        ${lib.filter === 'artists' ? artists : shown ? (shown.length ? `<div class="lib-list">${shown.map(row).join('')}</div>` : '<div class="empty">В этом сервисе плейлистов нет</div>') : `<div class="lib-list">${'<div class="lib-row"><span class="sk" style="width:48px;height:48px;border-radius:14px"></span><span class="lib-row-meta"><span class="sk" style="width:140px;height:13px;border-radius:6px"></span><span class="sk" style="width:80px;height:11px;border-radius:6px"></span></span></div>'.repeat(6)}</div>`}
+        <div class="pill-seg lib-split" role="radiogroup" aria-label="Как показывать «Мне нравится»">${[[true, 'Лайки по сервисам'], [false, 'Одним списком']].map(([v, l]) => `<button role="radio" aria-checked="${!!state.settings.splitLiked === v}" class="${!!state.settings.splitLiked === v ? 'on' : ''}" data-action="split-liked" data-v="${v ? 1 : 0}">${l}</button>`).join('')}</div>
+      </div>
     </div>
-    <aside class="aside">
-      ${sel ? `<div class="aside-head">
-        <div class="pl-head">
-          ${isLiked(sel) ? heart('50', sel.source) : coverHtml(sel)}
-          <div style="min-width:0"><span class="muted" style="font-size:12px">${sel.id === 'liked' ? 'Общий список лайков' : isLiked(sel) ? 'Лайки одного сервиса' : sel.source === 'mix' ? 'Смешанный плейлист' : sel.source === 'ya' ? 'Плейлист Яндекса' : sel.source === 'sc' ? 'Плейлист SoundCloud' : sel.source === 'vk' ? 'Плейлист VK' : sel.source === 'sp' ? 'Плейлист Spotify' : 'Плейлист YouTube Music'}</span>
+    <section class="lib-main" style="--lib-glow:${tint}">
+      ${sel ? `<div class="lib-cookie" aria-hidden="true"></div>
+      <div class="lib-main-scroll">
+        <header class="lib-head" data-pl="${esc(sel.id)}">
+          <span class="lib-eyebrow">${esc(kind(sel))}${tr ? ` · ${tr.length} ${pl(tr.length, 'трек', 'трека', 'треков')} · ${fmt(tr.reduce((a, t) => a + (t.duration || 0), 0))}` : ''}</span>
           <h2>${esc(sel.title)}</h2>
-          <span class="muted" style="font-size:12px">${lib.tracks ? `${lib.tracks.length} треков · ${fmt(lib.tracks.reduce((a, t) => a + (t.duration || 0), 0))}` : 'Загружаю…'}</span></div>
-        </div>
-        <div class="row-actions">
-          <button class="btn primary" data-action="pl-play" ${lib.tracks && lib.tracks.length ? '' : 'disabled'}>${ICONS.play}Слушать</button>
-          <button class="icbtn" data-action="pl-shuffle" aria-label="Перемешать">${ICONS.shuffle}</button>
-          <span class="grow"></span>
-          ${lib.tracks ? `<span class="counts"><span class="dotsrc ya"></span>${lib.tracks.filter((t) => t.source === 'ya').length}<span class="dotsrc yt" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'yt').length}${lib.tracks.some((t) => t.source === 'sc') ? `<span class="dotsrc sc" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sc').length}` : ''}${lib.tracks.some((t) => t.source === 'vk') ? `<span class="dotsrc vk" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'vk').length}` : ''}${lib.tracks.some((t) => t.source === 'sp') ? `<span class="dotsrc sp" style="margin-left:6px"></span>${lib.tracks.filter((t) => t.source === 'sp').length}` : ''}</span>` : ''}
-          ${lib.tracks && lib.tracks.length ? `<button class="icbtn" data-action="pl-transfer" aria-label="Перенести в другой сервис" title="Перенести в другой сервис">${ICONS.transfer}</button>` : ''}
-          ${sel.source === 'mix' && !isLiked(sel) ? `<button class="icbtn" data-action="del-mix" aria-label="Удалить микс">${ICONS.ban}</button>` : ''}
-        </div>
-      </div>
-      <div class="aside-scroll">${lib.tracks ? (lib.tracks.length ? tracksHtml(lib.tracks, 'lib', { num: false }) : `<div class="empty">${isLiked(sel) ? 'В этом сервисе лайков пока нет.' : sel.source === 'mix' ? 'Микс пустой. Добавляй треки через «⋯» в любом списке.' : 'Здесь пока пусто'}</div>`) : '<div class="skeleton" style="height:300px;margin:8px"></div>'}</div>` : '<div class="empty">Выбери плейлист</div>'}
-    </aside>
+          <div class="row-actions">
+            <button class="btn primary lib-play" data-action="pl-play" ${tr && tr.length ? '' : 'disabled'}>${ICONS.play}Слушать</button>
+            <button class="btn lib-shuffle" data-action="pl-shuffle" ${tr && tr.length ? '' : 'disabled'}>${ICONS.shuffle}Перемешать</button>
+            ${tr && tr.length ? `<button class="icbtn" data-action="pl-transfer" aria-label="Перенести в другой сервис" title="Перенести в другой сервис">${ICONS.transfer}</button>` : ''}
+            ${sel.source === 'mix' && !isLiked(sel) ? `<button class="icbtn" data-action="del-mix" aria-label="Удалить микс" title="Удалить микс">${ICONS.ban}</button>` : ''}
+            <span class="grow"></span>
+            ${tr ? `<span class="counts">${['ya', 'yt', 'sc', 'vk', 'sp'].map(count).join('')}</span>` : ''}
+          </div>
+        </header>
+        ${tr ? (tr.length ? tracksHtml(tr, 'lib') : `<div class="empty">${isLiked(sel) ? 'В этом сервисе лайков пока нет.' : sel.source === 'mix' ? 'Микс пустой. Добавляй треки через «⋯» в любом списке.' : 'Здесь пока пусто'}</div>`) : `<div class="tracks">${'<div class="trow"><span class="sk" style="width:44px;height:44px;border-radius:10px"></span><span class="sk" style="width:38%;height:13px;border-radius:6px"></span></div>'.repeat(7)}</div>`}
+      </div>` : '<div class="empty lib-empty">Выбери плейлист слева</div>'}
+    </section>
   </div>`;
+  // цвет фигуры из обложки плейлиста: считаем один раз на плейлист и подставляем без перерисовки
+  if (sel && !isLiked(sel) && sel.cover && !(lib.glow && lib.glow.id === sel.id)) {
+    const id = sel.id;
+    Promise.resolve(api.coverColor(sel.cover)).catch(() => null).then((rgb) => {
+      if (!rgb || state.lib.selected !== id) return;
+      state.lib.glow = { id, color: glowFrom(rgb) };
+      const main = $('.lib-main', view);
+      if (main && state.route === 'library') main.style.setProperty('--lib-glow', state.lib.glow.color);
+    });
+  }
 }
 
 function renderSearch() {
