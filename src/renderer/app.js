@@ -855,8 +855,11 @@ function libraryCounts() {
   return { all: l.length + 1, ya: l.filter((p) => p.source === 'ya').length, yt: l.filter((p) => p.source === 'yt').length, sc: l.filter((p) => p.source === 'sc').length, vk: l.filter((p) => p.source === 'vk').length, sp: l.filter((p) => p.source === 'sp').length, mix: l.filter((p) => p.source === 'mix').length };
 }
 
-// фигура вкатывается только при выборе другого плейлиста, а не на каждую перерисовку (догрузились треки, цвет)
+// фигура вкатывается при выборе другого плейлиста. Медиатека перерисовывается несколько раз подряд (догрузились
+// треки, цвет), и каждый раз фигура — новый элемент: продолжаем вкатывание с того места, где оно было, а не заново
 let libCookieShown = null;
+let libCookieAt = 0;
+const LIB_COOKIE_MS = 700;
 function renderLibrary() {
   const lib = state.lib;
   const c = libraryCounts();
@@ -865,6 +868,9 @@ function renderLibrary() {
   const isLiked = (p) => p.id === 'liked' || p.id.startsWith('liked:');
   const shown = all ? all.filter((p) => lib.filter === 'all' || p.source === lib.filter || (p.id === 'liked' && lib.filter === 'mix')) : null;
   const sel = all ? all.find((p) => p.id === lib.selected) : null;
+  if (sel && sel.id !== libCookieShown) { libCookieShown = sel.id; libCookieAt = performance.now(); }
+  const cookieAge = performance.now() - libCookieAt;
+  const cookieIn = sel && cookieAge < LIB_COOKIE_MS ? Math.round(cookieAge) + 1 : 0; // 1 — «только что», 0 — уже на месте
   const f = (v, label, dot) => `<button class="chip solid ${lib.filter === v ? 'on' : ''}" data-action="lib-filter" data-v="${v}">${dot ? `<span class="d" style="background:${dot}"></span>` : ''}${label}</button>`;
   const heart = (size, src = 'mix') => `<div class="cover" style="background:${(SRC_TINT[src] || SRC_TINT.mix)[0]}">${ICONS.heartOn.replace('width="20" height="20"', `width="${size}" height="${size}" style="color:${(SRC_TINT[src] || SRC_TINT.mix)[1]}"`)}</div>`;
   const kind = (p) => (p.id === 'liked' ? 'Все лайки' : isLiked(p) ? 'Лайки сервиса' : p.source === 'mix' ? 'Микс' : p.source === 'ya' ? 'Плейлист · Яндекс' : p.source === 'sc' ? 'Плейлист · SoundCloud' : p.source === 'vk' ? 'Плейлист · VK' : p.source === 'sp' ? 'Плейлист · Spotify' : 'Плейлист · YouTube Music');
@@ -892,7 +898,7 @@ function renderLibrary() {
       </div>
     </div>
     <section class="lib-main" style="--lib-glow:${tint}">
-      ${sel ? `<div class="lib-cookie ${sel.id !== libCookieShown ? 'in' : ''}" aria-hidden="true"></div>
+      ${sel ? `<div class="lib-cookie ${cookieIn ? 'in' : ''}" ${cookieIn ? `style="animation-delay:-${cookieIn - 1}ms"` : ''} aria-hidden="true"></div>
       <div class="lib-main-scroll">
         <header class="lib-head" data-pl="${esc(sel.id)}">
           <span class="lib-eyebrow">${esc(kind(sel))}${tr ? ` · ${tr.length} ${pl(tr.length, 'трек', 'трека', 'треков')} · ${fmt(tr.reduce((a, t) => a + (t.duration || 0), 0))}` : ''}</span>
@@ -910,7 +916,6 @@ function renderLibrary() {
       </div>` : '<div class="empty lib-empty">Выбери плейлист слева</div>'}
     </section>
   </div>`;
-  libCookieShown = sel ? sel.id : null;
   // фигура укатывается, пока листаешь к трекам: 0 — на месте, 1 — ушла (полностью к 280 px прокрутки)
   const libScroll = $('.lib-main-scroll', view);
   if (libScroll) {
