@@ -1,0 +1,15 @@
+{
+  "id": "nyao.lastfm",
+  "name": "Last.fm",
+  "version": "1.0",
+  "nyao": 1,
+  "author": "Nyao",
+  "description": "Отмечает в твоём профиле всё, что играет, — со всех сервисов сразу.",
+  "icon": "scrobble",
+  "color": "#FF8FB1",
+  "native": "lastfm",
+  "permissions": ["track", "net:ws.audioscrobbler.com"],
+  "settings": [
+    { "key": "nowPlaying", "type": "toggle", "label": "Показывать «Сейчас играет»", "default": true }
+  ]
+}

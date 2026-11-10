@@ -26,6 +26,8 @@ import { Catalog } from './catalog.js';
 import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
 import { NyaoCloud, API_BASE } from './cloud.js';
 import { LastFm } from './lastfm.js';
+import { AddonHost, ADDON_SCHEME } from './addons/host.js';
+import { AddonPages } from './addons/pages.js';
 import { Radio } from './radio.js';
 import { LiveRadio } from './live-radio.js';
 import { LiveEvents } from './live.js';
@@ -127,7 +129,9 @@ app.on('open-url', (e, url) => {
 }
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'nyao', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } }
+  { scheme: 'nyao', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } },
+  // страницы дополнений в песочнице (см. addons/host.js): отдельный «сайт» на каждое дополнение
+  { scheme: ADDON_SCHEME, privileges: { standard: true, secure: true } }
 ]);
 
 const fetchFn = (url, opts) => net.fetch(url, opts);
@@ -169,7 +173,7 @@ const up = (id) => !svcStatus.outages.includes(id) && !netBlocked.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
 setInterval(probeServices, 60_000).unref?.();
 setTimeout(probeServices, 8_000).unref?.();
-let ya, yt, sc, vk, sp, spEngine, wave, streams, catalog, win, cloud, lastfm, radio, live;
+let ya, yt, sc, vk, sp, spEngine, wave, streams, catalog, win, cloud, lastfm, radio, live, addons;
 let spExperiment, nativePermission = false;
 const onAir = new LiveRadio();
 let onAirError = '';
@@ -467,6 +471,23 @@ function initProviders() {
     log: (m) => console.log(m)
   });
   setInterval(() => lastfm.flush().catch(() => {}), 10 * 60_000).unref?.();
+  // Дополнения: встроенные лежат в src/addons; папка для своих — только в Nyao Music Red, пока API обкатывается
+  const addonDev = readVersion().channel === 'nightly' ? path.join(app.getPath('userData'), 'addons-dev') : null;
+  addons = new AddonHost({
+    builtinDir: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'addons'),
+    devDir: addonDev,
+    dataDir: path.join(app.getPath('userData'), 'addons-data'),
+    settings,
+    pages: new AddonPages({ log: (m) => console.log('[nyao]', m) }),
+    command: (cmd, value) => send('control', { cmd, value }),
+    lyrics: (track) => (controlLyrics ? controlLyrics(track) : null),
+    history: () => cloud.history(),
+    toast: (payload) => send('addons:toast', payload),
+    changed: () => send('addons:changed'),
+    natives: { lastfm: { status: () => lastfm.status() } },
+    log: (m) => console.log('[nyao]', m),
+  });
+  addons.scan().catch((e) => console.warn('[nyao] дополнения:', safeDiagnostic(e.message)));
 
   radio = new Radio({ ya, yt, sc, vk, isDown: (id) => !up(id) });
 
@@ -875,7 +896,7 @@ function registerIpc() {
     return info.device || '';
   });
   handle('cloud:play', (play) => {
-    lastfm.scrobble({ track: play && play.track, listened: (play && play.listened) || 0 });
+    if (addons.native('lastfm').enabled) lastfm.scrobble({ track: play && play.track, listened: (play && play.listened) || 0 });
     return cloud.recordPlay(play);
   });
   handle('cloud:now', (info) => {
@@ -883,7 +904,8 @@ function registerIpc() {
       nowInfo = { title: (info.track && info.track.title) || '', artist: (info.track && info.track.artist) || '', playing: !!info.playing };
       updateTray();
     }
-    if (info && info.playing && info.track) lastfm.nowPlaying(info.track).catch(() => {});
+    const fm = addons.native('lastfm');
+    if (fm.enabled && fm.values.nowPlaying !== false && info && info.playing && info.track) lastfm.nowPlaying(info.track).catch(() => {});
     return cloud.setNow(info || {}).catch(() => {});
   });
   handle('track:details', async (track) => {
@@ -904,6 +926,20 @@ function registerIpc() {
   handle('lastfm:connect', () => lastfm.connect());
   handle('lastfm:cancel', () => lastfm.cancel());
   handle('lastfm:disconnect', () => lastfm.disconnect());
+
+  // ---------- Дополнения ----------
+  handle('addons:list', () => ({ items: addons.list(), dev: !!addons.devDir }));
+  handle('addons:toggle', (id, on, opts) => addons.toggle(String(id), !!on, { grant: !!(opts && opts.grant) }));
+  handle('addons:setValue', (id, key, value) => addons.setValue(String(id), String(key), value));
+  handle('addons:logs', (id) => addons.logs(String(id)));
+  handle('addons:state', (st) => addons.setState(st));
+  handle('addons:menuClick', (id, itemId, track) => addons.menuClick(String(id), String(itemId), track));
+  handle('addons:rescan', () => addons.scan());
+  handle('addons:openDev', () => {
+    if (!addons.devDir) throw new Error('Папка для своих дополнений есть только в Nyao Music Red');
+    fs.mkdirSync(addons.devDir, { recursive: true });
+    return shell.openPath(addons.devDir);
+  });
   // ---------- Nyao Connect, «Слушать вместе», итоги ----------
   const needCloud = () => {
     if (!cloud.loggedIn) throw new Error('Нужен вход в аккаунт Nyao (настройки → Аккаунт Nyao)');
@@ -1405,6 +1441,8 @@ function createWindow() {
       win.hide();
     }
   });
+  // невидимые окна дополнений не должны держать приложение открытым
+  win.on('closed', () => addons?.stopAll());
   setupTray();
   applyShortcuts();
   win.webContents.once('did-finish-load', () => pollStatus());
@@ -1570,7 +1608,7 @@ function applyShortcuts() {
     }
   }
 }
-app.on('will-quit', () => { globalShortcut.unregisterAll(); controlSrv?.stop(); });
+app.on('will-quit', () => { globalShortcut.unregisterAll(); controlSrv?.stop(); addons?.stopAll(); });
 app.on('before-quit', () => { quitting = true; spExperiment?.nativeEngine.release(); });
 
 app.on('window-all-closed', () => {

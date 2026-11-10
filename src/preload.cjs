@@ -44,6 +44,18 @@ contextBridge.exposeInMainWorld('nyao', {
   trackDetails: (track) => call('track:details', track),
   onControl: (cb) => ipcRenderer.on('control', (_e, cmd) => cb(cmd)),
   control: { state: (s) => call('control:state', s), info: () => call('control:info') },
+  addons: {
+    list: () => call('addons:list'),
+    toggle: (id, on, opts) => call('addons:toggle', id, on, opts),
+    setValue: (id, key, value) => call('addons:setValue', id, key, value),
+    logs: (id) => call('addons:logs', id),
+    state: (s) => call('addons:state', s),
+    menuClick: (id, itemId, track) => call('addons:menuClick', id, itemId, track),
+    rescan: () => call('addons:rescan'),
+    openDev: () => call('addons:openDev'),
+    onChanged: (cb) => ipcRenderer.on('addons:changed', () => cb()),
+    onToast: (cb) => on('addons:toast', cb)
+  },
   onair: {
     stations: () => call('onair:stations'),
     genres: () => call('onair:genres'),

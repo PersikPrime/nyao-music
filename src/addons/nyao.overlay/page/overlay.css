@@ -1,0 +1,27 @@
+/* Фон прозрачный: OBS накладывает страницу поверх картинки стрима */
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font-family: 'Onest', 'Segoe UI', system-ui, sans-serif; color: #F2F2F3; }
+.np { position: fixed; display: flex; align-items: center; gap: 18px; max-width: min(640px, calc(100vw - 48px)); padding: 14px 26px 14px 14px; border-radius: 999px; background: rgba(8, 8, 10, .86); box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+  opacity: 0; transform: translateY(16px) scale(.96); transition: opacity .45s ease, transform .6s cubic-bezier(.2, .9, .25, 1.15); }
+.np.on { opacity: 1; transform: none; }
+.np.bl { left: 24px; bottom: 24px; } .np.br { right: 24px; bottom: 24px; } .np.tl { left: 24px; top: 24px; } .np.tr { right: 24px; top: 24px; }
+.art { width: 84px; height: 84px; flex: none; background: #1C1C21; animation: roll 60s linear infinite; }
+.art img { width: 100%; height: 100%; object-fit: cover; display: block; animation: roll 60s linear infinite reverse; transition: opacity .35s; }
+.np.swap .art { transform: rotate(-50deg) scale(.86); }
+.np.swap .art img { opacity: 0; }
+.np.paused .art, .np.paused .art img { animation-play-state: paused; }
+@keyframes roll { to { rotate: 360deg; } }
+.meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; transition: opacity .3s, transform .4s; }
+.np.swap .meta { opacity: 0; transform: translateY(8px); }
+.eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .12em; color: #7CE0C3; }
+.title { font-size: 22px; font-weight: 700; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.artist { font-size: 15px; color: #C9C9CE; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar { margin-top: 7px; height: 4px; width: 240px; max-width: 100%; border-radius: 4px; background: rgba(255, 255, 255, .16); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; border-radius: 4px; background: #F2F2F3; }
+.np.line { padding: 10px 22px 10px 10px; gap: 12px; }
+.np.line .art { width: 44px; height: 44px; }
+.np.line .eyebrow, .np.line .bar { display: none; }
+.np.line .meta { flex-direction: row; align-items: baseline; gap: 10px; }
+.np.line .title { font-size: 17px; }
+.np.cookie { padding: 0; background: none; box-shadow: none; }
+.np.cookie .art { width: 180px; height: 180px; }
+.np.cookie .meta { display: none; }

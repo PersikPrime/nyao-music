@@ -435,6 +435,15 @@ function renderAccounts() {
   renderRail();
 }
 
+/** Новая страница въезжает: содержимое поднимается, строки и плитки появляются по очереди (см. «Движение» в styles.css) */
+let enterTimer;
+function pageEnter() {
+  view.classList.remove('enter');
+  void view.offsetWidth; // перезапуск анимации
+  view.classList.add('enter');
+  clearTimeout(enterTimer);
+  enterTimer = setTimeout(() => view.classList.remove('enter'), 900);
+}
 function go(route, params = {}, push = true) {
   // «Сейчас играет» больше не вкладка (0.7.43): старые ссылки открывают выезжающую панель
   if (route === 'player') return openDrawer('info');
@@ -451,6 +460,7 @@ function go(route, params = {}, push = true) {
   renderRail();
   view.scrollTop = 0;
   RENDER[route]();
+  pageEnter();
   if (route === 'home') loadHome();
   if (route === 'library') loadLibrary();
   if (route === 'artist') loadArtist(params.ref);
@@ -1532,6 +1542,7 @@ const RI = {
   palette: 'M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.7-.8 1.7-1.6 0-1-.9-1.5-.9-2.4 0-.9.7-1.5 1.6-1.5h2c2 0 3.6-1.6 3.6-3.6 0-4.4-3.6-7.9-8-7.9M7.5 12a1 1 0 1 0 0 .1M10 8a1 1 0 1 0 0 .1M14.5 8a1 1 0 1 0 0 .1',
   update: 'M20 12a8 8 0 1 1-2.3-5.7M20 4.5v4h-4',
   info: 'M12 21a9 9 0 1 0 0-18a9 9 0 1 0 0 18M12 11v5M12 7.8v.2',
+  puzzle: 'M9.5 4.5a2 2 0 0 1 4 0V6H18v4.5h1.5a2 2 0 0 1 0 4H18V19h-4.5v-1.5a2 2 0 0 0-4 0V19H5v-4.5h1.5a2 2 0 0 0 0-4H5V6h4.5z',
   chevron: 'M9.5 6l6 6-6 6'
 };
 function rowIcon(d) {
@@ -1551,7 +1562,7 @@ function profileTabs(active) {
 }
 const SECTIONS = {
   account: 'Аккаунт Nyao', sound: 'Звук и воспроизведение', lyrics: 'Текст песни', dev: 'Разработчик', keys: 'Управление и окно', view: 'Вид приложения',
-  lastfm: 'Last.fm', discord: 'Discord', updates: 'Обновления', about: 'О приложении', wave: 'Моя волна'
+  lastfm: 'Last.fm', addons: 'Дополнения', discord: 'Discord', updates: 'Обновления', about: 'О приложении', wave: 'Моя волна'
 };
 function sectionTitle(sec) {
   if (sec === 'svc:sp-native') return 'Spotify (librespot)';
@@ -1598,7 +1609,7 @@ function renderSettings() {
     ])}
     ${sgroup('Сервисы', [...SERVICES.map((x) => srow({ lead: svcDot(x), title: x.name, value: state.status[x.id] ? 'подключено' : 'войти', ok: !!state.status[x.id], sec: 'svc:' + x.id })), ...(nativeVisible() ? [srow({ lead: svcDot(SERVICES.find(x => x.id === 'sp')), title: 'Spotify (librespot)', value: state.spotify.native.active ? 'используется' : 'эксперимент', ok: state.spotify.native.active, sec: 'svc:sp-native' })] : [])])}
     ${sgroup('Интеграции', [
-      srow({ lead: '<span class="dot" style="background:#D51007;color:#fff">fm</span>', title: 'Last.fm', value: lastfmState.connected ? lastfmState.name || 'подключено' : lastfmState.configured ? 'подключить' : 'выключен', ok: lastfmState.connected, sec: 'lastfm' }),
+      srow({ icon: RI.puzzle, title: 'Дополнения', value: addonsOn() ? `включено ${addonsOn()}` : 'Last.fm, оверлей для OBS', ok: addonsOn() > 0, sec: 'addons' }),
       srow({ lead: '<span class="dot" style="background:#5865F2;color:#fff">D</span>', title: 'Статус в Discord', value: state.settings.discordRpc ? 'включён' : 'выключен', ok: !!state.settings.discordRpc, sec: 'discord' })
     ])}
     ${isDev() ? sgroup('Разработчик', [srow({ icon: RI.dev, title: 'Разработчик', value: 'тесты и диагностика', sec: 'dev' })]) : ''}
@@ -1611,6 +1622,8 @@ function renderSettings() {
 }
 
 function renderSettingsSection(sec) {
+  if (sec === 'lastfm') { state.addonSel = 'nyao.lastfm'; sec = 'addons'; }
+  if (sec === 'addons') return renderAddons();
   let body = '';
   if (sec === 'account') body = nyaoCardHtml();
   else if (sec === 'sound') body = soundCardHtml() + eqCardHtml();
@@ -1679,6 +1692,126 @@ function controlCardHtml() {
     <div class="pref-row"><span><b>Прятать кнопки в полноэкранном режиме</b><span class="hint">Если мышь не двигается 3 секунды, кнопки исчезают и остаются обложка и текст</span></span>
       <button class="switch ${s.fsAutoHide ? 'on' : ''}" role="switch" aria-checked="${!!s.fsAutoHide}" aria-label="Прятать кнопки в полноэкранном режиме" data-action="toggle-fshide"><span></span></button></div>
   </section>`;
+}
+
+// ---------- Дополнения ----------
+// Список слева, карточка справа. Права каждого дополнения видны до включения; сторонние включаются только после подтверждения.
+const ADDON_GLYPHS = {
+  scrobble: 'M12 3.5a8.5 8.5 0 1 0 8.5 8.5M12 9.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5M15 5.5l2 2 3.5-4',
+  overlay: 'M3.5 5.5h17v13h-17zM7 14.5h6M7 11.5h3',
+  puzzle: RI.puzzle,
+  music: 'M9 18V6l10-2v12M6.5 15.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5M16.5 13.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5',
+  globe: 'M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 1 0 0-17M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17',
+  lock: 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z',
+  control: 'M8 6.5v11l9-5.5z',
+  lyrics: RI.lyrics,
+  history: 'M12 6a7 7 0 1 0 7 7M12 9.5V13l2.5 2M4 5v4h4',
+  menu: 'M5 7h14M5 12h14M5 17h9',
+  bell: 'M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'
+};
+const PERM_GLYPH = { track: 'music', control: 'control', lyrics: 'lyrics', history: 'history', 'ui.trackMenu': 'menu', 'ui.toast': 'bell', page: 'link' };
+state.addons = { items: [], dev: false, loaded: false };
+const addonsOn = () => state.addons.items.filter((a) => a.enabled && a.status !== 'error').length;
+const addonGlyph = (name, size = 24) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ADDON_GLYPHS[name] || ADDON_GLYPHS.puzzle}"/></svg>`;
+async function loadAddons() {
+  if (!api.addons) return;
+  try {
+    const r = await api.addons.list();
+    state.addons = { items: (r && r.items) || [], dev: !!(r && r.dev), loaded: true };
+  } catch { /* нет дополнений — раздел просто пуст */ }
+  if (state.route && state.params && (state.params.section === 'addons' || state.params.section === 'lastfm')) renderAddons(true);
+  pushControl();
+}
+function addonStatusLine(a) {
+  if (a.status === 'error') return a.error || 'не читается';
+  if (a.status === 'crashed') return 'упало трижды — остановлено';
+  if (a.status === 'slow') return 'не отвечает';
+  if (a.status === 'needs-grant' || (a.enabled && a.needs.length)) return 'просит новый доступ';
+  if (a.native === 'lastfm') return !lastfmState.configured ? 'в этой сборке выключено' : lastfmState.connected ? (a.enabled ? `скробблинг · ${lastfmState.name || ''}` : 'выключено') : 'аккаунт не подключён';
+  return a.enabled ? 'включено' : (a.description || '').split(':')[0].split('.')[0];
+}
+function addonDetailHtml(a) {
+  if (!a) return '<div class="ad-empty"><b>Дополнений нет</b><span class="hint">Встроенные появятся после перезапуска.</span></div>';
+  if (a.status === 'error') return `<div class="ad-head"><span class="ad-eyebrow">СВОЁ · НЕ ЗАПУСТИТСЯ</span><h2>${esc(a.name)}</h2><p>${esc(a.error)}</p></div>
+    <div class="row-actions"><button class="btn" data-action="addon-rescan">Проверить снова</button><button class="btn" data-action="addon-dev-open">Открыть папку</button></div>`;
+  const bad = a.status === 'crashed' || a.status === 'slow';
+  const needs = a.enabled && a.needs.length > 0;
+  const local = a.permissions.filter((p) => !p.net);
+  const net = a.permissions.filter((p) => p.net);
+  const permRow = (p) => `<div class="ad-perm ${needs && a.needs.includes(p.key) ? 'new' : ''}">${addonGlyph(p.net ? 'globe' : PERM_GLYPH[p.key], 20)}<span class="ad-perm-t"><b>${esc(p.title)}</b><span>${esc(p.hint)}</span></span><span class="ad-pill ${p.net ? 'net' : 'local'}">${p.net ? 'уходит в сеть' : 'на устройстве'}</span></div>`;
+  const setRow = (s) => s.type === 'toggle'
+    ? `<div class="ad-set"><span>${esc(s.label)}</span><button class="switch ${a.values[s.key] ? 'on' : ''}" role="switch" aria-checked="${!!a.values[s.key]}" aria-label="${esc(s.label)}" data-action="addon-val" data-id="${esc(a.id)}" data-k="${esc(s.key)}" data-v="${a.values[s.key] ? '' : '1'}" data-t="toggle"><span></span></button></div>`
+    : `<div class="ad-set col"><span>${esc(s.label)}</span><div class="chips">${s.options.map((o) => `<button class="chip ${a.values[s.key] === o.value ? 'on' : ''}" data-action="addon-val" data-id="${esc(a.id)}" data-k="${esc(s.key)}" data-v="${esc(o.value)}">${esc(o.label)}</button>`).join('')}</div></div>`;
+  return `
+    <div class="ad-cookie" style="--ad-c:${esc(a.color)}" aria-hidden="true"><span>${addonGlyph(a.icon, 120)}</span></div>
+    <div class="ad-head">
+      <span class="ad-eyebrow">${a.source === 'builtin' ? 'ОТ NYAO' : 'СВОЁ · ИЗ ПАПКИ'} · ВЕРСИЯ ${esc(a.version)}</span>
+      <h2>${esc(a.name)}</h2>
+      <p>${esc(a.description)}</p>
+    </div>
+    <button class="ad-power ${a.enabled ? 'on' : ''}" role="switch" aria-checked="${a.enabled}" data-action="addon-toggle" data-id="${esc(a.id)}">
+      <span class="ad-power-t"><b>${a.enabled ? 'Включено' : 'Выключено'}</b><span>${esc(bad ? addonStatusLine(a) : needs ? 'Просит больше доступа, чем разрешено, — без него не запустится' : a.native === 'lastfm' ? (lastfmState.connected ? `Аккаунт ${lastfmState.name || 'Last.fm'} подключён` : 'Аккаунт Last.fm не подключён') : a.enabled ? 'Работает, пока открыт Nyao Music' : 'Ничего не делает и ничего не видит')}</span></span>
+      <span class="ad-power-sw"><span></span></span>
+    </button>
+    ${bad ? `<div class="ad-note bad">${addonGlyph('bell', 20)}<span><b>${a.status === 'crashed' ? 'Дополнение остановлено' : 'Дополнение не отвечает'}</b><span>${a.status === 'crashed' ? 'Оно упало три раза за минуту. Плеер это не задело.' : 'Плеер работает как обычно. Можно подождать или перезапустить.'}</span></span><button class="btn" data-action="addon-restart" data-id="${esc(a.id)}">Перезапустить</button></div>` : ''}
+    ${needs ? `<div class="ad-note">${addonGlyph('lock', 20)}<span><b>Нужен новый доступ</b><span>${esc(a.needs.map((k) => (a.permissions.find((p) => p.key === k) || { title: k }).title).join(', '))}</span></span><button class="btn primary" data-action="addon-grant" data-id="${esc(a.id)}">Разрешить</button></div>` : ''}
+    ${a.native === 'lastfm' ? `<div class="ad-group"><div class="ad-fm" id="lastfm-card">${lastfmCardInner()}</div></div>` : ''}
+    ${a.pageUrl ? `<div class="ad-group"><div class="ad-url"><span class="ad-url-t"><b>Адрес для OBS</b><code>${esc(a.pageUrl)}</code></span><button class="btn primary" data-action="addon-copy" data-v="${esc(a.pageUrl)}">Скопировать</button></div>
+      <div class="ad-hint">В OBS: «Источники» → «+» → «Браузер», вставь адрес, размер 800×200. Фон прозрачный. Адрес открывается только с этого компьютера.</div></div>` : ''}
+    ${a.settings.length ? `<div class="ad-group"><div class="ad-label">НАСТРОЙКИ</div><div class="ad-sets">${a.settings.map(setRow).join('')}</div></div>` : ''}
+    <div class="ad-group"><div class="ad-label">ДОСТУП</div>
+      <div class="ad-perms">${local.map(permRow).join('')}${net.map(permRow).join('')}
+        <div class="ad-perm closed">${addonGlyph('lock', 20)}<span class="ad-perm-t"><b>Входы в сервисы</b><span>пароли, куки и ключи Яндекса, VK, Spotify и остальных</span></span><span class="ad-closed">закрыты для всех</span></div>
+      </div>
+    </div>
+    ${state.addonLogs && state.addonLogs.id === a.id ? `<div class="ad-group"><div class="ad-label">ЖУРНАЛ</div><div class="ad-log">${state.addonLogs.lines.length ? state.addonLogs.lines.map((l) => `<div><time>${new Date(l.at).toLocaleTimeString('ru-RU')}</time>${esc(l.text)}</div>`).join('') : '<div>Пока пусто</div>'}</div></div>` : ''}
+    ${a.native ? '' : `<div class="row-actions"><button class="btn" data-action="addon-logs" data-id="${esc(a.id)}">${state.addonLogs && state.addonLogs.id === a.id ? 'Скрыть журнал' : 'Журнал'}</button></div>`}`;
+}
+function renderAddons(keepScroll = false) {
+  const items = state.addons.items;
+  const sel = items.find((a) => a.id === state.addonSel) || items[0];
+  state.addonSel = sel ? sel.id : null;
+  const row = (a) => `<div class="ad-row ${sel && a.id === sel.id ? 'sel' : ''} ${a.enabled ? 'on' : ''}">
+      <button class="ad-row-main" data-action="addon-sel" data-id="${esc(a.id)}">
+        <span class="ad-ic" style="--ad-c:${esc(a.color || '#3A3A40')}">${addonGlyph(a.icon, 22)}</span>
+        <span class="lib-row-meta"><b>${esc(a.name)}</b><span class="${a.status === 'error' || a.status === 'crashed' ? 'bad' : ''}">${esc(addonStatusLine(a))}</span></span>
+      </button>
+      ${a.status === 'error' ? '' : `<button class="switch ${a.enabled ? 'on' : ''}" role="switch" aria-checked="${a.enabled}" aria-label="${esc(a.name)}" data-action="addon-toggle" data-id="${esc(a.id)}"><span></span></button>`}
+    </div>`;
+  const own = items.filter((a) => a.source === 'builtin');
+  const dev = items.filter((a) => a.source !== 'builtin');
+  const old = keepScroll && $('.ad-main-scroll', view);
+  const top = old ? old.scrollTop : 0;
+  view.innerHTML = `<div class="lib addons">
+    <aside class="lib-side">
+      <div class="lib-side-head"><div class="ad-title"><button class="icon-btn" data-action="set-sec" data-sec="" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button><h1 class="page">Дополнения</h1></div></div>
+      <div class="lib-side-scroll">
+        <div class="hint ad-count">Включено ${addonsOn()} из ${items.filter((a) => a.status !== 'error').length}</div>
+        <div class="ad-label">ОТ NYAO</div>
+        <div class="lib-list">${own.map(row).join('')}</div>
+        ${state.addons.dev ? `<div class="ad-label">СВОИ · ТОЛЬКО В RED</div>
+        <div class="lib-list">${dev.map(row).join('') || '<div class="hint ad-devhint">Положи папку с manifest.json и addon.js — дополнение появится здесь. Как писать: docs/addons.md в репозитории.</div>'}</div>
+        <div class="row-actions ad-dev"><button class="btn" data-action="addon-dev-open">Открыть папку</button><button class="btn" data-action="addon-rescan">Перечитать</button></div>` : `<div class="ad-soon"><b>Сторонние — скоро</b><span>Каталог откроется, когда обкатаем API в Nyao Music Red. Каждое дополнение будет проходить проверку.</span></div>`}
+      </div>
+    </aside>
+    <section class="lib-main ad-main"><div class="lib-main-scroll ad-main-scroll"><div class="ad-body">${addonDetailHtml(sel)}</div></div></section>
+  </div>`;
+  if (top) $('.ad-main-scroll', view).scrollTop = top;
+  if (sel && sel.native === 'lastfm') refreshLastfm();
+}
+async function addonToggle(id) {
+  const a = state.addons.items.find((x) => x.id === id);
+  if (!a) return;
+  const on = !a.enabled;
+  let grant = false;
+  if (on && a.source !== 'builtin') {
+    const list = a.permissions.map((p) => (p.net ? `отправлять данные на ${p.title}` : p.title.toLowerCase())).join(', ') || 'ничего особенного';
+    if (!(await askConfirm(`Включить «${a.name}»? Оно сможет: ${list}. Входы в сервисы ему недоступны.`, 'Разрешить и включить'))) return;
+    grant = true;
+  }
+  await api.addons.toggle(id, on, { grant });
+  await loadAddons();
 }
 
 // ---------- Last.fm ----------
@@ -1996,14 +2129,16 @@ function pushRpc() {
 // Состояние для пульта (мод Nyao MinePlay): главный процесс отдаёт его по 127.0.0.1, только когда пульт включён
 let controlTimer;
 function pushControl() {
-  if (!api.control || !state.settings || !state.settings.controlServer) return;
+  const toControl = !!(api.control && state.settings && state.settings.controlServer);
+  const toAddons = !!(api.addons && state.addons.items.some((x) => x.enabled && !x.native));
+  if (!toControl && !toAddons) return;
   clearTimeout(controlTimer);
   controlTimer = setTimeout(() => {
     const t = player.current;
     const a = player.audio;
     const slim = (x) => x && { id: x.id, title: x.title, artist: x.artist, album: x.album || '', source: x.source, srcId: x.srcId, albumId: x.albumId, duration: x.duration || 0, url: x.url, cover: x.cover && /^https?:/.test(x.cover) ? x.cover : null };
     const upcoming = player.live ? [] : player.queue.slice(player.index + 1, player.index + 6).map(slim);
-    api.control.state({
+    const st = {
       playing: player.playing,
       position: a.currentTime || 0,
       duration: Number.isFinite(a.duration) ? a.duration : (t && t.duration) || 0,
@@ -2015,10 +2150,43 @@ function pushControl() {
       mode: player.mode || '',
       track: slim(t),
       next: upcoming,
-    }).catch(() => {});
+    };
+    if (toControl) api.control.state(st).catch(() => {});
+    if (toAddons) api.addons.state(st).catch(() => {});
   }, 150);
 }
 ['track', 'state', 'like', 'queue', 'onair'].forEach((e) => player.addEventListener(e, pushControl));
+
+// ---------- Движение в панели плеера: смена трека, пауза, лайк ----------
+{
+  const calm = matchMedia('(prefers-reduced-motion: reduce)');
+  const SPRING = 'cubic-bezier(.2, .9, .25, 1.25)';
+  const pop = (el, scale, duration = 360) => el && !calm.matches && el.animate([{ transform: 'scale(1)' }, { transform: `scale(${scale})`, offset: 0.35 }, { transform: 'scale(1)' }], { duration, easing: SPRING });
+  let lastTrack = null;
+  let lastPlaying = false;
+  let lastLiked = false;
+  player.addEventListener('track', () => {
+    const id = player.current ? player.current.id : null;
+    if (id === lastTrack) return;
+    const first = lastTrack === null;
+    lastTrack = id;
+    lastLiked = !!(id && player.liked.has(id));
+    if (first || calm.matches) return;
+    // обложка «вкатывается», название и исполнитель поднимаются следом
+    $('#pb-cover').animate([{ transform: 'scale(.72) rotate(-14deg)', opacity: 0.3 }, { transform: 'none', opacity: 1 }], { duration: 560, easing: SPRING });
+    [$('#pb-title'), $('#pb-sub')].forEach((el, i) => el.animate([{ transform: 'translateY(10px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 400, delay: 60 + i * 60, easing: 'cubic-bezier(.2, .8, .2, 1)', fill: 'backwards' }));
+  });
+  player.addEventListener('state', () => {
+    if (player.playing === lastPlaying) return;
+    lastPlaying = player.playing;
+    pop($('#pb-play'), 0.88, 320);
+  });
+  player.addEventListener('like', () => {
+    const liked = !!(player.current && player.liked.has(player.current.id));
+    if (liked && !lastLiked) pop($('#pb-like'), 1.4, 460);
+    lastLiked = liked;
+  });
+}
 player.audio.addEventListener('seeked', pushControl);
 player.audio.addEventListener('volumechange', pushControl);
 
@@ -2236,6 +2404,7 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
     <button data-m="like">${player.liked.has(track.id) ? 'Убрать из «Мне нравится»' : 'В «Мне нравится»'}</button>
     ${track.artistRef ? '<button data-m="artist">Открыть исполнителя</button>' : ''}
     ${track.albumRef ? '<button data-m="album">Открыть альбом</button>' : ''}
+    ${state.addons.items.flatMap((a) => (a.menu || []).map((m) => `<button data-m="addon" data-a="${esc(a.id)}" data-i="${esc(m.id)}" class="menu-addon"><span>${esc(m.title)}</span><i>${esc(a.name)}</i></button>`)).join('')}
     <div class="lbl">Добавить в микс</div>
     ${mixes.map((m) => `<button data-m="mix" data-id="${esc(m.id)}">${esc(m.title)}</button>`).join('')}
     <button data-m="newmix">${ICONS.plus} Новый микс…</button>`;
@@ -2276,6 +2445,8 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
         go('artist', { ref: track.artistRef });
       } else if (b.dataset.m === 'album') {
         go('album', { ref: track.albumRef });
+      } else if (b.dataset.m === 'addon') {
+        await api.addons.menuClick(b.dataset.a, b.dataset.i, track);
       } else if (b.dataset.m === 'mix') {
         await api.mix.add(b.dataset.id, track);
         state.lib.lists = null;
@@ -3027,6 +3198,42 @@ async function handleAction(el, e) {
     case 'artist-kind':
       state.artist.kind = el.dataset.v;
       renderArtist();
+      break;
+    case 'addon-sel':
+      state.addonSel = el.dataset.id;
+      state.addonLogs = null;
+      renderAddons();
+      break;
+    case 'addon-toggle':
+      await addonToggle(el.dataset.id);
+      break;
+    case 'addon-grant':
+      await api.addons.toggle(el.dataset.id, true, { grant: true });
+      await loadAddons();
+      break;
+    case 'addon-restart':
+      await api.addons.toggle(el.dataset.id, true);
+      await loadAddons();
+      break;
+    case 'addon-val':
+      await api.addons.setValue(el.dataset.id, el.dataset.k, el.dataset.t === 'toggle' ? !!el.dataset.v : el.dataset.v);
+      await loadAddons();
+      break;
+    case 'addon-copy':
+      copyText(el.dataset.v);
+      toast('Адрес скопирован — вставь его в OBS');
+      break;
+    case 'addon-logs':
+      state.addonLogs = state.addonLogs && state.addonLogs.id === el.dataset.id ? null : { id: el.dataset.id, lines: (await api.addons.logs(el.dataset.id)).slice().reverse() };
+      renderAddons(true);
+      break;
+    case 'addon-dev-open':
+      await api.addons.openDev();
+      break;
+    case 'addon-rescan':
+      await api.addons.rescan();
+      await loadAddons();
+      toast('Папка перечитана');
       break;
     case 'lastfm-connect':
       lastfmState.waiting = true;
@@ -3961,6 +4168,11 @@ player.addEventListener('state', () => fullscreen.update());
 player.addEventListener('like', () => fullscreen.update());
 player.addEventListener('time', () => fullscreen.tick());
 // команды из трея и глобальных сочетаний
+if (api.addons) {
+  api.addons.onChanged(() => loadAddons());
+  api.addons.onToast((t) => t && toast(`${t.name}: ${t.text}`));
+  loadAddons();
+}
 api.onControl((msg) => {
   // строка — от трея и сочетаний клавиш; объект {cmd, value} — от пульта (мод Nyao MinePlay)
   const cmd = typeof msg === 'string' ? msg : msg && msg.cmd;

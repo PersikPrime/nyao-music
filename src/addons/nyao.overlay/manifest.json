@@ -1,0 +1,28 @@
+{
+  "id": "nyao.overlay",
+  "name": "Оверлей для OBS",
+  "version": "1.0",
+  "nyao": 1,
+  "author": "Nyao",
+  "description": "Плашка «Сейчас играет» для стрима: добавь адрес в OBS как источник «Браузер».",
+  "icon": "overlay",
+  "color": "#7CE0C3",
+  "main": "addon.js",
+  "page": "page",
+  "permissions": ["track", "page"],
+  "settings": [
+    { "key": "style", "type": "select", "label": "Вид плашки", "default": "card", "options": [
+      { "value": "card", "label": "Карточка" },
+      { "value": "line", "label": "Строка" },
+      { "value": "cookie", "label": "Только обложка" }
+    ] },
+    { "key": "side", "type": "select", "label": "Угол экрана", "default": "bl", "options": [
+      { "value": "bl", "label": "Слева снизу" },
+      { "value": "br", "label": "Справа снизу" },
+      { "value": "tl", "label": "Слева сверху" },
+      { "value": "tr", "label": "Справа сверху" }
+    ] },
+    { "key": "progress", "type": "toggle", "label": "Полоса прогресса", "default": true },
+    { "key": "hidePaused", "type": "toggle", "label": "Прятать на паузе", "default": true }
+  ]
+}
