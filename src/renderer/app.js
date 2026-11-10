@@ -13,6 +13,7 @@ import { ACCENTS, paletteFor, applyAccent } from './accent.js';
 import { releaseAgo } from './releases.js';
 import { arrangeSearch } from './search.js';
 import { createFriends } from './friends.js';
+import { createQol, startupVolume } from './qol.js';
 import { handoffPlan, queueSnapshot, REACTIONS, JOIN_BASE, trackLink, profileLink, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
 
 const api = window.nyao;
@@ -1752,6 +1753,12 @@ function soundCardHtml() {
       <input type="range" min="0" max="10" step="1" value="${fade}" data-input="fade" aria-label="Плавные переходы, секунд" style="width:180px"></div>
     <div class="pref-row"><span><b>Продолжать похожим</b><span class="hint">Плейлист или альбом доиграл — дальше без паузы идёт радио по последнему треку</span></span>
       <button class="switch ${s.continueSimilar !== false ? 'on' : ''}" role="switch" aria-checked="${s.continueSimilar !== false}" aria-label="Продолжать похожим" data-action="toggle-continue"><span></span></button></div>
+    <div class="pref-row"><span><b>Громкость при запуске</b><span class="hint">Чтобы после перезапуска плеер не заорал на полную</span></span>
+      <div class="pill-seg" role="radiogroup" aria-label="Громкость при запуске">${[['last', 'Как была'], ['0.3', '30%'], ['0.5', '50%']].map(([v, l]) => { const cur = String(s.startVolume ?? 'last'); return `<button role="radio" aria-checked="${cur === v}" class="${cur === v ? 'on' : ''}" data-action="start-volume" data-v="${v}">${l}</button>`; }).join('')}</div></div>
+    <div class="pref-row"><span><b>Тише ночью</b><span class="hint">С 23:00 до 7:00 громкость не выше ${Math.round((Number(s.nightCapLevel) || 0.4) * 100)}%, даже если крутануть ползунок</span></span>
+      <button class="switch ${s.nightCap ? 'on' : ''}" role="switch" aria-checked="${!!s.nightCap}" aria-label="Тише ночью" data-action="toggle-nightcap"><span></span></button></div>
+    <div class="pref-row"><span><b>Помнить место в длинных треках</b><span class="hint">Подкасты, миксы и сеты длиннее 15 минут продолжаются с того места, где остановился</span></span>
+      <button class="switch ${s.rememberLong !== false ? 'on' : ''}" role="switch" aria-checked="${s.rememberLong !== false}" aria-label="Помнить место в длинных треках" data-action="toggle-remember-long"><span></span></button></div>
     <div class="pref-row"><span><b>Трек из поиска</b><span class="hint">${(s.searchPlay || 'similar') === 'similar' ? 'Играет он, а дальше — похожее на него, как в Яндексе' : 'После него играют остальные найденные треки'}</span></span>
       <div class="pill-seg" role="radiogroup" aria-label="Что играть после трека из поиска">${[['similar', 'Дальше похожее'], ['list', 'Весь поиск']].map(([v, l]) => `<button role="radio" aria-checked="${(s.searchPlay || 'similar') === v}" class="${(s.searchPlay || 'similar') === v ? 'on' : ''}" data-action="search-play" data-v="${v}">${l}</button>`).join('')}</div></div>
   </section>`;
@@ -2351,7 +2358,7 @@ function remoteCommand(e) {
       player.seek(a.position);
       break;
     case 'volume':
-      player.setVolume(a.volume);
+      qol.setVolume(a.volume);
       volEl.value = Math.round(a.volume * 100);
       setRangeFill(volEl);
       api.settings.set({ volume: a.volume }).catch(() => {});
@@ -2975,6 +2982,19 @@ async function handleAction(el, e) {
       break;
     case 'search-play':
       state.settings = await api.settings.set({ searchPlay: el.dataset.v });
+      renderSettings();
+      break;
+    case 'start-volume':
+      state.settings = await api.settings.set({ startVolume: el.dataset.v === 'last' ? 'last' : Number(el.dataset.v) });
+      renderSettings();
+      break;
+    case 'toggle-nightcap':
+      state.settings = await api.settings.set({ nightCap: !state.settings.nightCap });
+      qol.apply();
+      renderSettings();
+      break;
+    case 'toggle-remember-long':
+      state.settings = await api.settings.set({ rememberLong: state.settings.rememberLong === false });
       renderSettings();
       break;
     case 'toggle-normalize':
@@ -3697,7 +3717,8 @@ function openBarMore(r) {
     <button data-m="shuffle">${player.shuffle ? 'Не перемешивать' : 'Перемешать'}</button>
     <button data-m="repeat">Повтор: ${{ off: 'выключен', all: 'плейлист', one: 'трек' }[rep] || 'выключен'}</button>
     <button data-m="queue">Очередь</button>
-    <button data-m="connect">Устройства и «Слушать вместе»</button>`;
+    <button data-m="connect">Устройства и «Слушать вместе»</button>
+    <button data-m="sleep">Таймер сна${qol.sleeping ? ': ' + esc(qol.sleepLabel()) : ''}</button>`;
   menu.hidden = false;
   const m = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(r.right - m.width, innerWidth - m.width - 8))}px`;
@@ -3713,6 +3734,7 @@ function openBarMore(r) {
     else if (k === 'repeat') $('#pb-repeat').click();
     else if (k === 'queue') toggleDrawer('queue');
     else if (k === 'connect') $('#pb-connect').click();
+    else if (k === 'sleep') openSleepMenu(r);
   };
 }
 const seekEl = $('#pb-seek');
@@ -3728,11 +3750,48 @@ seekEl.addEventListener('change', () => {
 const volEl = $('#pb-vol');
 let volTimer;
 volEl.addEventListener('input', () => {
-  player.setVolume(volEl.value / 100);
+  qol.setVolume(volEl.value / 100);
   setRangeFill(volEl);
   clearTimeout(volTimer);
   volTimer = setTimeout(() => api.settings.set({ volume: volEl.value / 100 }), 400);
 });
+// колёсико: над полоской — перемотка (5 с, с Shift — 15 с), над громкостью — по 5%
+seekEl.addEventListener('wheel', (e) => {
+  const a = player.audio;
+  if (!player.current || player.live || !Number.isFinite(a.duration)) return;
+  e.preventDefault();
+  const step = (e.shiftKey ? 15 : 5) * (e.deltaY < 0 ? 1 : -1);
+  player.seek(Math.max(0, Math.min(a.duration - 1, a.currentTime + step)));
+}, { passive: false });
+$('.vol').addEventListener('wheel', (e) => {
+  e.preventDefault();
+  volEl.value = Math.max(0, Math.min(100, Number(volEl.value) + (e.deltaY < 0 ? 5 : -5)));
+  volEl.dispatchEvent(new Event('input'));
+}, { passive: false });
+const qol = createQol({ player, settings: () => state.settings, applyVolume: (v) => player.setVolume(v), toast });
+/** Таймер сна: меню у кнопки с луной */
+function openSleepMenu(r) {
+  const menu = $('#menu');
+  const on = qol.sleeping;
+  menu.innerHTML = `${on ? `<div class="menu-note">Пауза ${esc(qol.sleepLabel())}</div>` : ''}
+    ${[15, 30, 45, 60, 90].map((m) => `<button data-sleep="${m}">Через ${m} мин</button>`).join('')}
+    <button data-sleep="track">После этого трека</button>
+    ${on ? '<button data-sleep="off">Выключить таймер</button>' : ''}`;
+  menu.hidden = false;
+  const m = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(r.right - m.width, innerWidth - m.width - 8))}px`;
+  menu.style.top = `${Math.max(8, r.top - m.height - 8)}px`;
+  menu.onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    menu.hidden = true;
+    const v = b.dataset.sleep;
+    if (v === 'off') qol.stopSleep();
+    else qol.startSleep(v === 'track' ? 'track' : Number(v));
+    $('#pb-sleep').classList.toggle('on', qol.sleeping);
+  };
+}
+$('#pb-sleep').onclick = (e) => openSleepMenu(e.currentTarget.getBoundingClientRect());
 
 player.addEventListener('track', () => {
   renderBar();
@@ -3816,7 +3875,7 @@ api.onControl((msg) => {
   if (cmd === 'pause' && player.playing) return player.toggle();
   if (cmd === 'seek' && player.current && !player.live) return player.seek(value);
   if (cmd === 'volume') {
-    player.setVolume(value);
+    qol.setVolume(value);
     const v = $('#pb-vol');
     if (v) v.value = Math.round(value * 100);
     api.settings.set({ volume: value }).catch(() => {});
@@ -4203,9 +4262,11 @@ function openMixBuilder() {
   eq.apply(state.settings.eq);
   api.status.get().then(applyStatus).catch(() => {});
   api.status.onChange(applyStatus);
-  player.setVolume(state.settings.volume);
+  // громкость при запуске: как была или заданная в настройках (чтобы после перезапуска не орало)
+  const startVol = startupVolume(state.settings);
+  qol.setVolume(startVol);
   player.continueSimilar = state.settings.continueSimilar !== false;
-  volEl.value = Math.round(state.settings.volume * 100);
+  volEl.value = Math.round(startVol * 100);
   setRangeFill(volEl);
   renderBar();
   // кто вошёл — известно сразу (входы лежат на компьютере); точные имена догрузит loadStatus
