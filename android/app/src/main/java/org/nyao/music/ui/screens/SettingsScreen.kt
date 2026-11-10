@@ -110,6 +110,7 @@ fun ProfileScreen(model: AppModel, part: String = "all") {
 
         SettingsGroup("Профиль") {
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.BarChart, "Статистика") { model.go(Route.Stats) }
+            SettingsRow(org.nyao.music.ui.components.NyaoIcons.History, "История прослушиваний") { model.go(Route.History) }
             SettingsRow(org.nyao.music.ui.components.NyaoIcons.Devices, "Устройства") { model.connectOpen = true }
             if (user != null) SettingsRow(org.nyao.music.ui.components.NyaoIcons.Devices, "Подключить по коду", "Nyao Legacy на Android 4") { legacyOpen = true }
             if (user != null) SettingsRow(org.nyao.music.ui.components.NyaoIcons.Edit, "Мой профиль и приватность", social?.let { if (it.invisible) "невидимка" else when (it.visibility) { "all" -> "видят все"; "nobody" -> "скрыт"; else -> "только друзья" } }) { model.go(Route.SettingsPage("profile")) }

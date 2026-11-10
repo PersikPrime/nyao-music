@@ -32,6 +32,7 @@ sealed interface Route {
     data class ArtistPage(val source: String, val id: String?, val name: String) : Route
     data object Together : Route
     data object Stats : Route
+    data object History : Route
     /** Профиль пользователя: ник или id. "" — свой */
     data class UserPage(val key: String) : Route
 }

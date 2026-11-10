@@ -299,6 +299,29 @@ class NyaoCloud(private val prefs: Prefs, private val dir: File) {
         return out
     }
 
+    data class Play(val track: Track, val at: Long, val skipped: Boolean)
+
+    /**
+     * История для экрана «История прослушиваний»: своя + с сервера (все устройства, 90 дней).
+     * Одно и то же прослушивание не дублируем (тот же трек в пределах минуты)
+     */
+    suspend fun historyAll(): List<Play> {
+        fun at(p: JSONObject): Long = p.optLong("playedAt", 0L).takeIf { it > 0 }
+            ?: runCatching { java.time.Instant.parse(p.optString("playedAt")).toEpochMilli() }.getOrDefault(0L)
+        val plays = ArrayList<JSONObject>()
+        val hist = fileLock.withLock { readArr(historyFile) }
+        for (i in 0 until hist.length()) hist.optJSONObject(i)?.let { plays += it }
+        if (loggedIn) runCatching { request("GET", "/history?days=90&limit=2000").arr("plays").objects().forEach { plays += it } }
+        val sorted = plays.mapNotNull { p -> playToTrack(p)?.let { Play(it, at(p), p.optBoolean("skipped")) } }.filter { it.at > 0 }.sortedByDescending { it.at }
+        val out = ArrayList<Play>()
+        for (p in sorted) {
+            if (out.takeLast(6).any { it.track.id == p.track.id && kotlin.math.abs(it.at - p.at) < 60_000 }) continue
+            out += p
+            if (out.size >= 3000) break
+        }
+        return out
+    }
+
     /**
      * Самое прослушиваемое за days дней: сервер (все устройства) + своё неотправленное,
      * без сервера — своя история. Пропущенное не считается. → пары (трек, сколько раз)

@@ -118,6 +118,7 @@ private fun routeOrder(r: Route): Int = when (r) {
     is Route.UserPage -> 10
     Route.AppSettings -> 11
     Route.Radio -> 12
+    Route.History -> 13
 }
 
 /** icon — обычная (контурная), iconOn — залитая для выбранной вкладки, как в Material 3 Expressive */
@@ -145,7 +146,7 @@ private val PROFILE_SECTIONS = setOf("profile", "account")
 private fun tabRouteOf(r: Route, s: org.nyao.music.data.Settings): Route = when {
     r is Route.PlaylistPage || r is Route.ArtistPage -> Route.Library
     r is Route.SettingsPage -> if (s.navPrefs && r.section !in PROFILE_SECTIONS) Route.AppSettings else Route.Settings
-    r == Route.Stats || r is Route.UserPage -> Route.Settings
+    r == Route.Stats || r == Route.History || r is Route.UserPage -> Route.Settings
     else -> r
 }
 
@@ -410,6 +411,7 @@ private fun Content(model: AppModel, wide: Boolean) {
             is Route.ArtistPage -> org.nyao.music.ui.screens.ArtistScreen(model, r)
             Route.Together -> org.nyao.music.ui.screens.TogetherScreen(model)
             Route.Stats -> org.nyao.music.ui.screens.StatsScreen(model)
+            Route.History -> org.nyao.music.ui.screens.HistoryScreen(model)
             is Route.UserPage -> org.nyao.music.ui.screens.UserScreen(model, r.key)
         }
     }
