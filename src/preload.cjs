@@ -187,6 +187,7 @@ contextBridge.exposeInMainWorld('nyao', {
     now: (info) => call('cloud:now', info),
     others: () => call('cloud:others'),
     history: () => call('cloud:history'),
+    historyAll: () => call('cloud:historyAll'),
     top: (opts) => call('cloud:top', opts),
     sync: () => call('cloud:sync'),
     onChanged: (cb) => ipcRenderer.on('cloud:changed', (_e, keys) => cb(keys))

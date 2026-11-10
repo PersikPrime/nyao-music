@@ -1325,3 +1325,8 @@ body.live-mode #pb-shuffle, body.live-mode #pb-repeat, body.live-mode #pb-radio,
 .onair-streams { overflow-x: auto; scrollbar-width: none; }
 .onair-streams button { white-space: nowrap; flex-shrink: 0; }
 .brand .brand-red { color: #ff5c5c; font-weight: inherit; }
+
+/* История прослушиваний */
+.hist-day { font-size: 13px; font-weight: 700; letter-spacing: .02em; color: var(--muted, #9a9aa2); margin: 22px 0 8px; text-transform: none; }
+.trow.hist .hist-time { width: 44px; flex: none; font-size: 12px; color: var(--muted, #9a9aa2); font-variant-numeric: tabular-nums; }
+.trow.hist.skipped .meta { opacity: .55; }

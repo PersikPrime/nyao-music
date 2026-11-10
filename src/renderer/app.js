@@ -60,6 +60,7 @@ const state = {
   room: null, // «Слушать вместе»: снимок комнаты + isHost
   roomSync: { hostTrackId: null },
   stats: { period: 'month', data: null, error: null, loading: false },
+  history: { plays: null, q: '', error: null },
   favArtists: [], // любимые исполнители (сердечко на странице исполнителя)
   version: ''
 };
@@ -565,7 +566,7 @@ function renderHomePlayer() {
     ${!loggedAny ? `<div class="card"><div class="field"><label>Подключи сервисы</label><div class="hint">Войди в Яндекс Музыку, YouTube Music или SoundCloud — здесь появятся лайки, плейлисты и волна.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Открыть настройки</button></div></div>` : ''}
     ${loggedAny && !state.lib.lists && !state.lib.counts ? qgridSkeleton() : loggedAny ? `<section class="qgrid">${tiles.map(quickTile).join('')}</section>` : ''}
     ${!recent.length && state.recentLoading ? shelfSkeleton() : ''}
-    ${recent.length ? `<section><div class="sec-head"><h2 class="sec">Недавно слушал</h2></div>
+    ${recent.length ? `<section><div class="sec-head"><h2 class="sec">Недавно слушал</h2><button class="link" data-action="go" data-route="history">Вся история</button></div>
       <div class="recent-row">${recent.slice(0, 12).map((t, i) => `<button class="rcard" data-action="play-row" data-list="home-recent" data-i="${i}">${coverHtml(t, '', true)}<b>${esc(t.title)}</b><span>${esc(t.artist)}</span></button>`).join('')}</div></section>` : ''}
     ${releasesHtml()}
     <div class="home-split">
@@ -968,6 +969,62 @@ function renderTrackList() {
     </div>
     ${tl.error ? `<div class="hint err">${esc(tl.error)}</div>` : !tl.tracks ? '<div class="skeleton" style="height:320px"></div>' : tl.tracks.length ? tracksHtml(tl.tracks, 'tracklist') : '<div class="empty">Треков не нашлось</div>'}
   </div>`;
+}
+
+// ---------- История прослушиваний: что играло, по дням, с поиском ----------
+async function loadHistory() {
+  const h = state.history;
+  h.error = null;
+  try {
+    h.plays = await api.cloud.historyAll();
+  } catch (e) {
+    h.error = e.message;
+    h.plays = h.plays || [];
+  }
+  if (state.route === 'history') renderHistory();
+}
+function historyDay(ts) {
+  const d = new Date(ts);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day = new Date(d); day.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - day) / 86_400_000);
+  if (diff === 0) return 'Сегодня';
+  if (diff === 1) return 'Вчера';
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });
+}
+function renderHistory() {
+  const h = state.history;
+  // при каждом открытии подтягиваем свежее (не чаще раза в минуту), пока — то, что уже есть
+  if (!h.loading && (!h.plays || Date.now() - (h.at || 0) > 60_000)) { h.loading = true; h.at = Date.now(); loadHistory().finally(() => (h.loading = false)); }
+  const q = h.q.trim().toLowerCase();
+  const plays = (h.plays || []).filter((p) => !q || `${p.title} ${p.artist}`.toLowerCase().includes(q));
+  const tracks = plays.map((p) => {
+    const i = p.trackId.indexOf(':');
+    return { id: p.trackId, source: p.source || p.trackId.slice(0, i), srcId: p.trackId.slice(i + 1), title: p.title, artist: p.artist, cover: p.cover, duration: p.duration };
+  });
+  lists.history = tracks;
+  let body = '';
+  let lastDay = '';
+  plays.forEach((p, i) => {
+    const day = historyDay(p.playedAt);
+    if (day !== lastDay) { body += `${lastDay ? '</div>' : ''}<h3 class="hist-day">${esc(day)}</h3><div class="tracks">`; lastDay = day; }
+    const time = new Date(p.playedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    body += rowHtml(tracks[i], i, 'history', { num: false }).replace('<div class="trow ', `<div class="trow hist ${p.skipped ? 'skipped' : ''} `).replace(/(<div class="trow[^>]*>)/, `$1<span class="hist-time">${time}</span>`);
+  });
+  if (lastDay) body += '</div>';
+  view.innerHTML = `<div class="scroll">
+    <button class="back" data-action="back">${ICONS.back}Назад</button>
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:12px 0 18px">
+      <div><span class="eyebrow">Все устройства · 90 дней</span><h1 class="page">История прослушиваний</h1></div>
+      <form class="search-field" data-form="history-search" style="max-width:320px">${ICONS.search}<input name="q" type="search" value="${esc(h.q)}" placeholder="Найти трек из истории" aria-label="Поиск по истории"></form>
+    </div>
+    ${h.error ? `<div class="hint err">${esc(h.error)}</div>` : ''}
+    ${!h.plays ? '<div class="skeleton" style="height:320px"></div>' : plays.length ? body : `<div class="empty">${q ? 'В истории такого не нашлось' : 'История пока пустая — включи что-нибудь'}</div>`}
+  </div>`;
+  const input = $('[data-form="history-search"] input', view);
+  if (input) {
+    input.addEventListener('input', () => { h.q = input.value; const pos = input.selectionStart; renderHistory(); const again = $('[data-form="history-search"] input', view); again.focus(); again.setSelectionRange(pos, pos); });
+  }
 }
 
 function renderAlbum() {
@@ -1964,7 +2021,7 @@ const friends = createFriends({
     renderRail();
   }
 });
-const RENDER = { friends: () => friends.renderFriends(), user: () => friends.renderUser(), profile: () => friends.renderProfile(), home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, prefs: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList, radio: renderRadio };
+const RENDER = { friends: () => friends.renderFriends(), user: () => friends.renderUser(), profile: () => friends.renderProfile(), home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, prefs: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, history: renderHistory, tracks: renderTrackList, radio: renderRadio };
 
 // ---------- Загрузка данных ----------
 /** Может ли Spotify играть сам; если нет — треки Spotify играют копиями из других сервисов */
@@ -3523,6 +3580,7 @@ view.addEventListener('submit', async (e) => {
     joinRoom(new FormData(form).get('code').toString());
     return;
   }
+  if (form.dataset.form === 'history-search') return; // ищет на лету, по вводу
   if (form.dataset.form.startsWith('fr-')) {
     try {
       await friends.submit(form);
