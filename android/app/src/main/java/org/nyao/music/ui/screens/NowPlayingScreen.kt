@@ -20,6 +20,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -168,8 +170,20 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                 ) { tr ->
                     // эфир: обложка трека, который звучит; не загрузилась или трека нет — логотип станции на её цвете
                     val station = if (live) org.nyao.music.data.YandexRadio.stationOf(tr) else null
-                    Cover(if (live) onAir?.cover ?: tr.cover else tr.cover, Modifier.fillMaxSize().graphicsLayer { scaleX = coverScale; scaleY = coverScale }, if (mono) coverShape(32.dp) else PolarShape(12, 0.035f),
-                        bg = station?.let { Color(it.bg) }, fallback = if (live) tr.cover else null)
+                    // двойной тап по обложке — лайк (в эфире — трек, который звучит, если он из Яндекс Музыки)
+                    var heart by remember { mutableStateOf(0) }
+                    val likeTarget = if (live) onAir?.let { onAirTrack(it) } else tr
+                    Box(Modifier.fillMaxSize().pointerInput(likeTarget?.id) {
+                        detectTapGestures(onDoubleTap = {
+                            val target = likeTarget ?: return@detectTapGestures
+                            if (target.id !in Repo.liked.value) model.like(target, true)
+                            heart++
+                        })
+                    }) {
+                        Cover(if (live) onAir?.cover ?: tr.cover else tr.cover, Modifier.fillMaxSize().graphicsLayer { scaleX = coverScale; scaleY = coverScale }, if (mono) coverShape(32.dp) else PolarShape(12, 0.035f),
+                            bg = station?.let { Color(it.bg) }, fallback = if (live) tr.cover else null)
+                        HeartBurst(heart, Modifier.align(Alignment.Center))
+                    }
                 }
             }
         }
@@ -305,9 +319,24 @@ fun NowPlayingScreen(model: AppModel, asPane: Boolean, onClose: () -> Unit) {
                     pal,
                 ) { PlayerConnection.cycleRepeat() }
                 Tool(NyaoIcons.Block, "Не нравится", false, pal, enabled = !live && (wave || mode == Repo.Mode.RADIO)) { model.dislike() }
-                Tool(NyaoIcons.Bedtime, if (sleep) "Таймер сна: 30 мин" else "Таймер сна", sleep, pal) {
-                    PlayerConnection.toggleSleep()
-                    model.message(if (!sleep) "Пауза через 30 минут" else "Таймер сна выключен")
+                Box {
+                    var sleepMenu by remember { mutableStateOf(false) }
+                    val sleepLabel by PlayerConnection.sleepLabel.collectAsState()
+                    Tool(NyaoIcons.Bedtime, if (sleep) "Таймер сна: $sleepLabel" else "Таймер сна", sleep, pal) { sleepMenu = true }
+                    androidx.compose.material3.DropdownMenu(expanded = sleepMenu, onDismissRequest = { sleepMenu = false }) {
+                        if (sleep) Text("Пауза $sleepLabel", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                        listOf(15, 30, 45, 60, 90).forEach { m ->
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("Через $m мин") }, onClick = {
+                                sleepMenu = false; PlayerConnection.startSleep(m); model.message("Пауза через $m минут")
+                            })
+                        }
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("После этого трека") }, onClick = {
+                            sleepMenu = false; PlayerConnection.startSleep(0); model.message("Пауза после этого трека")
+                        })
+                        if (sleep) androidx.compose.material3.DropdownMenuItem(text = { Text("Выключить таймер") }, onClick = {
+                            sleepMenu = false; PlayerConnection.stopSleep(); model.message("Таймер сна выключен")
+                        })
+                    }
                 }
             }
         }
@@ -564,6 +593,18 @@ private fun shareText(ctx: android.content.Context, text: String, title: String)
 
 private fun openUrl(ctx: android.content.Context, url: String) {
     runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+}
+
+/** Сердце, которое вспыхивает по центру обложки при двойном тапе */
+@Composable
+private fun HeartBurst(key: Int, modifier: Modifier) {
+    if (key == 0) return
+    val a = remember(key) { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(key) { a.snapTo(0f); a.animateTo(1f, androidx.compose.animation.core.tween(700)) }
+    val t = a.value
+    val scale = if (t < 0.3f) 0.4f + t / 0.3f * 0.8f else 1.2f - (t - 0.3f) * 0.3f
+    val alpha = if (t < 0.6f) 1f else (1f - (t - 0.6f) / 0.4f).coerceAtLeast(0f)
+    Icon(NyaoIcons.Favorite, null, tint = Color.White, modifier = modifier.size(96.dp).graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha * 0.92f })
 }
 
 /** Лайк-«печенька»: заливается акцентом, когда трек нравится */

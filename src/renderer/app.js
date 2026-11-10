@@ -329,6 +329,17 @@ function renderRail() {
   $('#rail').innerHTML = navItems().map((n) => btn(...n)).join('') + friendsBtn + extra + '<div class="spacer"></div>' + prefsBtn + btn('settings', 'Профиль', 'M12 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M5 20c.9-3.6 3.6-5.5 7-5.5s6.1 1.9 7 5.5') + accounts;
 }
 // Подключаемые сервисы. Новый сервис (VK Музыка, SoundCloud…) добавляется сюда — кнопка аккаунта и меню подхватят его сами
+/** Страница трека в его сервисе (для «Открыть в …»); эфиру и неизвестному — нет */
+function serviceUrl(t) {
+  const id = String((t && (t.srcId || t.id)) || '').replace(/^[a-z]+:/, '');
+  if (!t || !id) return '';
+  if (t.source === 'ya') return t.albumId ? `https://music.yandex.ru/album/${t.albumId}/track/${id}` : `https://music.yandex.ru/track/${id}`;
+  if (t.source === 'yt') return `https://music.youtube.com/watch?v=${id}`;
+  if (t.source === 'vk') return `https://vk.com/audio${id}`;
+  if (t.source === 'sp') return `https://open.spotify.com/track/${id}`;
+  if (t.source === 'sc') return `https://soundcloud.com/search/sounds?q=${encodeURIComponent(`${t.artist} ${t.title}`)}`;
+  return '';
+}
 /** Название сервиса: в родительном падеже («из Яндекс Музыки») или обычное */
 function srcName(source, gen = false) {
   if (source === 'ya') return gen ? 'Яндекс Музыки' : 'Яндекс Музыка';
@@ -2145,6 +2156,8 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
     <button data-m="radio">Похожее · радио по треку</button>
     ${state.cloud.loggedIn ? '<button data-m="share">Отправить другу</button>' : ''}
     <button data-m="link">Скопировать ссылку</button>
+    <button data-m="copy">Скопировать название</button>
+    ${serviceUrl(track) ? `<button data-m="open">Открыть в ${esc(track.source === 'ya' ? 'Яндекс Музыке' : srcName(track.source))}</button>` : ''}
     <button data-m="like">${player.liked.has(track.id) ? 'Убрать из «Мне нравится»' : 'В «Мне нравится»'}</button>
     ${track.artistRef ? '<button data-m="artist">Открыть исполнителя</button>' : ''}
     ${track.albumRef ? '<button data-m="album">Открыть альбом</button>' : ''}
@@ -2177,6 +2190,11 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
       } else if (b.dataset.m === 'link') {
         copyText(trackLink(track));
         toast('Ссылка скопирована — откроется в Nyao Music');
+      } else if (b.dataset.m === 'copy') {
+        copyText(`${track.artist} — ${track.title}`);
+        toast('Название скопировано');
+      } else if (b.dataset.m === 'open') {
+        api.openExternal(serviceUrl(track));
       } else if (b.dataset.m === 'like') {
         await player.toggleLike(track);
       } else if (b.dataset.m === 'artist') {

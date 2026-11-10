@@ -303,19 +303,50 @@ object PlayerConnection {
     private var sleepJob: Job? = null
     private val mainScope = CoroutineScope(Dispatchers.Main)
 
-    /** Включает/выключает паузу через [minutes] минут */
-    fun toggleSleep(minutes: Int = 30) {
-        sleepJob?.cancel()
-        if (_sleep.value) {
-            _sleep.value = false
-            return
-        }
+    private val _sleepLabel = MutableStateFlow("")
+    /** «через 12 мин» / «после этого трека» — для подписи у кнопки */
+    val sleepLabel: StateFlow<String> = _sleepLabel
+
+    /**
+     * Таймер сна: пауза через [minutes] минут (за последние 30 секунд громкость плавно затихает)
+     * или, если minutes = 0, — когда доиграет текущий трек.
+     */
+    fun startSleep(minutes: Int) {
+        stopSleep()
         _sleep.value = true
+        val startId = _current.value?.id
         sleepJob = mainScope.launch {
-            delay(minutes * 60_000L)
-            withController { it.pause() }
-            _sleep.value = false
+            try {
+                if (minutes <= 0) {
+                    _sleepLabel.value = "после этого трека"
+                    while (true) {
+                        delay(500)
+                        if (_current.value?.id != startId) { withController { it.pause() }; break }
+                    }
+                } else {
+                    val until = System.currentTimeMillis() + minutes * 60_000L
+                    while (true) {
+                        val left = until - System.currentTimeMillis()
+                        if (left <= 0) { withController { it.pause() }; break }
+                        _sleepLabel.value = "через ${(left + 59_999) / 60_000} мин"
+                        if (left < 30_000) withController { it.volume = (left / 30_000f).coerceIn(0f, 1f) }
+                        delay(if (left < 30_000) 250 else 1000)
+                    }
+                }
+            } finally {
+                withController { it.volume = 1f }
+                _sleep.value = false
+                _sleepLabel.value = ""
+            }
         }
+    }
+
+    fun stopSleep() {
+        sleepJob?.cancel()
+        sleepJob = null
+        withController { it.volume = 1f }
+        _sleep.value = false
+        _sleepLabel.value = ""
     }
 
     // ---------- Положение ----------
