@@ -118,6 +118,7 @@ private fun routeOrder(r: Route): Int = when (r) {
     is Route.UserPage -> 10
     Route.AppSettings -> 11
     Route.Radio -> 12
+    Route.History -> 13
 }
 
 /** icon — обычная (контурная), iconOn — залитая для выбранной вкладки, как в Material 3 Expressive */
@@ -145,7 +146,7 @@ private val PROFILE_SECTIONS = setOf("profile", "account")
 private fun tabRouteOf(r: Route, s: org.nyao.music.data.Settings): Route = when {
     r is Route.PlaylistPage || r is Route.ArtistPage -> Route.Library
     r is Route.SettingsPage -> if (s.navPrefs && r.section !in PROFILE_SECTIONS) Route.AppSettings else Route.Settings
-    r == Route.Stats || r is Route.UserPage -> Route.Settings
+    r == Route.Stats || r == Route.History || r is Route.UserPage -> Route.Settings
     else -> r
 }
 
@@ -171,7 +172,6 @@ fun NyaoRoot() {
     val outdated by Repo.cloud.outdated.collectAsState()
 
     // эфир Яндекс Радио: «что звучит» опрашивает сервис воспроизведения (PlaybackService) — и для шторки, и для экрана
-    LaunchedEffect(settings.onboarded) { if (settings.onboarded) { delay(1200); Hundred.maybeFirstRun(org.nyao.music.BuildConfig.VERSION_CODE) } }
     LaunchedEffect(Unit) {
         Repo.refreshAccounts()
         // свежий профиль Nyao: в нём, например, отметка разработчика
@@ -380,7 +380,6 @@ fun NyaoRoot() {
         model.transferFor?.let { (p, t) -> org.nyao.music.ui.screens.TransferSheet(model, p, t) { model.transferFor = null } }
         if (settings.onboarded && settings.layout == null) org.nyao.music.ui.screens.LayoutAskDialog()
         if (requiredUpdate != null || outdated > 0) org.nyao.music.ui.screens.OutdatedDialog(requiredUpdate?.apkUrl)
-        if (settings.onboarded) HundredHost()
     }
     }
 }
@@ -412,6 +411,7 @@ private fun Content(model: AppModel, wide: Boolean) {
             is Route.ArtistPage -> org.nyao.music.ui.screens.ArtistScreen(model, r)
             Route.Together -> org.nyao.music.ui.screens.TogetherScreen(model)
             Route.Stats -> org.nyao.music.ui.screens.StatsScreen(model)
+            Route.History -> org.nyao.music.ui.screens.HistoryScreen(model)
             is Route.UserPage -> org.nyao.music.ui.screens.UserScreen(model, r.key)
         }
     }

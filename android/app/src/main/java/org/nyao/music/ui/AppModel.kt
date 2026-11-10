@@ -32,6 +32,7 @@ sealed interface Route {
     data class ArtistPage(val source: String, val id: String?, val name: String) : Route
     data object Together : Route
     data object Stats : Route
+    data object History : Route
     /** Профиль пользователя: ник или id. "" — свой */
     data class UserPage(val key: String) : Route
 }
@@ -242,6 +243,22 @@ class AppModel(private val scope: CoroutineScope) {
                 PlayerConnection.startWave()
             } catch (e: Exception) {
                 message(e.message ?: "Волна не запустилась")
+            } finally {
+                waveStarting = false
+            }
+        }
+    }
+
+    /** «Похожее на этот трек» — волна от одного трека */
+    fun startSimilar(t: Track) {
+        if (waveStarting) return
+        waveStarting = true
+        message("Собираю похожее на «${t.title}»…")
+        scope.launch {
+            try {
+                PlayerConnection.startSimilar(t)
+            } catch (e: Exception) {
+                message(e.message ?: "Не нашлось похожего")
             } finally {
                 waveStarting = false
             }

@@ -143,6 +143,45 @@ final class Player: ObservableObject {
         sendNow(force: true)
     }
 
+    // MARK: - Таймер сна
+
+    /// «через 12 мин» / «после этого трека»; пусто — таймер выключен
+    @Published private(set) var sleepLabel = ""
+    private var sleepTask: Task<Void, Never>?
+
+    /// Пауза через minutes минут (за последние 30 секунд громкость плавно затихает); 0 — когда доиграет текущий трек
+    func startSleep(minutes: Int) {
+        stopSleep()
+        let startId = current?.id
+        sleepTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.player.volume = 1; self.sleepLabel = "" }
+            if minutes <= 0 {
+                self.sleepLabel = "после этого трека"
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    if self.current?.id != startId { self.pause(); return }
+                }
+                return
+            }
+            let until = Date().addingTimeInterval(Double(minutes) * 60)
+            while !Task.isCancelled {
+                let left = until.timeIntervalSinceNow
+                if left <= 0 { self.pause(); return }
+                self.sleepLabel = "через \(Int(ceil(left / 60))) мин"
+                if left < 30 { self.player.volume = Float(max(0, left / 30)) }
+                try? await Task.sleep(nanoseconds: left < 30 ? 250_000_000 : 1_000_000_000)
+            }
+        }
+    }
+
+    func stopSleep() {
+        sleepTask?.cancel()
+        sleepTask = nil
+        player.volume = 1
+        sleepLabel = ""
+    }
+
     func pause() {
         player.pause()
         isPlaying = false
@@ -253,7 +292,6 @@ final class Player: ObservableObject {
         // 30 секунд — трек засчитан (для пасхалки «сотый трек»)
         if sec >= 30, let t = current, counted != t.id {
             counted = t.id
-            Hundred.countPlay()
         }
         sendNow()
     }

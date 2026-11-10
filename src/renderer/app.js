@@ -8,12 +8,12 @@ import { layoutChoiceHtml } from './layouts.js';
 import { Equalizer, EQ_BANDS, EQ_PRESETS, normalizeEq, bandLabel, normalizeGain } from './eq.js';
 import { FullScreen } from './fullscreen.js';
 import { PRANKS, createPranks, fakeWords } from './pranks.js';
-import { createHundred } from './hundred.js';
 import { coverOf, templateCover, installImageFallback } from './covers.js';
 import { ACCENTS, paletteFor, applyAccent } from './accent.js';
 import { releaseAgo } from './releases.js';
 import { arrangeSearch } from './search.js';
 import { createFriends } from './friends.js';
+import { createQol, startupVolume } from './qol.js';
 import { handoffPlan, queueSnapshot, REACTIONS, JOIN_BASE, trackLink, profileLink, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
 
 const api = window.nyao;
@@ -60,6 +60,7 @@ const state = {
   room: null, // «Слушать вместе»: снимок комнаты + isHost
   roomSync: { hostTrackId: null },
   stats: { period: 'month', data: null, error: null, loading: false },
+  history: { plays: null, q: '', error: null },
   favArtists: [], // любимые исполнители (сердечко на странице исполнителя)
   version: ''
 };
@@ -86,6 +87,7 @@ function badge(source, extra = '') {
   if (source === 'vk') return `<span class="badge vk ${extra}">VK</span>`;
   if (source === 'sp') return `<span class="badge sp ${extra}">SP</span>`;
   if (source === 'mix') return '<span class="badge mix">Я+YT</span>';
+  if (source === 'live') return `<span class="badge live ${extra}">FM</span>`;
   return '';
 }
 /** Значок трека; трек Spotify, играющий копией из другого сервиса, — «SP → Я» */
@@ -328,6 +330,17 @@ function renderRail() {
   $('#rail').innerHTML = navItems().map((n) => btn(...n)).join('') + friendsBtn + extra + '<div class="spacer"></div>' + prefsBtn + btn('settings', 'Профиль', 'M12 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7M5 20c.9-3.6 3.6-5.5 7-5.5s6.1 1.9 7 5.5') + accounts;
 }
 // Подключаемые сервисы. Новый сервис (VK Музыка, SoundCloud…) добавляется сюда — кнопка аккаунта и меню подхватят его сами
+/** Страница трека в его сервисе (для «Открыть в …»); эфиру и неизвестному — нет */
+function serviceUrl(t) {
+  const id = String((t && (t.srcId || t.id)) || '').replace(/^[a-z]+:/, '');
+  if (!t || !id) return '';
+  if (t.source === 'ya') return t.albumId ? `https://music.yandex.ru/album/${t.albumId}/track/${id}` : `https://music.yandex.ru/track/${id}`;
+  if (t.source === 'yt') return `https://music.youtube.com/watch?v=${id}`;
+  if (t.source === 'vk') return `https://vk.com/audio${id}`;
+  if (t.source === 'sp') return `https://open.spotify.com/track/${id}`;
+  if (t.source === 'sc') return `https://soundcloud.com/search/sounds?q=${encodeURIComponent(`${t.artist} ${t.title}`)}`;
+  return '';
+}
 /** Название сервиса: в родительном падеже («из Яндекс Музыки») или обычное */
 function srcName(source, gen = false) {
   if (source === 'ya') return gen ? 'Яндекс Музыки' : 'Яндекс Музыка';
@@ -335,7 +348,9 @@ function srcName(source, gen = false) {
   if (source === 'vk') return 'VK Музыка';
   if (source === 'sp') return 'Spotify';
   if (source === 'mix') return gen ? 'моего микса' : 'Мой микс';
-  return 'YouTube Music';
+  if (source === 'live') return 'Яндекс Радио';
+  if (source === 'yt') return 'YouTube Music';
+  return 'Nyao';
 }
 const SERVICES = [
   { id: 'ya', short: 'Я', name: 'Яндекс Музыка', bg: 'var(--ya)', fg: '#000' },
@@ -551,7 +566,7 @@ function renderHomePlayer() {
     ${!loggedAny ? `<div class="card"><div class="field"><label>Подключи сервисы</label><div class="hint">Войди в Яндекс Музыку, YouTube Music или SoundCloud — здесь появятся лайки, плейлисты и волна.</div></div><div><button class="btn primary" data-action="go" data-route="settings">Открыть настройки</button></div></div>` : ''}
     ${loggedAny && !state.lib.lists && !state.lib.counts ? qgridSkeleton() : loggedAny ? `<section class="qgrid">${tiles.map(quickTile).join('')}</section>` : ''}
     ${!recent.length && state.recentLoading ? shelfSkeleton() : ''}
-    ${recent.length ? `<section><div class="sec-head"><h2 class="sec">Недавно слушал</h2></div>
+    ${recent.length ? `<section><div class="sec-head"><h2 class="sec">Недавно слушал</h2><button class="link" data-action="go" data-route="history">Вся история</button></div>
       <div class="recent-row">${recent.slice(0, 12).map((t, i) => `<button class="rcard" data-action="play-row" data-list="home-recent" data-i="${i}">${coverHtml(t, '', true)}<b>${esc(t.title)}</b><span>${esc(t.artist)}</span></button>`).join('')}</div></section>` : ''}
     ${releasesHtml()}
     <div class="home-split">
@@ -954,6 +969,62 @@ function renderTrackList() {
     </div>
     ${tl.error ? `<div class="hint err">${esc(tl.error)}</div>` : !tl.tracks ? '<div class="skeleton" style="height:320px"></div>' : tl.tracks.length ? tracksHtml(tl.tracks, 'tracklist') : '<div class="empty">Треков не нашлось</div>'}
   </div>`;
+}
+
+// ---------- История прослушиваний: что играло, по дням, с поиском ----------
+async function loadHistory() {
+  const h = state.history;
+  h.error = null;
+  try {
+    h.plays = await api.cloud.historyAll();
+  } catch (e) {
+    h.error = e.message;
+    h.plays = h.plays || [];
+  }
+  if (state.route === 'history') renderHistory();
+}
+function historyDay(ts) {
+  const d = new Date(ts);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day = new Date(d); day.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - day) / 86_400_000);
+  if (diff === 0) return 'Сегодня';
+  if (diff === 1) return 'Вчера';
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });
+}
+function renderHistory() {
+  const h = state.history;
+  // при каждом открытии подтягиваем свежее (не чаще раза в минуту), пока — то, что уже есть
+  if (!h.loading && (!h.plays || Date.now() - (h.at || 0) > 60_000)) { h.loading = true; h.at = Date.now(); loadHistory().finally(() => (h.loading = false)); }
+  const q = h.q.trim().toLowerCase();
+  const plays = (h.plays || []).filter((p) => !q || `${p.title} ${p.artist}`.toLowerCase().includes(q));
+  const tracks = plays.map((p) => {
+    const i = p.trackId.indexOf(':');
+    return { id: p.trackId, source: p.source || p.trackId.slice(0, i), srcId: p.trackId.slice(i + 1), title: p.title, artist: p.artist, cover: p.cover, duration: p.duration };
+  });
+  lists.history = tracks;
+  let body = '';
+  let lastDay = '';
+  plays.forEach((p, i) => {
+    const day = historyDay(p.playedAt);
+    if (day !== lastDay) { body += `${lastDay ? '</div>' : ''}<h3 class="hist-day">${esc(day)}</h3><div class="tracks">`; lastDay = day; }
+    const time = new Date(p.playedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    body += rowHtml(tracks[i], i, 'history', { num: false }).replace('<div class="trow ', `<div class="trow hist ${p.skipped ? 'skipped' : ''} `).replace(/(<div class="trow[^>]*>)/, `$1<span class="hist-time">${time}</span>`);
+  });
+  if (lastDay) body += '</div>';
+  view.innerHTML = `<div class="scroll">
+    <button class="back" data-action="back">${ICONS.back}Назад</button>
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:12px 0 18px">
+      <div><span class="eyebrow">Все устройства · 90 дней</span><h1 class="page">История прослушиваний</h1></div>
+      <form class="search-field" data-form="history-search" style="max-width:320px">${ICONS.search}<input name="q" type="search" value="${esc(h.q)}" placeholder="Найти трек из истории" aria-label="Поиск по истории"></form>
+    </div>
+    ${h.error ? `<div class="hint err">${esc(h.error)}</div>` : ''}
+    ${!h.plays ? '<div class="skeleton" style="height:320px"></div>' : plays.length ? body : `<div class="empty">${q ? 'В истории такого не нашлось' : 'История пока пустая — включи что-нибудь'}</div>`}
+  </div>`;
+  const input = $('[data-form="history-search"] input', view);
+  if (input) {
+    input.addEventListener('input', () => { h.q = input.value; const pos = input.selectionStart; renderHistory(); const again = $('[data-form="history-search"] input', view); again.focus(); again.setSelectionRange(pos, pos); });
+  }
 }
 
 function renderAlbum() {
@@ -1552,7 +1623,7 @@ function renderSettingsSection(sec) {
   else if (sec === 'discord') body = discordCardHtml();
   else if (sec === 'updates') body = updateCardHtml();
   else if (sec === 'about') body = `<section class="card">
-      <div class="hint"><span class="ver-tap" data-action="hundred-tap">Nyao Music ${esc(state.version || '0.2')}</span> · оформление ${IS_MAC ? 'Liquid Glass' : 'Nyao'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
+      <div class="hint">Nyao Music ${esc(state.version || '0.2')} · оформление ${IS_MAC ? 'Liquid Glass' : 'Nyao'}. Сервисы подключены через неофициальные API, поэтому после их обновлений что-то может сломаться; тексты песен — из Яндекс Музыки, LRCLIB и YouTube Music.</div>
       <div><button class="btn" data-action="onboarding">Показать приветствие снова</button></div>
     </section>`;
   view.innerHTML = `<div class="scroll settings psec">
@@ -1750,6 +1821,12 @@ function soundCardHtml() {
       <input type="range" min="0" max="10" step="1" value="${fade}" data-input="fade" aria-label="Плавные переходы, секунд" style="width:180px"></div>
     <div class="pref-row"><span><b>Продолжать похожим</b><span class="hint">Плейлист или альбом доиграл — дальше без паузы идёт радио по последнему треку</span></span>
       <button class="switch ${s.continueSimilar !== false ? 'on' : ''}" role="switch" aria-checked="${s.continueSimilar !== false}" aria-label="Продолжать похожим" data-action="toggle-continue"><span></span></button></div>
+    <div class="pref-row"><span><b>Громкость при запуске</b><span class="hint">Чтобы после перезапуска плеер не заорал на полную</span></span>
+      <div class="pill-seg" role="radiogroup" aria-label="Громкость при запуске">${[['last', 'Как была'], ['0.3', '30%'], ['0.5', '50%']].map(([v, l]) => { const cur = String(s.startVolume ?? 'last'); return `<button role="radio" aria-checked="${cur === v}" class="${cur === v ? 'on' : ''}" data-action="start-volume" data-v="${v}">${l}</button>`; }).join('')}</div></div>
+    <div class="pref-row"><span><b>Тише ночью</b><span class="hint">С 23:00 до 7:00 громкость не выше ${Math.round((Number(s.nightCapLevel) || 0.4) * 100)}%, даже если крутануть ползунок</span></span>
+      <button class="switch ${s.nightCap ? 'on' : ''}" role="switch" aria-checked="${!!s.nightCap}" aria-label="Тише ночью" data-action="toggle-nightcap"><span></span></button></div>
+    <div class="pref-row"><span><b>Помнить место в длинных треках</b><span class="hint">Подкасты, миксы и сеты длиннее 15 минут продолжаются с того места, где остановился</span></span>
+      <button class="switch ${s.rememberLong !== false ? 'on' : ''}" role="switch" aria-checked="${s.rememberLong !== false}" aria-label="Помнить место в длинных треках" data-action="toggle-remember-long"><span></span></button></div>
     <div class="pref-row"><span><b>Трек из поиска</b><span class="hint">${(s.searchPlay || 'similar') === 'similar' ? 'Играет он, а дальше — похожее на него, как в Яндексе' : 'После него играют остальные найденные треки'}</span></span>
       <div class="pill-seg" role="radiogroup" aria-label="Что играть после трека из поиска">${[['similar', 'Дальше похожее'], ['list', 'Весь поиск']].map(([v, l]) => `<button role="radio" aria-checked="${(s.searchPlay || 'similar') === v}" class="${(s.searchPlay || 'similar') === v ? 'on' : ''}" data-action="search-play" data-v="${v}">${l}</button>`).join('')}</div></div>
   </section>`;
@@ -1944,7 +2021,7 @@ const friends = createFriends({
     renderRail();
   }
 });
-const RENDER = { friends: () => friends.renderFriends(), user: () => friends.renderUser(), profile: () => friends.renderProfile(), home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, prefs: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, tracks: renderTrackList, radio: renderRadio };
+const RENDER = { friends: () => friends.renderFriends(), user: () => friends.renderUser(), profile: () => friends.renderProfile(), home: renderHome, wave: renderWave, library: renderLibrary, search: renderSearch, settings: renderSettings, prefs: renderSettings, artist: renderArtist, album: renderAlbum, together: renderTogether, stats: renderStats, history: renderHistory, tracks: renderTrackList, radio: renderRadio };
 
 // ---------- Загрузка данных ----------
 /** Может ли Spotify играть сам; если нет — треки Spotify играют копиями из других сервисов */
@@ -2136,6 +2213,8 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
     <button data-m="radio">Похожее · радио по треку</button>
     ${state.cloud.loggedIn ? '<button data-m="share">Отправить другу</button>' : ''}
     <button data-m="link">Скопировать ссылку</button>
+    <button data-m="copy">Скопировать название</button>
+    ${serviceUrl(track) ? `<button data-m="open">Открыть в ${esc(track.source === 'ya' ? 'Яндекс Музыке' : srcName(track.source))}</button>` : ''}
     <button data-m="like">${player.liked.has(track.id) ? 'Убрать из «Мне нравится»' : 'В «Мне нравится»'}</button>
     ${track.artistRef ? '<button data-m="artist">Открыть исполнителя</button>' : ''}
     ${track.albumRef ? '<button data-m="album">Открыть альбом</button>' : ''}
@@ -2168,6 +2247,11 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
       } else if (b.dataset.m === 'link') {
         copyText(trackLink(track));
         toast('Ссылка скопирована — откроется в Nyao Music');
+      } else if (b.dataset.m === 'copy') {
+        copyText(`${track.artist} — ${track.title}`);
+        toast('Название скопировано');
+      } else if (b.dataset.m === 'open') {
+        api.openExternal(serviceUrl(track));
       } else if (b.dataset.m === 'like') {
         await player.toggleLike(track);
       } else if (b.dataset.m === 'artist') {
@@ -2349,7 +2433,7 @@ function remoteCommand(e) {
       player.seek(a.position);
       break;
     case 'volume':
-      player.setVolume(a.volume);
+      qol.setVolume(a.volume);
       volEl.value = Math.round(a.volume * 100);
       setRangeFill(volEl);
       api.settings.set({ volume: a.volume }).catch(() => {});
@@ -2975,6 +3059,19 @@ async function handleAction(el, e) {
       state.settings = await api.settings.set({ searchPlay: el.dataset.v });
       renderSettings();
       break;
+    case 'start-volume':
+      state.settings = await api.settings.set({ startVolume: el.dataset.v === 'last' ? 'last' : Number(el.dataset.v) });
+      renderSettings();
+      break;
+    case 'toggle-nightcap':
+      state.settings = await api.settings.set({ nightCap: !state.settings.nightCap });
+      qol.apply();
+      renderSettings();
+      break;
+    case 'toggle-remember-long':
+      state.settings = await api.settings.set({ rememberLong: state.settings.rememberLong === false });
+      renderSettings();
+      break;
     case 'toggle-normalize':
       state.settings = await api.settings.set({ normalize: !state.settings.normalize });
       applyTrackSound();
@@ -3062,8 +3159,6 @@ async function handleAction(el, e) {
     case 'dev-prank-reset':
       pranks.resetAll();
       break;
-    case 'hundred-tap':
-      hundred.tapVersion();
       break;
     case 'dev-open':
       try {
@@ -3485,6 +3580,7 @@ view.addEventListener('submit', async (e) => {
     joinRoom(new FormData(form).get('code').toString());
     return;
   }
+  if (form.dataset.form === 'history-search') return; // ищет на лету, по вводу
   if (form.dataset.form.startsWith('fr-')) {
     try {
       await friends.submit(form);
@@ -3697,7 +3793,8 @@ function openBarMore(r) {
     <button data-m="shuffle">${player.shuffle ? 'Не перемешивать' : 'Перемешать'}</button>
     <button data-m="repeat">Повтор: ${{ off: 'выключен', all: 'плейлист', one: 'трек' }[rep] || 'выключен'}</button>
     <button data-m="queue">Очередь</button>
-    <button data-m="connect">Устройства и «Слушать вместе»</button>`;
+    <button data-m="connect">Устройства и «Слушать вместе»</button>
+    <button data-m="sleep">Таймер сна${qol.sleeping ? ': ' + esc(qol.sleepLabel()) : ''}</button>`;
   menu.hidden = false;
   const m = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(r.right - m.width, innerWidth - m.width - 8))}px`;
@@ -3713,6 +3810,7 @@ function openBarMore(r) {
     else if (k === 'repeat') $('#pb-repeat').click();
     else if (k === 'queue') toggleDrawer('queue');
     else if (k === 'connect') $('#pb-connect').click();
+    else if (k === 'sleep') openSleepMenu(r);
   };
 }
 const seekEl = $('#pb-seek');
@@ -3728,11 +3826,48 @@ seekEl.addEventListener('change', () => {
 const volEl = $('#pb-vol');
 let volTimer;
 volEl.addEventListener('input', () => {
-  player.setVolume(volEl.value / 100);
+  qol.setVolume(volEl.value / 100);
   setRangeFill(volEl);
   clearTimeout(volTimer);
   volTimer = setTimeout(() => api.settings.set({ volume: volEl.value / 100 }), 400);
 });
+// колёсико: над полоской — перемотка (5 с, с Shift — 15 с), над громкостью — по 5%
+seekEl.addEventListener('wheel', (e) => {
+  const a = player.audio;
+  if (!player.current || player.live || !Number.isFinite(a.duration)) return;
+  e.preventDefault();
+  const step = (e.shiftKey ? 15 : 5) * (e.deltaY < 0 ? 1 : -1);
+  player.seek(Math.max(0, Math.min(a.duration - 1, a.currentTime + step)));
+}, { passive: false });
+$('.vol').addEventListener('wheel', (e) => {
+  e.preventDefault();
+  volEl.value = Math.max(0, Math.min(100, Number(volEl.value) + (e.deltaY < 0 ? 5 : -5)));
+  volEl.dispatchEvent(new Event('input'));
+}, { passive: false });
+const qol = createQol({ player, settings: () => state.settings, applyVolume: (v) => player.setVolume(v), toast });
+/** Таймер сна: меню у кнопки с луной */
+function openSleepMenu(r) {
+  const menu = $('#menu');
+  const on = qol.sleeping;
+  menu.innerHTML = `${on ? `<div class="menu-note">Пауза ${esc(qol.sleepLabel())}</div>` : ''}
+    ${[15, 30, 45, 60, 90].map((m) => `<button data-sleep="${m}">Через ${m} мин</button>`).join('')}
+    <button data-sleep="track">После этого трека</button>
+    ${on ? '<button data-sleep="off">Выключить таймер</button>' : ''}`;
+  menu.hidden = false;
+  const m = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(r.right - m.width, innerWidth - m.width - 8))}px`;
+  menu.style.top = `${Math.max(8, r.top - m.height - 8)}px`;
+  menu.onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    menu.hidden = true;
+    const v = b.dataset.sleep;
+    if (v === 'off') qol.stopSleep();
+    else qol.startSleep(v === 'track' ? 'track' : Number(v));
+    $('#pb-sleep').classList.toggle('on', qol.sleeping);
+  };
+}
+$('#pb-sleep').onclick = (e) => openSleepMenu(e.currentTarget.getBoundingClientRect());
 
 player.addEventListener('track', () => {
   renderBar();
@@ -3801,7 +3936,6 @@ const pranks = createPranks({
 });
 player.addEventListener('like', renderBar);
 player.addEventListener('like', refreshOnAirPanel);
-const hundred = createHundred({ player, toast, build: () => (state.versionInfo && state.versionInfo.build) || 0 });
 player.addEventListener('track', () => fullscreen.update());
 player.addEventListener('track', applyTrackSound);
 player.addEventListener('time', checkFadeOut);
@@ -3817,7 +3951,7 @@ api.onControl((msg) => {
   if (cmd === 'pause' && player.playing) return player.toggle();
   if (cmd === 'seek' && player.current && !player.live) return player.seek(value);
   if (cmd === 'volume') {
-    player.setVolume(value);
+    qol.setVolume(value);
     const v = $('#pb-vol');
     if (v) v.value = Math.round(value * 100);
     api.settings.set({ volume: value }).catch(() => {});
@@ -4204,9 +4338,11 @@ function openMixBuilder() {
   eq.apply(state.settings.eq);
   api.status.get().then(applyStatus).catch(() => {});
   api.status.onChange(applyStatus);
-  player.setVolume(state.settings.volume);
+  // громкость при запуске: как была или заданная в настройках (чтобы после перезапуска не орало)
+  const startVol = startupVolume(state.settings);
+  qol.setVolume(startVol);
   player.continueSimilar = state.settings.continueSimilar !== false;
-  volEl.value = Math.round(state.settings.volume * 100);
+  volEl.value = Math.round(startVol * 100);
   setRangeFill(volEl);
   renderBar();
   // кто вошёл — известно сразу (входы лежат на компьютере); точные имена догрузит loadStatus
@@ -4261,7 +4397,6 @@ function openMixBuilder() {
       if (brand) brand.innerHTML = 'Nyao Music <b class="brand-red">Red</b>';
     }
     if (isSettingsRoute()) renderSettings();
-    hundred.maybeFirstRun();
   }).catch(() => {});
   if (api.onOutdated) api.onOutdated((min) => showOutdated(min));
   // трек Spotify заиграл копией из другого сервиса — показываем «SP → Я»

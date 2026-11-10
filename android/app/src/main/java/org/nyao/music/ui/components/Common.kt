@@ -59,6 +59,7 @@ fun sourceColor(source: String): Color = when (source) {
     org.nyao.music.data.SOURCE_SC -> NyaoColors.Sc
     org.nyao.music.data.SOURCE_VK -> NyaoColors.Vk
     org.nyao.music.data.SOURCE_SP -> Color(0xFF1ED760)
+    org.nyao.music.data.SOURCE_LIVE -> Color(0xFFE5484D)
     "mix" -> NyaoColors.Lavender
     else -> NyaoColors.YtBadge
 }
@@ -69,12 +70,13 @@ fun sourceShort(source: String): String = when (source) {
     org.nyao.music.data.SOURCE_SC -> "SC"
     org.nyao.music.data.SOURCE_VK -> "VK"
     org.nyao.music.data.SOURCE_SP -> "SP"
+    org.nyao.music.data.SOURCE_LIVE -> "FM"
     "mix" -> "Микс"
     else -> "YT"
 }
 
 @Composable
-fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(16.dp), bg: Color? = null, filter: androidx.compose.ui.graphics.ColorFilter? = null) {
+fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(16.dp), bg: Color? = null, filter: androidx.compose.ui.graphics.ColorFilter? = null, fallback: String? = null) {
     // bg — подложка под прозрачной картинкой (логотипы радиостанций — на цвете станции)
     Box(modifier.clip(shape).background(bg ?: NyaoColors.S3), contentAlignment = Alignment.Center) {
         if (org.nyao.music.ui.Pranks.has("cat")) {
@@ -85,10 +87,12 @@ fun Cover(url: String?, modifier: Modifier = Modifier, shape: Shape = RoundedCor
         } else {
             // пока картинка грузится — силуэт с бликом, а не пустой квадрат
             var loaded by remember(url) { mutableStateOf(false) }
+            // не загрузилась (обложка трека из эфира бывает битой) — показываем запасную, например логотип станции
+            var shown by remember(url, fallback) { mutableStateOf(url) }
             if (!loaded) Box(Modifier.fillMaxSize().shimmer(androidx.compose.ui.graphics.RectangleShape))
             AsyncImage(
-                model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), colorFilter = filter,
-                onSuccess = { loaded = true }, onError = { loaded = true },
+                model = shown, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), colorFilter = filter,
+                onSuccess = { loaded = true }, onError = { if (fallback != null && shown != fallback) shown = fallback else loaded = true },
             )
         }
     }

@@ -174,6 +174,13 @@ class PlaybackService : MediaSessionService() {
             }
         }
         scope.launch { org.nyao.music.data.YandexRadio.recent.collect { applyLiveMeta() } }
+        // место в длинных треках (подкасты, миксы, сеты от 15 минут): раз в 10 секунд запоминаем
+        scope.launch {
+            while (isActive) {
+                delay(10_000)
+                saveLong()
+            }
+        }
 
         val notifications = DefaultMediaNotificationProvider.Builder(this).build()
         notifications.setSmallIcon(R.drawable.ic_notification)
@@ -223,6 +230,7 @@ class PlaybackService : MediaSessionService() {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             applyNorm()
             updateWidget()
+            resumeLong(mediaItem)
             val prev = lastId?.let { Repo.track(it) }
             val wave = Repo.mode.value == Repo.Mode.WAVE
             if (wave && prev != null && prev.id != mediaItem?.mediaId) {
@@ -255,6 +263,36 @@ class PlaybackService : MediaSessionService() {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
             val s = Repo.prefs.settings.value
             equalizer.attach(audioSessionId, s.eqOn, s.eqGains)
+        }
+    }
+
+    // ---------- Место в длинных треках ----------
+    private val positions by lazy { getSharedPreferences("positions", MODE_PRIVATE) }
+    private val longSec = 15 * 60
+
+    private fun saveLong() {
+        val item = player.currentMediaItem ?: return
+        val dur = player.duration
+        if (!player.isPlaying || dur <= 0 || dur < longSec * 1000L) return
+        val t = Repo.track(item.mediaId) ?: return
+        if (t.source == org.nyao.music.data.SOURCE_LIVE) return
+        val pos = player.currentPosition
+        positions.edit().apply {
+            // дослушал почти до конца — забываем место
+            if (pos > dur - 60_000) remove(t.id) else putLong(t.id, pos)
+        }.apply()
+        // не копим бесконечно: больше 60 — чистим всё, кроме текущего
+        if (positions.all.size > 60) positions.edit().clear().putLong(t.id, pos).apply()
+    }
+
+    private fun resumeLong(item: MediaItem?) {
+        item ?: return
+        val t = Repo.track(item.mediaId) ?: return
+        if (t.duration < longSec || t.source == org.nyao.music.data.SOURCE_LIVE) return
+        val saved = positions.getLong(t.id, 0L)
+        if (saved > 60_000 && saved < t.duration * 1000L - 60_000) {
+            player.seekTo(saved)
+            org.nyao.music.playback.PlaybackEvents.emit("Продолжаем с ${org.nyao.music.data.formatTime((saved / 1000).toInt())}")
         }
     }
 

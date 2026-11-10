@@ -194,7 +194,6 @@ object PlayerConnection {
         // «пропущен» — переключили в первые полминуты (или до середины короткого трека)
         val skipped = listened < minOf(30, dur / 2)
         if (listened < 5 && !skipped) return
-        if (listened >= 30) org.nyao.music.ui.Hundred.countPlay()?.let { PlaybackEvents.emit(it) }
         ioScope.launch { runCatching { Repo.cloud.recordPlay(t, listened, skipped) } }
         ioScope.launch { runCatching { Repo.lastfm.scrobble(if (t.duration > 0) t else t.copy(duration = dur), listened) } }
     }
@@ -304,19 +303,50 @@ object PlayerConnection {
     private var sleepJob: Job? = null
     private val mainScope = CoroutineScope(Dispatchers.Main)
 
-    /** Включает/выключает паузу через [minutes] минут */
-    fun toggleSleep(minutes: Int = 30) {
-        sleepJob?.cancel()
-        if (_sleep.value) {
-            _sleep.value = false
-            return
-        }
+    private val _sleepLabel = MutableStateFlow("")
+    /** «через 12 мин» / «после этого трека» — для подписи у кнопки */
+    val sleepLabel: StateFlow<String> = _sleepLabel
+
+    /**
+     * Таймер сна: пауза через [minutes] минут (за последние 30 секунд громкость плавно затихает)
+     * или, если minutes = 0, — когда доиграет текущий трек.
+     */
+    fun startSleep(minutes: Int) {
+        stopSleep()
         _sleep.value = true
+        val startId = _current.value?.id
         sleepJob = mainScope.launch {
-            delay(minutes * 60_000L)
-            withController { it.pause() }
-            _sleep.value = false
+            try {
+                if (minutes <= 0) {
+                    _sleepLabel.value = "после этого трека"
+                    while (true) {
+                        delay(500)
+                        if (_current.value?.id != startId) { withController { it.pause() }; break }
+                    }
+                } else {
+                    val until = System.currentTimeMillis() + minutes * 60_000L
+                    while (true) {
+                        val left = until - System.currentTimeMillis()
+                        if (left <= 0) { withController { it.pause() }; break }
+                        _sleepLabel.value = "через ${(left + 59_999) / 60_000} мин"
+                        if (left < 30_000) withController { it.volume = (left / 30_000f).coerceIn(0f, 1f) }
+                        delay(if (left < 30_000) 250 else 1000)
+                    }
+                }
+            } finally {
+                withController { it.volume = 1f }
+                _sleep.value = false
+                _sleepLabel.value = ""
+            }
         }
+    }
+
+    fun stopSleep() {
+        sleepJob?.cancel()
+        sleepJob = null
+        withController { it.volume = 1f }
+        _sleep.value = false
+        _sleepLabel.value = ""
     }
 
     // ---------- Положение ----------
@@ -427,6 +457,31 @@ object PlayerConnection {
             c.setMediaItems(tracks.map { Repo.mediaItem(it) }, 0, 0L)
             c.prepare()
             c.play()
+        }
+    }
+
+    /** «Похожее на этот трек»: трек остаётся (или включается), дальше — волна похожего на него */
+    suspend fun startSimilar(seed: org.nyao.music.data.Track) {
+        val generation = ++queueGeneration
+        val tracks = withContext(Dispatchers.IO) { Repo.waveFrom(seed) }
+        if (queueGeneration != generation) return
+        Repo.mode.value = Repo.Mode.WAVE
+        Repo.queueLabel.value = "Похоже на «${seed.title}»"
+        withController { c ->
+            c.shuffleModeEnabled = false
+            if (c.repeatMode == Player.REPEAT_MODE_ALL) c.repeatMode = Player.REPEAT_MODE_OFF
+            val cur = c.currentMediaItem
+            if (cur?.mediaId == seed.id) {
+                // тот же трек играет — не прерываем, заменяем всё вокруг него
+                val i = c.currentMediaItemIndex
+                if (c.mediaItemCount > i + 1) c.removeMediaItems(i + 1, c.mediaItemCount)
+                if (i > 0) c.removeMediaItems(0, i)
+                c.addMediaItems(tracks.map { Repo.mediaItem(it) })
+            } else {
+                c.setMediaItems((listOf(seed) + tracks).map { Repo.mediaItem(it) }, 0, 0L)
+                c.prepare()
+                c.play()
+            }
         }
     }
 

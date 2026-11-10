@@ -11,6 +11,7 @@ struct NowPlayingView: View {
     @State private var scrubbing: Double?
     @State private var lyrics: Lyrics?
     @State private var lyricsFor: String?
+    @State private var heartPop = false
 
     enum Pane { case cover, lyrics, queue }
 
@@ -66,6 +67,17 @@ struct NowPlayingView: View {
     private func coverPane(_ t: Track) -> some View {
         CoverView(url: t.cover, key: t.id, radius: 28)
             .aspectRatio(1, contentMode: .fit)
+            // двойной тап по обложке — лайк, с сердцем по центру
+            .overlay {
+                Image(systemName: "heart.fill").font(.system(size: 90)).foregroundStyle(.white.opacity(0.92))
+                    .scaleEffect(heartPop ? 1.15 : 0.4).opacity(heartPop ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
+            .onTapGesture(count: 2) {
+                if !repo.likedIds.contains(t.id) { Task { await repo.toggleLike(t) } }
+                withAnimation(.spring(duration: 0.25)) { heartPop = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { withAnimation(.easeOut(duration: 0.3)) { heartPop = false } }
+            }
             .shadow(color: .black.opacity(0.5), radius: 30, y: 16)
             .padding(.vertical, 16)
             .scaleEffect(player.isPlaying ? 1 : 0.92)
@@ -127,9 +139,27 @@ struct NowPlayingView: View {
             Spacer()
             AirPlayButton().frame(width: 44, height: 44)
             Spacer()
+            sleepButton
+            Spacer()
             toolButton("list.bullet", .queue)
         }
         .padding(.horizontal, 30).padding(.top, 18)
+    }
+
+    /// Таймер сна: меню с минутами и «после этого трека»
+    private var sleepButton: some View {
+        Menu {
+            if !player.sleepLabel.isEmpty {
+                Text("Пауза \(player.sleepLabel)")
+                Button("Выключить таймер", role: .destructive) { player.stopSleep() }
+            }
+            ForEach([15, 30, 45, 60, 90], id: \.self) { m in Button("Через \(m) мин") { player.startSleep(minutes: m) } }
+            Button("После этого трека") { player.startSleep(minutes: 0) }
+        } label: {
+            Image(systemName: player.sleepLabel.isEmpty ? "moon" : "moon.fill").font(.system(size: 20))
+                .foregroundStyle(player.sleepLabel.isEmpty ? .white.opacity(0.85) : Nyao.accent).frame(width: 44, height: 44)
+        }
+        .accessibilityLabel(player.sleepLabel.isEmpty ? "Таймер сна" : "Таймер сна: \(player.sleepLabel)")
     }
 
     private func toolButton(_ icon: String, _ p: Pane) -> some View {

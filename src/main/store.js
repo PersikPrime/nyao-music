@@ -28,6 +28,9 @@ const DEFAULT_SETTINGS = {
   fade: 0,               // плавные переходы между треками, секунд (0 — выкл)
   fsAutoHide: false,
   accent: 'lavender',     // акцентный цвет: lavender | coral | mint | sun | cover     // полноэкранный режим: прятать кнопки, если мышь не двигается
+  startVolume: 'last', // громкость при запуске: 'last' или 0..1
+  nightCap: false, nightCapLevel: 0.4, // с 23 до 7 не громче
+  rememberLong: true, // место в треках длиннее 15 минут
   continueSimilar: true, // список доиграл — продолжать похожим (радио по последнему треку)
   searchPlay: 'similar', // трек из поиска: 'similar' — дальше похожее, 'list' — остальные результаты
   controlServer: false, // пульт для других программ на этом ПК (мод Nyao MinePlay)

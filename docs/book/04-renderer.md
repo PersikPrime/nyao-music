@@ -155,7 +155,8 @@ player.addEventListener('time',  …);   // позиция (часто!) — т�
 | `spotify-sync.js`, `sp-mode.js`, `librespot-ui.js` | Связка плеера и Spotify |
 | `accent.js`, `ribbon.js`, `layouts.js` | Акцентный цвет, «лента» волны, выбор вида приложения |
 | `lyric-card.js` | Картинка «строки из песни» для соцсетей |
-| `hundred.js`, `pranks.js` | Пасхалка сотой сборки и «приколы» раздела «Разработчик» |
+| `pranks.js` | «Приколы» раздела «Разработчик» |
+| `qol.js` | Таймер сна, ночной предел и громкость при запуске, место в длинных треках (тесты — `test/qol.test.js`) |
 | `styles.css` | Все стили; `theme-mac.css` — поверх для Liquid Glass |
 
 ## Правила хорошего тона в app.js

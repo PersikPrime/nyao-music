@@ -976,6 +976,7 @@ function registerIpc() {
   });
   handle('cloud:others', () => cloud.others());
   handle('cloud:history', () => cloud.history().slice(0, 200));
+  handle('cloud:historyAll', () => cloud.historyAll());
   handle('cloud:top', (opts) => cloud.top(opts || {}));
   handle('cloud:sync', () => syncCloud());
   handle('sc:flush', () => flushScLikes());

@@ -182,6 +182,28 @@ export class NyaoCloud {
     return readJson(this.file('history.json'), []);
   }
 
+  /**
+   * История для экрана «История прослушиваний»: своя (с этого компьютера) + с сервера (все устройства, 90 дней),
+   * одно и то же прослушивание не дублируем (тот же трек в пределах минуты)
+   */
+  async historyAll() {
+    const local = this.history().map((p) => ({ ...p, playedAt: Number(p.playedAt) }));
+    let remote = [];
+    if (this.loggedIn) {
+      try {
+        const r = await this.request('GET', '/history?days=90&limit=2000');
+        remote = (r.plays || []).map((p) => ({ ...p, playedAt: new Date(p.playedAt).getTime() }));
+      } catch { /* нет сети — только своё */ }
+    }
+    const all = [...local, ...remote].filter((p) => p && p.trackId && Number.isFinite(p.playedAt)).sort((a, b) => b.playedAt - a.playedAt);
+    const out = [];
+    for (const p of all) {
+      const dup = out.length && out.slice(-6).some((x) => x.trackId === p.trackId && Math.abs(x.playedAt - p.playedAt) < 60_000);
+      if (!dup) out.push(p);
+    }
+    return out.slice(0, 3000);
+  }
+
   recordPlay({ track, listened = 0, skipped = false, at = Date.now() }) {
     const t = slimTrack(track);
     if (!t) return;

@@ -218,6 +218,7 @@ private fun SocialRow(model: AppModel, modifier: Modifier = Modifier) {
             Triple(NyaoIcons.Devices, "Устройства") { model.connectOpen = true },
             Triple(NyaoIcons.Group, if (room != null) "В комнате" else "Вместе") { model.go(Route.Together) },
             Triple(NyaoIcons.BarChart, "Статистика") { model.go(Route.Stats) },
+            Triple(NyaoIcons.History, "История") { model.go(Route.History) },
         ).forEach { (icon, label, open) ->
             Column(
                 Modifier.weight(1f).bouncy().clip(RoundedCornerShape(24.dp)).background(if (label == "В комнате") NyaoColors.Tonal else NyaoColors.S2).clickable(onClick = open).padding(vertical = 14.dp),

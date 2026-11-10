@@ -284,7 +284,6 @@ struct UserView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var repo: Repo
-    @EnvironmentObject var hundred: Hundred
     @State private var login: String?
     @State private var nyaoLogin = false
 
@@ -338,7 +337,7 @@ struct SettingsView: View {
                 HStack {
                     Text("Nyao Music")
                     Spacer()
-                    Text(version).foregroundStyle(Nyao.muted).onTapGesture { hundred.tapVersion() }
+                    Text(version).foregroundStyle(Nyao.muted)
                 }
                 Text("Неофициальный клиент: сервисы подключены через их внутренние API — после их обновлений что-то может сломаться. Ставится через SideStore, подпись продлевается раз в 7 дней.")
                     .font(.system(size: 12)).foregroundStyle(Nyao.muted)

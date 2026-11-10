@@ -73,8 +73,11 @@ fun sourceName(source: String, genitive: Boolean = false): String = when (source
     SOURCE_YA -> if (genitive) "Яндекс Музыки" else "Яндекс Музыка"
     SOURCE_SC -> "SoundCloud"
     SOURCE_VK -> if (genitive) "VK Музыки" else "VK Музыка"
-    SOURCE_SP -> "Spotify"
-    else -> "YouTube Music"
+    SOURCE_SP, SOURCE_SPX -> "Spotify"
+    // эфир — не YouTube: раньше всё неизвестное по умолчанию считалось YouTube Music
+    SOURCE_LIVE -> if (genitive) "Яндекс Радио" else "Яндекс Радио"
+    SOURCE_YT -> "YouTube Music"
+    else -> "Nyao"
 }
 
 fun formatTime(sec: Int): String {

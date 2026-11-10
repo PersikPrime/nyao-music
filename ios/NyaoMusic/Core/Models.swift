@@ -49,7 +49,9 @@ enum Source {
         case vk: return genitive ? "VK Музыки" : "VK Музыка"
         case sc: return "SoundCloud"
         case sp: return "Spotify"
-        default: return "YouTube Music"
+        case yt: return "YouTube Music"
+        case "live": return "Яндекс Радио"
+        default: return "Nyao"
         }
     }
 }
