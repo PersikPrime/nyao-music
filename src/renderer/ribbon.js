@@ -8,6 +8,10 @@ function ss(a, b, x) {
 
 const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const live = new Set();
+// фаза ленты по id холста: страница перерисовывается, пока грузится (главная — несколько раз подряд),
+// и новая лента продолжает с того же места, а не прыгает в случайное — иначе волна «двоилась»
+const phases = new Map();
+let speedNow = 0.25;
 
 export class Ribbon {
   constructor(canvas, opts = {}) {
@@ -20,17 +24,20 @@ export class Ribbon {
     this.width = opts.width || 1.3;
     this.accent = opts.accent || '#C6B8FF';
     this.alpha = opts.alpha ?? 1;
-    this.t = Math.random() * 10;
-    this.speed = 0.25;
+    this.key = canvas.id || '';
+    this.t = this.key && phases.has(this.key) ? phases.get(this.key) : Math.random() * 10;
+    this.speed = speedNow;
     this.last = 0;
     this.size = { w: 0, h: 0 };
     live.add(this);
     this.loop = this.loop.bind(this);
+    this.draw(); // сразу первый кадр — без пустой вспышки на месте старой ленты
     requestAnimationFrame(this.loop);
   }
 
   static setPlaying(playing) {
-    live.forEach((r) => (r.speed = playing ? 0.9 : 0.25));
+    speedNow = playing ? 0.9 : 0.25;
+    live.forEach((r) => (r.speed = speedNow));
   }
 
   resize() {
@@ -95,6 +102,7 @@ export class Ribbon {
       const dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
       this.last = now;
       if (!reduceMotion) this.t += dt * this.speed;
+      if (this.key) phases.set(this.key, this.t);
       this.draw();
       if (reduceMotion) return; // один статичный кадр
     }

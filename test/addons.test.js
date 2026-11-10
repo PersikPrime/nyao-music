@@ -99,6 +99,11 @@ test('встроенные дополнения: манифесты проход
   }
 });
 
+test('пример из docs/examples проходит проверку', () => {
+  const r = validateManifest(JSON.parse(fs.readFileSync(new URL('../docs/examples/autoskip/manifest.json', import.meta.url), 'utf8')));
+  assert.equal(r.ok, true, r.error);
+});
+
 test('страницы: отдают файлы и данные, не выпускают из папки, пускают только с этого компьютера', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nyao-addon-'));
   fs.mkdirSync(path.join(dir, 'page'));

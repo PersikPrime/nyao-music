@@ -1,0 +1,24 @@
+{
+  "id": "example.autoskip",
+  "name": "Умный пропуск",
+  "version": "1.0",
+  "nyao": 1,
+  "author": "пример из docs/examples",
+  "description": "Замечает треки, которые ты раз за разом листаешь в первые секунды, и дальше пропускает их сам.",
+  "icon": "control",
+  "color": "#FFB86B",
+  "permissions": ["track", "control", "ui.toast", "ui.trackMenu"],
+  "settings": [
+    { "key": "after", "type": "select", "label": "Пропускать сам после", "default": "3", "options": [
+      { "value": "2", "label": "2 пропусков" },
+      { "value": "3", "label": "3 пропусков" },
+      { "value": "5", "label": "5 пропусков" }
+    ] },
+    { "key": "window", "type": "select", "label": "Пропуск — это переключил за первые", "default": "15", "options": [
+      { "value": "8", "label": "8 секунд" },
+      { "value": "15", "label": "15 секунд" },
+      { "value": "30", "label": "30 секунд" }
+    ] },
+    { "key": "wave", "type": "toggle", "label": "Только в «Моей волне»", "default": false }
+  ]
+}

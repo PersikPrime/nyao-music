@@ -208,7 +208,8 @@ h2.sec { margin: 0; font-size: 20px; font-weight: 600; }
 .lib-row-meta > span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lib-split { align-self: flex-start; }
 .lib-main { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; display: flex; transition: --lib-glow .6s ease; }
-.lib-cookie { position: absolute; z-index: 0; right: -110px; top: -150px; width: 420px; height: 420px; background: var(--lib-glow); clip-path: var(--cookie); pointer-events: none; animation: lib-cookie-in .7s cubic-bezier(.2, .9, .25, 1.06) both; }
+.lib-cookie { position: absolute; z-index: 0; right: -110px; top: -150px; width: 420px; height: 420px; background: var(--lib-glow); clip-path: var(--cookie); pointer-events: none; }
+.lib-cookie.in { animation: lib-cookie-in .7s cubic-bezier(.2, .9, .25, 1.06) both; }
 /* при прокрутке к трекам фигура укатывается вверх-вправо и тает (--lib-p от 0 до 1 ставит app.js), чтобы не ложиться под строки */
 .lib-cookie { --p: var(--lib-p, 0); translate: calc(var(--p) * 38%) calc(var(--p) * -62%); rotate: calc(var(--p) * 140deg); scale: calc(1 - var(--p) * .5); opacity: calc(1 - var(--p) * 1.15); transform-origin: 70% 30%; transition: translate .25s var(--ease-out, ease), rotate .25s var(--ease-out, ease), scale .25s var(--ease-out, ease), opacity .2s ease; }
 @keyframes lib-cookie-in { from { transform: rotate(-70deg) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -246,11 +247,12 @@ h2.sec { margin: 0; font-size: 20px; font-weight: 600; }
 
 .ad-main { --lib-glow: #C6B8FF; }
 .ad-body { position: relative; max-width: 760px; display: flex; flex-direction: column; gap: 22px; padding: 78px 0 20px; }
-.ad-body > * { animation: ad-in .5s cubic-bezier(.2, .8, .2, 1) backwards; }
+.ad-body.in > * { animation: ad-in .5s cubic-bezier(.2, .8, .2, 1) backwards; }
 .ad-body > :nth-child(2) { animation-delay: .04s; } .ad-body > :nth-child(3) { animation-delay: .08s; } .ad-body > :nth-child(4) { animation-delay: .12s; }
 .ad-body > :nth-child(5) { animation-delay: .16s; } .ad-body > :nth-child(n+6) { animation-delay: .2s; }
 @keyframes ad-in { from { opacity: 0; transform: translateY(14px); } }
-.ad-cookie { position: absolute; right: -150px; top: -170px; width: 400px; height: 400px; clip-path: var(--cookie); background: var(--ad-c); color: color-mix(in srgb, var(--ad-c) 22%, #000); display: grid; place-items: center; pointer-events: none; animation: ad-cookie-in .8s cubic-bezier(.2, .9, .25, 1.1) backwards; }
+.ad-cookie { position: absolute; right: -150px; top: -170px; width: 400px; height: 400px; clip-path: var(--cookie); background: var(--ad-c); color: color-mix(in srgb, var(--ad-c) 22%, #000); display: grid; place-items: center; pointer-events: none; }
+.ad-body.in .ad-cookie { animation: ad-cookie-in .8s cubic-bezier(.2, .9, .25, 1.1) backwards; }
 .ad-cookie span { translate: -56px 74px; display: grid; }
 @keyframes ad-cookie-in { from { opacity: 0; transform: rotate(-60deg) scale(.7); } }
 .ad-head { position: relative; display: flex; flex-direction: column; gap: 10px; padding-right: 260px; min-height: 150px; justify-content: flex-end; }
@@ -740,10 +742,11 @@ body.fs-on .toast { z-index: 1000; }
 @media (prefers-reduced-motion: reduce) { .fs-roll, .fs-roll img, .fs-halo { animation: none; } }
 
 /* правая часть: откуда играет, название, текст, управление */
-.fs-stage { position: absolute; z-index: 1; left: calc(var(--fs-size) * 0.8 + clamp(48px, 7vw, 120px)); right: clamp(40px, 7vw, 110px); top: 0; bottom: 0; display: flex; flex-direction: column; gap: clamp(20px, 3.4vh, 36px); padding: clamp(72px, 10vh, 104px) 0 clamp(36px, 6vh, 60px); box-sizing: border-box; min-width: 0; }
-.fs-head { flex: none; display: flex; flex-direction: column; gap: 12px; min-width: 0; max-height: 40vh; overflow: hidden; transition: max-height .45s cubic-bezier(.2, .8, .2, 1), opacity .3s ease, margin .45s cubic-bezier(.2, .8, .2, 1); }
+.fs-stage { position: absolute; z-index: 1; left: calc(var(--fs-size) * 0.8 + clamp(48px, 7vw, 120px)); right: clamp(40px, 7vw, 110px); top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; gap: clamp(18px, 2.8vh, 30px); transition: padding .5s cubic-bezier(.2, .8, .2, 1); padding: clamp(72px, 10vh, 104px) 0 clamp(36px, 6vh, 60px); box-sizing: border-box; min-width: 0; }
+.fs-head { flex: none; display: flex; flex-direction: column; gap: 12px; min-width: 0; max-height: 40vh; overflow: hidden; transition: max-height .5s cubic-bezier(.2, .8, .2, 1), opacity .3s ease, gap .5s cubic-bezier(.2, .8, .2, 1); }
+.fs-from, .fs-artist { max-height: 2.4em; transition: max-height .5s cubic-bezier(.2, .8, .2, 1), opacity .3s ease; }
 .fs-from { font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: color-mix(in srgb, var(--fs-glow) 55%, #fff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fs-title { margin: 0; font-family: var(--display); font-size: clamp(34px, 4.2vw, 64px); font-weight: 600; line-height: 1.06; letter-spacing: -0.01em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fs-title { margin: 0; transition: font-size .5s cubic-bezier(.2, .8, .2, 1); font-family: var(--display); font-size: clamp(34px, 4.2vw, 64px); font-weight: 600; line-height: 1.06; letter-spacing: -0.01em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .fs-artist { font-size: clamp(16px, 1.4vw, 20px); color: rgba(255,255,255,.78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fs-lyr.on { background: #fff; color: var(--fs-bg, #1c1a20); border-color: transparent; }
 .fs-lyr:disabled { opacity: .35; cursor: default; }
@@ -769,7 +772,12 @@ body.fs-on .toast { z-index: 1000; }
 .fs.paused .fs-play { border-radius: 26px; }
 
 /* текст: между названием и управлением; колёсиком — на весь экран */
-.fs-right { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; transition: opacity .4s ease; }
+/* текст — окошко на несколько строк между названием и управлением; касание разворачивает его на всю высоту */
+.fs-right { position: relative; flex: none; height: clamp(220px, 36vh, 340px); min-height: 0; min-width: 0; display: flex; flex-direction: column; transition: height .5s cubic-bezier(.2, .8, .2, 1), opacity .4s ease; }
+.fs:not(.expand) .fs-lyrics:not(.plain) { cursor: pointer; }
+.fs.expand .fs-right { height: var(--fs-exp-h, 60vh); }
+.fs.measure .fs-right { height: auto; flex: 1; }
+.fs.measure, .fs.measure * { transition: none !important; }
 .fs-right::before { content: ''; position: absolute; left: -12%; right: 10%; top: 50%; height: 200px; margin-top: -100px; border-radius: 50%; pointer-events: none; z-index: -1; background: radial-gradient(closest-side, color-mix(in srgb, var(--fs-glow) 16%, transparent), transparent); filter: blur(16px); opacity: calc(.5 + .5 * var(--fs-beat, 0)); transition: opacity .15s; }
 .fs.nolyrics .fs-right::before, .fs:has(.fs-lyrics.plain) .fs-right::before { display: none; }
 .fs-lyrics { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 16px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18%, #000 82%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 18%, #000 82%, transparent 100%); }
@@ -803,16 +811,18 @@ body.fs-on .toast { z-index: 1000; }
 .fs.expand .fs-now { display: flex; }
 .fs.expand .fs-credit { display: none; }
 /* текст на весь экран: название и управление сворачиваются */
-.fs.expand .fs-stage { padding-top: 24px; padding-bottom: 24px; gap: 0; }
-.fs.expand .fs-head, .fs.expand .fs-bottom { max-height: 0; opacity: 0; pointer-events: none; }
+.fs.expand .fs-stage { padding-top: 56px; padding-bottom: 28px; }
+.fs.expand .fs-bottom, .fs.expand .fs-from, .fs.expand .fs-artist { max-height: 0; opacity: 0; pointer-events: none; }
+.fs.expand .fs-head { gap: 0; }
+.fs.expand .fs-title { font-size: clamp(24px, 2.2vw, 34px); -webkit-line-clamp: 1; }
 /* текста нет или он выключен: название крупнее, всё собирается по центру */
 .fs.nolyrics .fs-stage { justify-content: center; gap: clamp(36px, 7vh, 72px); }
-.fs.nolyrics .fs-right { flex: 0 0 0; opacity: 0; pointer-events: none; }
+.fs.nolyrics .fs-right { height: 0; opacity: 0; pointer-events: none; }
 .fs.nolyrics .fs-head { max-height: 64vh; }
 .fs.nolyrics .fs-title { font-size: clamp(40px, 5.2vw, 84px); -webkit-line-clamp: 3; }
 .fs.nolyrics .fs-credit, .fs.nolyrics .fs-now { visibility: hidden; }
-@media (prefers-reduced-motion: reduce) { .fs-head, .fs-bottom, .fs-right, .fs-lyrics p { transition: none; } }
-.fs.noanim .fs-head, .fs.noanim .fs-bottom, .fs.noanim .fs-right { transition: none; }
+@media (prefers-reduced-motion: reduce) { .fs-head, .fs-bottom, .fs-right, .fs-lyrics p, .fs-title, .fs-stage, .fs-from, .fs-artist { transition: none; } }
+.fs.noanim .fs-head, .fs.noanim .fs-bottom, .fs.noanim .fs-right, .fs.noanim .fs-title, .fs.noanim .fs-stage { transition: none; }
 /* узкое окно: печенька меньше, чтобы тексту хватило места */
 @media (max-width: 1100px) { .fs { --fs-size: min(70vh, 46vw); } }
 
@@ -1452,16 +1462,7 @@ body.live-mode #pb-shuffle, body.live-mode #pb-repeat, body.live-mode #pb-radio,
    Всё ниже — только transform и opacity: не дёргает раскладку. При «уменьшить движение» выключается целиком. */
 :root { --ease-out: cubic-bezier(.2, .8, .2, 1); --ease-spring: cubic-bezier(.2, .9, .25, 1.25); }
 
-/* страница въезжает */
-@keyframes page-in { from { opacity: 0; transform: translateY(14px); } }
-@keyframes item-in { from { opacity: 0; transform: translateY(10px) scale(.985); } }
-.view.enter > * { animation: page-in .38s var(--ease-out) backwards; }
-.view.enter .trow, .view.enter .tile, .view.enter .lib-row, .view.enter .sgroup, .view.enter .ad-row { animation: item-in .42s var(--ease-out) backwards; }
-/* по очереди: каждый следующий на 24 мс позже, но не дольше 14 шагов (дальше — за краем экрана) */
-@supports (animation-delay: calc(sibling-index() * 1ms)) {
-  .view.enter .trow, .view.enter .lib-row, .view.enter .ad-row { animation-delay: calc(min(sibling-index(), 14) * 24ms + 40ms); }
-  .view.enter .tile, .view.enter .sgroup { animation-delay: calc(min(sibling-index(), 10) * 36ms + 40ms); }
-}
+/* въезд страницы — pageEnter() в app.js (WAAPI, один раз на переход) */
 
 /* нажатия и наведение */
 .trow { transition: background .18s ease, transform .22s var(--ease-out); }
@@ -1509,7 +1510,7 @@ body.live-mode #pb-shuffle, body.live-mode #pb-repeat, body.live-mode #pb-radio,
 .toast.show { transform: translate(-50%, 0) scale(1); }
 
 @media (prefers-reduced-motion: reduce) {
-  .view.enter > *, .view.enter .trow, .view.enter .tile, .view.enter .lib-row, .view.enter .sgroup, .view.enter .ad-row, .menu:not([hidden]), .modal { animation: none; }
+  .menu:not([hidden]), .modal { animation: none; }
   .trow, .tile .cover, .btn, .chip, .icbtn, .srow, .srow-ch, .ptab, .switch span, .rail .nav-btn, .rail .nav-btn svg, .playerbar .ic, .playerbar .play, .playerbar .cover-btn, .menu button, .toast, .trow .more { transition: none; }
   .tile:hover .cover, .playerbar .ic:hover, .playerbar .play:hover, .playerbar .cover-btn:hover, .rail .nav-btn:hover svg, .srow:hover .srow-ch { transform: none; }
 }

@@ -9,12 +9,31 @@ import { toggleLine, drawCard, ensureFonts, FORMATS, MAX_LINES } from './lyric-c
 import { coverOf, templateCover } from './covers.js';
 
 /** Кромка «печеньки» для clip-path: n зубцов, глубина amp (0…1). Проценты — фигура тянется за размером блока */
-export function cookiePolygon(n = 10, amp = 0.05, steps = 120) {
+export function cookiePolygon(n = 10, amp = 0.05, steps = 120, rot = 0) {
   const pts = [];
+  const off = (rot * Math.PI) / 180; // поворот всей фигуры, градусы
   for (let i = 0; i < steps; i++) {
     const t = (2 * Math.PI * i) / steps;
     const r = 50 * (1 - amp) + 50 * amp * Math.cos(n * t);
-    pts.push(`${(50 + r * Math.sin(t)).toFixed(2)}% ${(50 - r * Math.cos(t)).toFixed(2)}%`);
+    pts.push(`${(50 + r * Math.sin(t + off)).toFixed(2)}% ${(50 - r * Math.cos(t + off)).toFixed(2)}%`);
+  }
+  return `polygon(${pts.join(', ')})`;
+}
+
+/**
+ * Квадрат со скруглёнными углами (суперэллипс) из того же числа точек, что и печенька:
+ * clip-path плавно перетекает из одной фигуры в другую. p — «квадратность»: 2 — круг, больше — острее углы
+ */
+export function squarePolygon(steps = 120, p = 7) {
+  const pts = [];
+  const e = 2 / p;
+  for (let i = 0; i < steps; i++) {
+    const t = (2 * Math.PI * i) / steps;
+    const sx = Math.sin(t);
+    const cy = Math.cos(t);
+    const x = Math.sign(sx) * Math.abs(sx) ** e;
+    const y = Math.sign(cy) * Math.abs(cy) ** e;
+    pts.push(`${(50 + 50 * x).toFixed(2)}% ${(50 - 50 * y).toFixed(2)}%`);
   }
   return `polygon(${pts.join(', ')})`;
 }
@@ -194,8 +213,15 @@ export class FullScreen {
         this.pickToggle(Number(pickLine.dataset.i));
         return;
       }
+      // свёрнутый текст (несколько строк) — касание разворачивает его; в развёрнутом касание строки перематывает
+      const inLyrics = e.target.closest('.fs-lyrics') && !e.target.closest('button');
+      if (inLyrics && !this.picking && !this.el.classList.contains('expand')) {
+        this.setExpand(true);
+        return;
+      }
       if (line && !this.picking) {
         player.seek(Number(line.dataset.t));
+        this.touchExpand();
         return;
       }
       if (!b) return;
@@ -268,9 +294,12 @@ export class FullScreen {
       if (e.target.closest('.fs-art')) this.close();
     });
     el.addEventListener('mousemove', () => this.wake());
-    // колёсико над текстом — развернуть на весь экран и листать самому
+    // колёсико над текстом — листать самому (в окошке или в развёрнутом); развернуть — касанием
     $('.fs-right').addEventListener('wheel', () => this.userScroll(), { passive: true });
-    window.addEventListener('resize', () => this.layout());
+    window.addEventListener('resize', () => {
+      if (this.el && this.el.classList.contains('expand')) this.measureExpanded();
+      this.layout();
+    });
     // высота текста меняется анимацией (.35 с) при разворачивании и сворачивании: отступы считаем по
     // итоговой высоте, а не по промежуточной — иначе после прокрутки текст оставался ниже середины
     if (typeof ResizeObserver === 'function') {
@@ -310,21 +339,60 @@ export class FullScreen {
     if (!this.lyrics || !this.showLyrics) return;
     if (this.picking) return; // выбор строк: текст развёрнут, пока не закончили
     this.scrolling = true;
-    if (!this.el.classList.contains('expand')) {
-      this.el.classList.add('expand');
-      this.layout();
-    }
+    this.touchExpand();
     clearTimeout(this.scrollTimer);
-    this.scrollTimer = setTimeout(() => this.collapse(), 4000);
+    this.scrollTimer = setTimeout(() => this.recenter(), 4000);
   }
 
-  /** Обратно к высоте плеера и к текущей строке */
-  collapse() {
+  /** Перестали листать — обратно к строке, которая звучит */
+  recenter() {
     clearTimeout(this.scrollTimer);
     this.scrolling = false;
     if (!this.el) return;
-    this.el.classList.remove('expand');
-    this.layout();
+    this.lastLine = -2;
+    this.tick(true);
+  }
+
+  /** Развёрнутый текст сам сворачивается, если 12 секунд его не трогали */
+  touchExpand() {
+    clearTimeout(this.expandTimer);
+    if (!this.el || !this.el.classList.contains('expand') || this.picking) return;
+    this.expandTimer = setTimeout(() => this.collapse(), 12000);
+  }
+
+  /**
+   * Высота текста в развёрнутом виде. Меряем заранее и без переходов, чтобы сам разворот был обычным
+   * CSS-переходом высоты из одного числа в другое: блоки выше и ниже уезжают одновременно, ничего не прыгает
+   */
+  measureExpanded() {
+    const el = this.el;
+    const right = this.$('.fs-right');
+    if (!el || !right) return;
+    const was = el.classList.contains('expand');
+    el.classList.add('measure', 'expand');
+    const h = right.getBoundingClientRect().height;
+    if (!was) el.classList.remove('expand');
+    void el.offsetHeight;
+    el.classList.remove('measure');
+    void el.offsetHeight;
+    el.style.setProperty('--fs-exp-h', `${Math.round(h)}px`);
+  }
+
+  setExpand(on) {
+    if (!this.el || this.el.classList.contains('expand') === on) return;
+    if (on) this.measureExpanded();
+    this.el.classList.toggle('expand', on);
+    clearTimeout(this.expandTimer);
+    if (on) this.touchExpand();
+  }
+
+  /** Обратно к окошку из нескольких строк и к текущей строке */
+  collapse() {
+    clearTimeout(this.scrollTimer);
+    clearTimeout(this.expandTimer);
+    this.scrolling = false;
+    if (!this.el) return;
+    this.setExpand(false);
     this.lastLine = -2;
     this.tick(true);
   }
@@ -376,7 +444,9 @@ export class FullScreen {
     this.picked = [];
     this.scrolling = true;
     clearTimeout(this.scrollTimer);
+    this.measureExpanded();
     this.el.classList.add('picking', 'expand');
+    clearTimeout(this.expandTimer);
     this.$('.fs-pick').hidden = false;
     this.$('[data-fs="share"]').setAttribute('aria-pressed', 'true');
     this.paintPick();
@@ -508,6 +578,10 @@ export class FullScreen {
     }
     if (this.queueOpen) {
       this.toggleQueue(false);
+      return true;
+    }
+    if (this.open && this.el.classList.contains('expand')) {
+      this.collapse();
       return true;
     }
     if (this.open) {
@@ -664,13 +738,28 @@ export class FullScreen {
     const halo = this.$('.fs-halo');
     if (halo && halo.animate) halo.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: 'ease-in', fill: 'forwards' });
     // обратно в плашку: сжимается и докатывается на четверть оборота
-    const fly = art.animate([{ transform: 'translate(0px, 0px) scale(1) rotate(0deg)' }, { transform: `${this.flight(to, from)} rotate(-90deg)` }], { duration: 440, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+    const landed = this.flight(to, from);
+    const fly = art.animate([{ transform: 'translate(0px, 0px) scale(1) rotate(0deg)' }, { transform: `${landed} rotate(-90deg)` }], { duration: 420, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
+    const roll = this.$('.fs-roll');
     const end = () => {
+      if (roll) roll.style.clipPath = '';
       finish();
       // снимаем «замороженные» конечные кадры уже спрятанного слоя, иначе при следующем открытии всё останется прозрачным
       this.el.getAnimations({ subtree: true }).forEach((a) => a.cancel());
     };
-    fly.finished.then(end, end);
+    // встала на место — печенька разворачивается в квадрат обложки плашки и докручивается ровно
+    const unfold = () => {
+      if (!roll || !this.el || this.open) return end();
+      const m = /matrix\(([^,]+),\s*([^,]+)/.exec(getComputedStyle(roll).transform || '');
+      const ang = m ? (Math.atan2(Number(m[2]), Number(m[1])) * 180) / Math.PI : 0; // печенька всё время медленно катится
+      roll.style.clipPath = 'none'; // обрезает уже сама обложка: она не вращается вместе с печенькой
+      const shape = art.animate([
+        { transform: `${landed} rotate(-90deg)`, clipPath: cookiePolygon(10, 0.05, 120, ang) },
+        { transform: `${landed} rotate(0deg)`, clipPath: squarePolygon(120, 7) }
+      ], { duration: 260, easing: 'cubic-bezier(.3, .7, .2, 1.1)', fill: 'forwards' });
+      shape.finished.then(end, end);
+    };
+    fly.finished.then(unfold, end);
   }
 
   /** Мышь двинулась — показываем кнопки; прячем через 3 секунды, только если включено «Прятать кнопки» */

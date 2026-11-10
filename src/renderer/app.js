@@ -435,14 +435,25 @@ function renderAccounts() {
   renderRail();
 }
 
-/** Новая страница въезжает: содержимое поднимается, строки и плитки появляются по очереди (см. «Движение» в styles.css) */
-let enterTimer;
+/**
+ * Новая страница въезжает: содержимое поднимается, строки и плитки появляются по очереди.
+ * Анимируем один раз только то, что нарисовано сейчас: страницы часто перерисовываются, пока грузятся данные
+ * (главная — по три-четыре раза), и анимация на классе запускалась бы заново на каждую перерисовку.
+ */
+const ENTER_ITEMS = '.trow, .tile, .lib-row, .sgroup, .ad-row';
 function pageEnter() {
-  view.classList.remove('enter');
-  void view.offsetWidth; // перезапуск анимации
-  view.classList.add('enter');
-  clearTimeout(enterTimer);
-  enterTimer = setTimeout(() => view.classList.remove('enter'), 900);
+  if (typeof view.animate !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const ease = 'cubic-bezier(.2, .8, .2, 1)';
+  const root = view.firstElementChild;
+  if (!root) return;
+  root.animate([{ opacity: 0, transform: 'translateY(14px)' }, { opacity: 1, transform: 'none' }], { duration: 380, easing: ease });
+  const counts = new Map(); // свой счёт у каждого списка: строки второго списка не ждут, пока «доиграет» первый
+  view.querySelectorAll(ENTER_ITEMS).forEach((el) => {
+    const n = counts.get(el.parentNode) || 0;
+    counts.set(el.parentNode, n + 1);
+    if (n > 14 || el.getBoundingClientRect().top > innerHeight) return; // за краем экрана — без анимации
+    el.animate([{ opacity: 0, transform: 'translateY(10px) scale(.985)' }, { opacity: 1, transform: 'none' }], { duration: 420, delay: 40 + n * (el.matches('.tile, .sgroup') ? 36 : 24), easing: ease, fill: 'backwards' });
+  });
 }
 function go(route, params = {}, push = true) {
   // «Сейчас играет» больше не вкладка (0.7.43): старые ссылки открывают выезжающую панель
@@ -844,6 +855,8 @@ function libraryCounts() {
   return { all: l.length + 1, ya: l.filter((p) => p.source === 'ya').length, yt: l.filter((p) => p.source === 'yt').length, sc: l.filter((p) => p.source === 'sc').length, vk: l.filter((p) => p.source === 'vk').length, sp: l.filter((p) => p.source === 'sp').length, mix: l.filter((p) => p.source === 'mix').length };
 }
 
+// фигура вкатывается только при выборе другого плейлиста, а не на каждую перерисовку (догрузились треки, цвет)
+let libCookieShown = null;
 function renderLibrary() {
   const lib = state.lib;
   const c = libraryCounts();
@@ -879,7 +892,7 @@ function renderLibrary() {
       </div>
     </div>
     <section class="lib-main" style="--lib-glow:${tint}">
-      ${sel ? `<div class="lib-cookie" aria-hidden="true"></div>
+      ${sel ? `<div class="lib-cookie ${sel.id !== libCookieShown ? 'in' : ''}" aria-hidden="true"></div>
       <div class="lib-main-scroll">
         <header class="lib-head" data-pl="${esc(sel.id)}">
           <span class="lib-eyebrow">${esc(kind(sel))}${tr ? ` · ${tr.length} ${pl(tr.length, 'трек', 'трека', 'треков')} · ${fmt(tr.reduce((a, t) => a + (t.duration || 0), 0))}` : ''}</span>
@@ -897,6 +910,7 @@ function renderLibrary() {
       </div>` : '<div class="empty lib-empty">Выбери плейлист слева</div>'}
     </section>
   </div>`;
+  libCookieShown = sel ? sel.id : null;
   // фигура укатывается, пока листаешь к трекам: 0 — на месте, 1 — ушла (полностью к 280 px прокрутки)
   const libScroll = $('.lib-main-scroll', view);
   if (libScroll) {
@@ -1807,7 +1821,7 @@ function renderAddons(keepScroll = false) {
         <div class="row-actions ad-dev"><button class="btn" data-action="addon-dev-open">Открыть папку</button><button class="btn" data-action="addon-rescan">Перечитать</button></div>` : `<div class="ad-soon"><b>Сторонние — скоро</b><span>Каталог откроется, когда обкатаем API в Nyao Music Red. Каждое дополнение будет проходить проверку.</span></div>`}
       </div>
     </aside>
-    <section class="lib-main ad-main"><div class="lib-main-scroll ad-main-scroll"><div class="ad-body">${addonDetailHtml(sel)}</div></div></section>
+    <section class="lib-main ad-main"><div class="lib-main-scroll ad-main-scroll"><div class="ad-body ${keepScroll ? '' : 'in'}">${addonDetailHtml(sel)}</div></div></section>
   </div>`;
   if (top) $('.ad-main-scroll', view).scrollTop = top;
   if (sel && sel.native === 'lastfm') refreshLastfm();
