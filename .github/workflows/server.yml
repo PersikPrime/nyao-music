@@ -123,8 +123,16 @@ jobs:
             exit 1
           fi
           if grep -q NO_DOCKER ssh.out; then echo "::error::На сервере нет docker (или пользователь не в группе docker)"; exit 1; fi
+          # отпечаток Caddyfile до копирования: если он поменялся, Caddy надо пересоздать — файл примонтирован по одному,
+          # и уже запущенный контейнер продолжает видеть старую копию
+          OLD_CADDY=$($SSH "sha256sum $REMOTE_DIR/Caddyfile 2>/dev/null | cut -d' ' -f1" || true)
           tar -C server --exclude=node_modules --exclude=test -czf - . | $SSH "tar -xzf - -C $REMOTE_DIR && chmod 600 $REMOTE_DIR/.env"
           $SSH "cd $REMOTE_DIR && docker compose up -d --build --remove-orphans && docker image prune -f > /dev/null && docker compose ps"
+          NEW_CADDY=$(sha256sum server/Caddyfile | cut -d' ' -f1)
+          if [ "$OLD_CADDY" != "$NEW_CADDY" ]; then
+            echo "Caddyfile изменился — пересоздаю Caddy"
+            $SSH "cd $REMOTE_DIR && docker compose up -d --no-deps --force-recreate caddy" || echo "::warning::Не удалось перезапустить Caddy с новым Caddyfile"
+          fi
           # том /data/status создан Docker'ом от root, а сервер работает как node: Automator пишет статус сам — отдаём ему папку
           $SSH "cd $REMOTE_DIR && docker compose exec -T -u root api sh -c 'mkdir -p /data/status /data/banners /data/imgcache && chown -R node /data/status /data/banners /data/imgcache'" || echo "::warning::Не удалось отдать /data/status и /data/banners пользователю node — техработы и баннеры профилей не заработают"
 
@@ -144,6 +152,14 @@ jobs:
             for i in $(seq 1 12); do curl -fsS "https://$d/health" > /dev/null && { ok=1; break; }; sleep 10; done
             if [ -n "$ok" ]; then echo "https://$d — работает"; else echo "::warning::https://$d пока не отвечает (DNS или сертификат ещё не готовы)"; fi
           done
+      - name: Проверка сайта
+        run: |
+          # корень music.withnyao.app должен отдавать сайт (контейнер site), а не заглушку API
+          for i in $(seq 1 12); do
+            if curl -fsS "https://$WEB_DOMAIN/health" | grep -q nyao-site; then echo "https://$WEB_DOMAIN — сайт на месте"; exit 0; fi
+            sleep 5
+          done
+          echo "::warning::https://$WEB_DOMAIN отвечает, но не сайтом — проверь Caddyfile и контейнер site"
       - name: Проверка каталога Яндекса для сайта текстов
         run: |
           # сервер ищет треки в каталоге Яндекс Музыки без входа; если Яндекс не пускает — только предупреждение
