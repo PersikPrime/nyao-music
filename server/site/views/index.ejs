@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nyao Music — пять сервисов, один плеер</title>
+<meta name="description" content="Nyao Music собирает Яндекс Музыку, YouTube Music, Spotify, VK Музыку и SoundCloud в одном плеере. Windows, macOS, Android и iOS. Бесплатно и без рекламы.">
+<meta name="theme-color" content="#000000">
+<meta property="og:title" content="Nyao Music — пять сервисов, один плеер">
+<meta property="og:description" content="Одна медиатека, одна волна и одна очередь для всех твоих музыкальных сервисов.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="<%= config.siteUrl %>/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Unbounded:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/site.css">
+<script src="/js/boot.js"></script>
+<style>:root{--cookie:<%- shapes.cookiePolygon(10, 0.05) %>;--cookie8:<%- shapes.cookiePolygon(8, 0.07) %>}</style>
+</head>
+<body>
+<a class="skip" href="#features">К содержимому</a>
+
+<header class="top" id="top">
+  <a class="brand" href="#top" aria-label="Nyao Music — наверх">
+    <svg class="logo" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path stroke="#FFD60A" d="M3 10.6c3-5 6-5 9 0s6 5 9 0"/><path stroke="#F0574A" d="M3 13.4c3-5 6-5 9 0s6 5 9 0"/><path stroke="#D8CEFF" d="M3 12c3-5 6-5 9 0s6 5 9 0"/></svg>
+    <span>Nyao Music</span>
+  </a>
+  <nav class="top-nav" aria-label="Разделы">
+    <a href="#features">Возможности</a>
+    <a href="#fullscreen">Полный экран</a>
+    <a href="#addons">Дополнения</a>
+    <a href="<%= config.links.github %>" rel="noopener">GitHub</a>
+  </nav>
+  <a class="btn btn-light btn-sm" href="#download">Скачать</a>
+</header>
+
+<main>
+<section class="hero" data-parallax>
+  <div class="hero-copy">
+    <span class="eyebrow accent" data-reveal>ВСЯ ТВОЯ МУЗЫКА · ОДИН ПЛЕЕР</span>
+    <h1 data-reveal style="--d:.06s">Пять сервисов. Один плеер.</h1>
+    <p class="lead" data-reveal style="--d:.12s">Nyao Music собирает Яндекс Музыку, YouTube Music, Spotify, VK Музыку и SoundCloud в одну медиатеку, одну волну и одну очередь. На Windows, macOS, Android и iOS.</p>
+    <div class="hero-cta" data-reveal style="--d:.18s">
+      <a class="btn btn-light btn-lg" href="#download"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>Скачать бесплатно</a>
+      <a class="btn btn-ghost btn-lg" href="#features">Что умеет</a>
+    </div>
+    <div class="services" data-reveal style="--d:.24s">
+      <span class="svc-row" aria-label="Яндекс Музыка, YouTube Music, Spotify, VK Музыка, SoundCloud">
+        <b style="--c:#FFDB4D">Я</b><b style="--c:#FF5A5A">YT</b><b style="--c:#3DDC84">SP</b><b style="--c:#8FB4FF">VK</b><b style="--c:#FFB86B">SC</b>
+      </span>
+      <span>плюс радио и Last.fm</span>
+    </div>
+  </div>
+
+  <div class="scene" aria-hidden="true">
+    <div class="scene-in">
+      <div class="layer z-back"><div class="cookie spin" style="--c:#1C1930;--s:680px"></div></div>
+      <div class="layer z-mid"><div class="cookie spin-rev glossy" style="--c:#C6B8FF;--s:300px"></div></div>
+
+      <div class="layer z-window">
+        <div class="mock-window">
+          <div class="mock-art spin"><span></span></div>
+          <div class="mock-meta">
+            <i class="mock-eyebrow">ИГРАЕТ ИЗ · МОЯ ВОЛНА</i>
+            <b class="mock-title">Ночной трамвай</b>
+            <i class="mock-artist">Лисья Нора</i>
+            <i class="mock-line"></i><i class="mock-line on"></i><i class="mock-line short"></i>
+            <i class="mock-bar"><u></u></i>
+            <i class="mock-ctl"><u></u><u class="play"></u><u></u></i>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer z-phone float-a">
+        <div class="mock-phone">
+          <b>Главная</b>
+          <div class="mock-wave"><i>МОЯ ВОЛНА</i><span class="eq"><u></u><u></u><u></u><u></u></span><b>Под настроение</b></div>
+          <div class="mock-grid"><u style="--c:#7CE0C3"></u><u style="--c:#FF8FB1"></u><u style="--c:#FFB86B"></u><u style="--c:#8FB4FF"></u></div>
+          <div class="mock-mini"><u></u><i>Ночной трамвай</i><u class="dot"></u></div>
+        </div>
+      </div>
+
+      <div class="layer z-chip1 float-b"><div class="chip chip-light"><span class="chip-ic" style="--c:#FF8FB1"><svg width="18" height="18" viewBox="0 0 24 24" fill="#2A0A16"><path d="<%- shapes.GLYPHS.heart %>"/></svg></span>Двойное нажатие — и трек в «Мне нравится»</div></div>
+      <div class="layer z-chip2 float-a"><div class="chip chip-mint"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="<%- shapes.GLYPHS.lock %>"/></svg>Входы в сервисы остаются на устройстве</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="features">
+  <div class="head">
+    <span class="eyebrow" data-reveal>ВОЗМОЖНОСТИ</span>
+    <h2 data-reveal style="--d:.06s">Всё, за чем раньше приходилось открывать пять вкладок</h2>
+  </div>
+  <div class="grid3">
+    <% const features = [
+      { color: '#C6B8FF', glyph: 'wave', title: 'Моя волна', text: 'Бесконечный поток из всех подключённых сервисов. Можно задать настроение — волна подстроится.' },
+      { color: '#FFB86B', glyph: 'lyrics', title: 'Текст в такт', text: 'Строка, которая звучит сейчас, подсвечивается. Нажми на любую — трек перемотается к ней.' },
+      { color: '#7CE0C3', glyph: 'friends', title: 'Вместе с друзьями', text: 'Видно, что слушают друзья, и можно включить один трек на всех — слушать вместе.' },
+      { color: '#FF8FB1', glyph: 'radio', title: 'Радио', text: 'Станции в том же плеере: название трека из эфира видно в панели и в уведомлении на телефоне.' },
+      { color: '#8FB4FF', glyph: 'history', title: 'История и таймер сна', text: 'Всё, что играло, — в одном списке. Длинные треки продолжаются с места, где остановился.' },
+      { color: '#F5D97A', glyph: 'palette', title: 'Темы на любой вкус', text: 'Expressive, Mono и Glass на Android, свой акцентный цвет на компьютере. Плеер берёт краски из обложки.' },
+    ]; features.forEach((f, i) => { %>
+    <article class="card tilt" data-tilt data-reveal style="--d:<%= (i % 3) * 0.07 %>s;--glow:<%= f.color %>">
+      <span class="card-ic"><%- shapes.cookieIcon({ color: f.color, glyph: f.glyph }) %></span>
+      <h3><%= f.title %></h3>
+      <p><%= f.text %></p>
+      <span class="glare" aria-hidden="true"></span>
+    </article>
+    <% }) %>
+  </div>
+</section>
+
+<section class="section split" id="fullscreen">
+  <div class="split-copy">
+    <span class="eyebrow peach" data-reveal>ПОЛНЫЙ ЭКРАН</span>
+    <h2 data-reveal style="--d:.06s">Сейчас играет — как афиша, а не как таблица</h2>
+    <p class="lead" data-reveal style="--d:.12s">Справа — живой пример, его можно потрогать. Так выглядит плеер, если развернуть его на весь экран.</p>
+    <ol class="steps" data-reveal style="--d:.18s">
+      <li><span class="dot" style="--c:#FFB86B"></span><div><b>Цвет — из обложки</b><span>Переключи трек: экран перекрасится, а обложка-печенька перекатится.</span></div></li>
+      <li><span class="dot" style="--c:#F2F2F3"></span><div><b>Текст идёт в такт</b><span>Строка, которая звучит, — крупнее остальных.</span></div></li>
+      <li><span class="dot" style="--c:#C6B8FF"></span><div><b>Нажми на текст</b><span>Он развернётся на всю высоту — останется только название. Ещё раз — свернётся.</span></div></li>
+    </ol>
+  </div>
+
+  <div class="demo-wrap" data-reveal style="--d:.1s">
+    <div class="demo" id="demo" data-scroll-tilt>
+      <div class="demo-art"><div class="demo-roll"><span class="demo-cover"></span></div></div>
+      <div class="demo-stage">
+        <div class="demo-head">
+          <span class="demo-from">ИГРАЕТ ИЗ · МОЯ ВОЛНА</span>
+          <b class="demo-title" id="demo-title"></b>
+          <span class="demo-artist" id="demo-artist"></span>
+        </div>
+        <button class="demo-lyrics" id="demo-lyrics" type="button" aria-label="Развернуть или свернуть текст"><span class="demo-lines" id="demo-lines"></span></button>
+        <div class="demo-bottom">
+          <div class="demo-bar"><i id="demo-fill"></i></div>
+          <div class="demo-ctl">
+            <button type="button" id="demo-prev" aria-label="Предыдущий трек"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5v14h2V5zm3.5 7 8.5 6V6z"/></svg></button>
+            <button type="button" id="demo-play" class="play" aria-label="Пауза"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path id="demo-play-ic" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>
+            <button type="button" id="demo-next" aria-label="Следующий трек"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M15 5v14h2V5zM5 6v12l8.5-6z"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="demo-note">Пример на сайте — без звука. Треки и строки выдуманы.</p>
+  </div>
+</section>
+
+<section class="section" id="addons">
+  <div class="head">
+    <span class="eyebrow mint" data-reveal>ДОПОЛНЕНИЯ</span>
+    <h2 data-reveal style="--d:.06s">Плеер, который можно достраивать</h2>
+    <p class="lead" data-reveal style="--d:.12s">Каждое дополнение работает в песочнице и получает только то, что написано в его карточке. Входы в сервисы закрыты для всех.</p>
+  </div>
+  <div class="grid3">
+    <article class="card addon tilt" data-tilt data-reveal style="--bg:#FF8FB1;--ink:#2A0A16;--soft:#FFD3E0;--glow:#FF8FB1">
+      <span class="addon-ic"><%- shapes.cookieIcon({ color: '#FFE3EC', glyph: 'scrobble', glyphColor: '#2A0A16' }) %></span>
+      <span class="eyebrow">ОТ NYAO</span>
+      <h3>Last.fm</h3>
+      <p>Отмечает в профиле всё, что играет, — со всех сервисов сразу.</p>
+      <span class="pills"><i>что играет</i><i>уходит на last.fm</i></span>
+      <span class="glare" aria-hidden="true"></span>
+    </article>
+    <article class="card addon tilt" data-tilt data-reveal style="--d:.07s;--bg:#7CE0C3;--ink:#06261D;--soft:#C8F5E8;--glow:#7CE0C3">
+      <span class="addon-ic"><%- shapes.cookieIcon({ color: '#DDFBF2', glyph: 'overlay', glyphColor: '#06261D' }) %></span>
+      <span class="eyebrow">ОТ NYAO</span>
+      <h3>Оверлей для OBS</h3>
+      <p>Плашка «Сейчас играет» для стрима: скопируй адрес и добавь в OBS как источник «Браузер».</p>
+      <span class="pills"><i>что играет</i><i>остаётся на устройстве</i></span>
+      <span class="glare" aria-hidden="true"></span>
+    </article>
+    <article class="card addon-own tilt" data-tilt data-reveal style="--d:.14s;--glow:#C6B8FF">
+      <span class="eyebrow">СВОИ · В NYAO MUSIC RED</span>
+      <pre><code>nyao.player.onTrack((track) =&gt; {
+  nyao.ui.toast(track.title);
+});</code></pre>
+      <h3>Напиши своё</h3>
+      <p>Папка с манифестом и одним файлом JavaScript. Каталог дополнений откроется позже.</p>
+      <a class="link" href="<%= config.links.addonsDoc %>" rel="noopener">Как писать дополнения</a>
+      <span class="glare" aria-hidden="true"></span>
+    </article>
+  </div>
+</section>
+
+<section class="section" id="download">
+  <div class="dl" data-reveal>
+    <div class="dl-cookie cookie spin glossy" id="dl-cookie" aria-hidden="true"></div>
+    <div class="head">
+      <span class="eyebrow">СКАЧАТЬ</span>
+      <h2>Бесплатно. Без рекламы.</h2>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Платформа">
+      <% platforms.forEach((p) => { %>
+      <button type="button" role="tab" id="tab-<%= p.id %>" aria-controls="panel-<%= p.id %>" aria-selected="<%= p.id === os %>" data-os="<%= p.id %>" data-color="<%= p.color %>" class="tab"><%= p.label %></button>
+      <% }) %>
+    </div>
+    <% platforms.forEach((p) => { %>
+    <div class="dl-grid" role="tabpanel" id="panel-<%= p.id %>" aria-labelledby="tab-<%= p.id %>" <%= p.id === os ? '' : 'hidden' %>>
+      <div class="dl-card dl-stable">
+        <span class="eyebrow">СТАБИЛЬНАЯ · <%= stableVersion %></span>
+        <h3><%= p.title %></h3>
+        <p><%= p.note %></p>
+        <a class="btn btn-dark btn-lg" href="<%= p.href %>"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg><%= p.button %><% if (p.size) { %><small><%= p.size %></small><% } %></a>
+        <% if (p.alt) { %><a class="link dl-alt" href="<%= p.altHref %>"><%= p.alt.label %></a><% } %>
+      </div>
+      <div class="dl-card dl-red">
+        <span class="eyebrow">NYAO MUSIC RED · <%= redVersion %></span>
+        <h3>Новое — раньше всех</h3>
+        <p>Свежие функции до релиза: дополнения, новый полный экран, обновлённая медиатека. Может быть сыровато.</p>
+        <a class="btn btn-red btn-lg" href="<%= p.redHref %>">Red для <%= p.id === 'ios' ? 'iOS' : p.label %></a>
+      </div>
+    </div>
+    <% }) %>
+    <p class="dl-foot">Все сборки и список изменений — на странице <a href="<%= config.links.releases %>" rel="noopener">релизов на GitHub</a>. Приложение обновляется само.</p>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="foot-in">
+    <div class="foot-about">
+      <span class="brand"><svg class="logo" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path stroke="#FFD60A" d="M3 10.6c3-5 6-5 9 0s6 5 9 0"/><path stroke="#F0574A" d="M3 13.4c3-5 6-5 9 0s6 5 9 0"/><path stroke="#D8CEFF" d="M3 12c3-5 6-5 9 0s6 5 9 0"/></svg><span>Nyao Music</span></span>
+      <p>Неофициальный клиент. Не связан с Яндексом, Google, Spotify, VK и SoundCloud и ими не поддерживается. Все названия и товарные знаки принадлежат их владельцам. Для прослушивания нужен собственный аккаунт в каждом сервисе.</p>
+      <p>© <%= year %> Nyao</p>
+    </div>
+    <nav class="foot-nav" aria-label="Ссылки">
+      <a href="<%= config.links.github %>" rel="noopener">GitHub</a>
+      <a href="<%= config.links.telegram %>" rel="noopener">Telegram</a>
+      <a href="<%= config.links.docs %>" rel="noopener">Документация</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/js/site.js" defer></script>
+</body>
+</html>

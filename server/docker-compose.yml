@@ -48,11 +48,23 @@ services:
       - banners:/data/banners
       - imgcache:/data/imgcache
 
+  # сайт music.withnyao.app (лендинг и загрузки): релизы берёт из API, файлы отдаёт зеркало сервера
+  site:
+    build: ./site
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PORT: 3000
+      SITE_URL: https://${WEB_DOMAIN:-music.withnyao.app}
+      RELEASES_API: http://api:8080
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       - api
+      - site
     ports:
       - "80:80"
       - "443:443"
