@@ -123,13 +123,13 @@ jobs:
             exit 1
           fi
           if grep -q NO_DOCKER ssh.out; then echo "::error::На сервере нет docker (или пользователь не в группе docker)"; exit 1; fi
-          # отпечаток Caddyfile до копирования: если он поменялся, Caddy надо пересоздать — файл примонтирован по одному,
-          # и уже запущенный контейнер продолжает видеть старую копию
-          OLD_CADDY=$($SSH "sha256sum $REMOTE_DIR/Caddyfile 2>/dev/null | cut -d' ' -f1" || true)
           tar -C server --exclude=node_modules --exclude=test -czf - . | $SSH "tar -xzf - -C $REMOTE_DIR && chmod 600 $REMOTE_DIR/.env"
           $SSH "cd $REMOTE_DIR && docker compose up -d --build --remove-orphans && docker image prune -f > /dev/null && docker compose ps"
+          # Caddyfile примонтирован отдельным файлом: после копирования запущенный Caddy видит старую копию.
+          # Сравниваем то, что видит контейнер, с новым файлом; отличаются — пересоздаём Caddy
           NEW_CADDY=$(sha256sum server/Caddyfile | cut -d' ' -f1)
-          if [ "$OLD_CADDY" != "$NEW_CADDY" ]; then
+          RUN_CADDY=$($SSH "cd $REMOTE_DIR && docker compose exec -T caddy sha256sum /etc/caddy/Caddyfile 2>/dev/null | cut -d' ' -f1" || true)
+          if [ "$RUN_CADDY" != "$NEW_CADDY" ]; then
             echo "Caddyfile изменился — пересоздаю Caddy"
             $SSH "cd $REMOTE_DIR && docker compose up -d --no-deps --force-recreate caddy" || echo "::warning::Не удалось перезапустить Caddy с новым Caddyfile"
           fi
