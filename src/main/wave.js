@@ -24,6 +24,19 @@ const bounded = async (work, fallback = [], timeout = 8000) => {
   finally { clearTimeout(timer); }
 };
 const DAY = 86400000;
+const LIKES_LIMIT = 300;
+// своя волна находит треки поиском: строгий порог и сверка длительности, иначе в волну попадают каверы и однофамильцы
+const OWN_MATCH = 0.8;
+const tooFar = (want, got) => want.duration > 0 && got.duration > 0 && Math.abs(want.duration - got.duration) > 15;
+// Версии, которые почти никогда не хочется услышать вместо оригинала, если их нет в лайках
+const ODD_VERSION = /(^|[\s([\-–—])(karaoke|караоке|instrumental|инструментал|минус(овка)?|nightcore|sped[ -]?up|speed[ -]?up|slowed|reverb|8d( audio)?|tribute|in the style of|tiktok remix|бас буст|bass ?boost(ed)?)(?=$|[\s)\]\-–—,.])/i;
+// «кавер» — только как пометка версии: «(Cover)», «- кавер», «cover by…». Песню «Cover Me Up» не трогаем
+const COVER = /([([\-–—][^)\]]*(?<!\p{L})(cover|кавер)(?!\p{L})|(?<!\p{L})(cover|кавер)\s+(version|by|версия|от)(?!\p{L}))/iu;
+export const oddVersion = (t) => { const s = `${t?.title || ''} ${t?.album || ''}`; return ODD_VERSION.test(s) || COVER.test(s); };
+const TWIN_EVENTS = new Set(['trackStarted', 'trackFinished', 'skip', 'dislike', 'like']);
+const LIKED_REASONS = new Set(['Недавний лайк', 'Из любимого']);
+const normalTitle = (t) => String(t || '').toLowerCase().replace(/\s*[([].*?[)\]]\s*/g, ' ').replace(/\s+/g, ' ').trim();
+const newStats = (startMs) => ({ startMs, retuneMs: 0, started: 0, fromLikes: 0, skipped: 0, liked: 0, artistRepeats: 0, lastArtists: [], by: {} });
 export class WaveMixer {
   constructor({ ya, yt, sc, vk = null, sp = null, getSettings, getRecent = async () => new Set(), getHistory = () => [], getFavorites = async () => [], profile = null, isDown = () => false, nyao = null }) {
     Object.assign(this, { ya, yt, sc, vk, sp, getSettings, getRecent, getHistory, getFavorites, profile, isDown, nyao });
@@ -34,13 +47,39 @@ export class WaveMixer {
     this.libraryCache = new Map();
   }
   sources() { return [['ya', this.ya], ['yt', this.yt], ['sc', this.sc], ['vk', this.vk], ['sp', this.sp]].filter(([id, p]) => p?.loggedIn && !p.regionBlocked && !this.isDown(id)); }
-  opts() { const s = this.getSettings(); return { diversity: s.waveDiversity || 'any', mood: s.waveMood, fresh: s.waveFresh ?? 60, share: Math.max(0, Math.min(100, s.ytmShare ?? 30)) }; }
+  opts() { const s = this.getSettings(); return { diversity: s.waveDiversity || 'any', mood: s.waveMood, fresh: s.waveFresh ?? 60, share: Math.max(0, Math.min(100, s.ytmShare ?? 30)), nyao: s.waveNyao !== false }; }
   save() { try { this.profile?.set(this.state); } catch { /* The wave can run if disk is unavailable. */ } }
   invalidateLikes() { this.libraryCache.clear(); if (this.yt) this.yt.likedCache = null; if (this.session) this.session.hydrated = false; }
   async start(queueIds = []) {
+    const t0 = Date.now();
+    const out = await this.startFresh(queueIds);
+    this.stats = newStats(Date.now() - t0);
+    return out;
+  }
+  /**
+   * Настройки волны поменялись. «Свежесть» и «баланс» только пересортировывают уже собранный пул — без новых запросов,
+   * поэтому очередь меняется почти мгновенно. Новый «характер» или настроение меняют саму «Мою волну» Яндекса — тогда заново.
+   */
+  async retune(queueIds = []) {
+    const old = this.session;
+    const opts = this.opts();
+    if (!old || !old.hydrated || !old.opts || old.opts.mood !== opts.mood || old.opts.diversity !== opts.diversity || !!old.opts.nyao !== !!opts.nyao) return this.start(queueIds);
+    const t0 = Date.now();
     const generation = ++this.generation;
     const policy = new WavePolicy(); this.state.disliked.forEach(t => policy.block(t));
-    const s = { generation, policy, candidates: [], libraries: [], recent: new Set(), history: [], loads: 0, loading: null, hydrated: false, excludedIds: new Set(queueIds), seedHistory: [], rotorIds: new Set(), moodChecked: new Set() };
+    const s = { ...old, generation, policy, loading: null, ownLoading: null, opts, excludedIds: new Set(queueIds), loads: 1 };
+    s.candidates = old.candidates.filter(c => !queueIds.includes(c.track.id));
+    // уже сыгранное в этой волне не повторяем и после перенастройки
+    s.history = [...old.history, ...old.policy.selected];
+    this.session = s;
+    const out = await this.batch(s);
+    if (this.stats) this.stats.retuneMs = Date.now() - t0;
+    return out;
+  }
+  async startFresh(queueIds = []) {
+    const generation = ++this.generation;
+    const policy = new WavePolicy(); this.state.disliked.forEach(t => policy.block(t));
+    const s = { generation, policy, candidates: [], libraries: [], recent: new Set(), history: [], loads: 0, loading: null, hydrated: false, excludedIds: new Set(queueIds), seedHistory: [], rotorIds: new Set(), moodChecked: new Set(), opts: this.opts() };
     this.session = s;
     s.recent = await bounded(() => this.getRecent(), new Set());
     this.ensure(s);
@@ -54,11 +93,18 @@ export class WaveMixer {
     const now = Date.now();
     const lists = await Promise.all(this.sources().map(async ([id, p]) => {
       let cached = this.libraryCache.get(id);
-      if (!cached || now - cached.at > 120000) {
-        const tracks = await bounded(() => p.likedTracks(300));
+      if (!cached) {
+        const tracks = await bounded(() => p.likedTracks(LIKES_LIMIT));
         this.ensure(s);
         // Never cache a failed request as an empty library for the next two minutes.
         if (tracks.length) { cached = { at: now, tracks }; this.libraryCache.set(id, cached); }
+      } else if (now - cached.at > 120000 && !cached.refreshing) {
+        // кэш устарел — волна стартует на нём сразу, свежие лайки подтянутся в фоне к следующему подбору
+        cached.refreshing = true;
+        bounded(() => p.likedTracks(LIKES_LIMIT), [], 30000).then((tracks) => {
+          if (tracks.length && this.libraryCache.get(id) === cached) this.libraryCache.set(id, { at: Date.now(), tracks });
+          else cached.refreshing = false;
+        });
       }
       const tracks = cached?.tracks || [];
       const previous = this.state.libraries[id];
@@ -84,6 +130,7 @@ export class WaveMixer {
     this.ensure(s);
     for (const c of candidates) {
       if (!c.track?.id || s.excludedIds.has(c.track.id) || c.track.available === false || c.track.preview) continue;
+      if (!c.liked && oddVersion(c.track)) continue;
       const old = s.candidates.find(x => x.track.id === c.track.id);
       if (old) { if (c.liked) Object.assign(old, c); if (c.moodOk) old.moodOk = true; }
       else s.candidates.push(c);
@@ -109,21 +156,28 @@ export class WaveMixer {
       else if (seed?.source === id && id === 'sc') tasks.push(bounded(() => p.related(seed.srcId)));
       if (seed?.source === 'ya' && id === 'ya') tasks.push(bounded(() => p.similarTracks(seed.srcId)));
       // Cross-service taste transfer uses public metadata, not unavailable recommendation endpoints.
-      if (seed && artistKey(seed)) tasks.push(bounded(async () => (await p.search(String(seed.artist).split(/,| feat\.? /i)[0])).filter(t => artistKey(t) === artistKey(seed))));
+      // «Ещё от исполнителя» — не больше двух треков с сервиса: иначе один автор заполняет волну
+      if (seed && artistKey(seed)) tasks.push(bounded(async () => shuffle((await p.search(String(seed.artist).split(/,| feat\.? /i)[0])).filter(t => artistKey(t) === artistKey(seed))).slice(0, 2)));
       if (!tasks.length && id === 'yt') tasks.push(bounded(async () => (await p.home()).flatMap(section => section.tracks || [])));
       const tracks = (await Promise.all(tasks)).flat();
       return tracks.map(track => {
         const liked = s.libraries.filter(c => sameRecording(c.track, track));
-        const affinity = (seed && artistKey(track) === artistKey(seed) ? 0.8 : 0.2) + (favoriteNames.has(artistKey(track)) ? 0.2 : 0) + (this.state.taste[artistKey(track)] || 0) / 5;
+        const affinity = 0.3 + (favoriteNames.has(artistKey(track)) ? 0.2 : 0) + (this.state.taste[artistKey(track)] || 0) / 5;
         // «Моя волна» Яндекса сама подбирает под настроение — её треки подходят сразу, остальные проверим по тегам
         const rotor = !!opts.mood && s.rotorIds.has(track.id);
         return { track, liked: !!liked.length, recency: Math.max(0, ...liked.map(c => c.recency)), affinity, ...(rotor ? { moodOk: true } : {}),
           reason: rotor ? 'Моя волна Яндекса · по настроению' : seed && artistKey(track) === artistKey(seed) ? `Исполнитель из твоих лайков: ${seed.artist}` : 'Рекомендация сервиса' };
       });
     }));
-    // своя волна Nyao: похожее по открытым данным (Last.fm, Deezer) — находим эти треки в своих сервисах
-    const own = this.nyao && this.getSettings().waveNyao !== false ? await bounded(() => this.nyaoCandidates(s, sources, opts), [], 15000) : [];
-    this.ensure(s); this.add(s, [...lists.flat(), ...own]); s.loads++;
+    this.ensure(s); this.add(s, lists.flat()); s.loads++;
+    // своя волна Nyao: похожее по открытым данным (Last.fm, Deezer). Ищется дольше всего — не ждём её:
+    // первые треки играют сразу, найденное добавится к следующему подбору
+    if (this.nyao && this.getSettings().waveNyao !== false && !s.ownLoading) {
+      s.ownLoading = bounded(() => this.nyaoCandidates(s, sources, opts), [], 25000)
+        .then((own) => { if (this.session === s && s.generation === this.generation) this.add(s, own); })
+        .catch(() => {})
+        .finally(() => { s.ownLoading = null; });
+    }
   }
   /**
    * Настроение для треков всех сервисов: сервер Nyao смотрит теги Last.fm («chill», «sad», «energetic»…)
@@ -159,8 +213,8 @@ export class WaveMixer {
       while (i < wanted.length) {
         const w = wanted[i++];
         for (const [, p] of order) {
-          const m = await bounded(() => findMatch({ artist: w.artist, title: w.title, duration: 0 }, (q) => p.search(q), { minScore: 0.72 }), null, 6000);
-          if (m && m.track) {
+          const m = await bounded(() => findMatch({ artist: w.artist, title: w.title, duration: w.duration || 0 }, (q) => p.search(q), { minScore: OWN_MATCH }), null, 6000);
+          if (m && m.track && !tooFar(w, m.track)) {
             const t = m.track;
             out.push({ track: t, liked: s.libraries.some(c => sameRecording(c.track, t)), recency: 0,
               affinity: 0.5 + (this.state.taste[artistKey(t)] || 0) / 5, reason: w.reason || 'Своя волна Nyao' });
@@ -203,8 +257,8 @@ export class WaveMixer {
         const out = [];
         for (const w of ((res && res.tracks) || []).slice(0, 10)) {
           for (const [, p] of order) {
-            const m = await bounded(() => findMatch({ artist: w.artist, title: w.title, duration: 0 }, (q) => p.search(q), { minScore: 0.72 }), null, 6000);
-            if (m && m.track) { out.push({ track: m.track, liked: false, recency: 0, affinity: 0.6, reason: w.reason || 'Своя волна Nyao' }); break; }
+            const m = await bounded(() => findMatch({ artist: w.artist, title: w.title, duration: w.duration || 0 }, (q) => p.search(q), { minScore: OWN_MATCH }), null, 6000);
+            if (m && m.track && !tooFar(w, m.track)) { out.push({ track: m.track, liked: false, recency: 0, affinity: 0.6, reason: w.reason || 'Своя волна Nyao' }); break; }
           }
         }
         return out;
@@ -262,6 +316,7 @@ export class WaveMixer {
   async feedback(type, track, played) {
     if (!track) return;
     const now = Date.now();
+    this.count(type, track, played);
     if (type === 'dislike') {
       this.state.disliked = [track, ...this.state.disliked.filter(t => !sameRecording(t, track))].slice(0, 500);
       this.session?.policy.block(track);
@@ -277,5 +332,43 @@ export class WaveMixer {
     if (type === 'like') this.invalidateLikes();
     this.save();
     if (track.source === 'ya') await bounded(() => this.ya.waveFeedback(type, track, played));
+    else if (TWIN_EVENTS.has(type)) this.twinFeedback(type, track, played);
+  }
+  /**
+   * «Моя волна» Яндекса учится на реакциях. Треки из YouTube, VK, SoundCloud и Spotify она не видит — поэтому находим
+   * такой же трек в Яндексе и сообщаем реакцию на него: так Яндекс учится на всём, что человек слушает в Nyao.
+   * Только если «Моя волна» Яндекса сейчас открыта; найденные пары запоминаются.
+   */
+  async twinFeedback(type, track, played) {
+    const ya = this.ya;
+    if (!ya?.loggedIn || !ya.wave || !ya.search || !track.artist || !track.title) return;
+    const key = `${artistKey(track)}|${normalTitle(track.title)}`;
+    if (!this.twins) this.twins = new Map();
+    let twin = this.twins.get(key);
+    if (twin === undefined) {
+      const m = await bounded(() => findMatch(track, (q) => ya.search(q), { minScore: 0.85 }), null, 6000);
+      twin = m && m.track && m.track.source === 'ya' && !(track.duration > 0 && m.track.duration > 0 && Math.abs(track.duration - m.track.duration) > 10) ? m.track : null;
+      this.twins.set(key, twin);
+      if (this.twins.size > 3000) this.twins.delete(this.twins.keys().next().value);
+    }
+    if (twin) await bounded(() => ya.waveFeedback(type, twin, played));
+  }
+  /** Счётчики текущей волны — для отладки в Nyao Music Red: что играет, откуда и что скипают */
+  count(type, track, played) {
+    const st = this.stats;
+    if (!st) return;
+    const src = track.source || '?';
+    const why = track.waveReason || '';
+    const bucket = LIKED_REASONS.has(why) ? 'likes' : /исполнител|Ещё от/i.test(why) ? 'artist' : /Nyao/i.test(why) || /Похож/i.test(why) ? 'nyao' : /Яндекс/i.test(why) ? 'rotor' : 'other';
+    const by = (st.by[`${src}:${bucket}`] ||= { started: 0, skipped: 0 });
+    if (type === 'trackStarted') {
+      st.started++; by.started++;
+      if (LIKED_REASONS.has(why)) st.fromLikes++;
+      const a = artistKey(track);
+      if (a && st.lastArtists.includes(a)) st.artistRepeats++;
+      st.lastArtists = [...st.lastArtists.slice(-9), a];
+    }
+    if (type === 'skip' && played < 30) { st.skipped++; by.skipped++; }
+    if (type === 'like') st.liked++;
   }
 }

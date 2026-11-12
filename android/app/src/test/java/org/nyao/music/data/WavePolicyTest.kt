@@ -75,7 +75,7 @@ class WavePolicyTest {
         val random = { seed = (seed * 1664525 + 1013904223) and 0xffffffffL; seed.toDouble() / 4294967296.0 }
         val sources = listOf("ya", "yt", "sc", "vk", "sp")
         val input = (0 until 120).map { i -> WaveCandidate(track(i.toString(), sources[i % 5], "Артист "+i%8), i < 80, if (i < 40) 0.9 else 0.05) }
-        val expected = listOf("sp:9", "ya:5", "ya:75", "vk:23", "ya:0", "yt:81", "ya:30", "sc:2", "ya:40", "ya:15", "sc:22", "ya:35", "yt:66", "ya:25", "ya:20", "ya:80", "sp:19", "vk:18", "ya:45", "vk:38")
+        val expected = listOf("sp:9", "ya:5", "ya:75", "vk:23", "ya:0", "yt:86", "ya:10", "sc:12", "ya:40", "ya:25", "vk:13", "ya:35", "sc:47", "ya:30", "ya:20", "ya:90", "yt:16", "ya:15", "sc:62", "sp:34")
         assertEquals(expected, WavePolicy(random).select(input, "favorite", 100, 40, 20).map { it.id })
     }
 }

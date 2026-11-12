@@ -1338,6 +1338,8 @@ function registerIpc() {
 
   handle('wave:start', () => wave.start());
   handle('wave:more', (queueIds) => wave.more(queueIds || []));
+  handle('wave:retune', (queueIds) => wave.retune(queueIds || []));
+  handle('wave:stats', () => wave.stats || null);
   handle('wave:feedback', (type, track, played) => wave.feedback(type, track, played));
 
   handle('catalog:artist', (ref) => catalog.artist(ref));

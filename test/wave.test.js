@@ -132,7 +132,7 @@ test('desktop and Android share a deterministic selection fixture', () => {
   let seed=42; const random=()=>((seed=(seed*1664525+1013904223)>>>0)/4294967296);
   const sources=['ya','yt','sc','vk','sp'];
   const input=Array.from({length:120},(_,i)=>({track:track(i,sources[i%5],{artist:'Артист '+i%8}),liked:i<80,recency:i<40?0.9:0.05,affinity:0}));
-  assert.deepEqual(new WavePolicy({random}).select(input,{diversity:'favorite',fresh:100,share:40,size:20}).map(t=>t.id),["sp:9","ya:5","ya:75","vk:23","ya:0","yt:81","ya:30","sc:2","ya:40","ya:15","sc:22","ya:35","yt:66","ya:25","ya:20","ya:80","sp:19","vk:18","ya:45","vk:38"]);
+  assert.deepEqual(new WavePolicy({random}).select(input,{diversity:'favorite',fresh:100,share:40,size:20}).map(t=>t.id),["sp:9","ya:5","ya:75","vk:23","ya:0","yt:86","ya:10","sc:12","ya:40","ya:25","vk:13","ya:35","sc:47","ya:30","ya:20","ya:90","yt:16","ya:15","sc:62","sp:34"]);
 });
 test('своя волна Nyao: затравка уходит на сервер, ответ находится в подключённом сервисе', async () => {
   let body = null;
@@ -145,6 +145,8 @@ test('своя волна Nyao: затравка уходит на сервер,
     nyao: { mix: async (b) => { body = b; return { tracks: [{ artist: 'Band C', title: 'Song C', reason: 'Похоже на «Song L1»' }] }; } }
   });
   const out = await w.start();
+  // своя волна ищется в фоне и не задерживает первые треки — дожидаемся её
+  if (w.session.ownLoading) await w.session.ownLoading;
   assert.ok(body && body.seeds.length >= 1, 'затравка отправлена');
   assert.ok(body.seeds.every((s) => s.artist && s.title));
   const s = w.session;
@@ -201,4 +203,32 @@ test('настроение: треки других источников под�
   assert.ok(ids.includes('ya:Calm1') || ids.includes('ya:Calm2'), ids.join(','));
   assert.ok(!ids.includes('ya:Loud1'), ids.join(','));
   assert.ok(!asked.some((t) => t.title === 'R1'), 'треки «Моей волны» не проверяем — они уже под настроение');
+});
+
+test('исполнитель не повторяется чаще раза за 8 треков и не больше двух раз за 30, если есть из чего выбрать', () => {
+  const p = new WavePolicy({ random: seeded(7) });
+  const input = Array.from({ length: 300 }, (_, i) => ({ track: track(i, 'ya', { artist: 'A' + (i % 20) }), liked: true, recency: 0.9 }));
+  const out = p.select(input, { diversity: 'favorite', fresh: 100, size: 30 });
+  out.forEach((t, i) => {
+    const prev = out.slice(Math.max(0, i - 8), i).map((x) => x.artist);
+    assert.ok(!prev.includes(t.artist), `${t.artist} повторился через ${i - out.slice(0, i).map((x) => x.artist).lastIndexOf(t.artist)}`);
+  });
+  const counts = {}; out.forEach((t) => { counts[t.artist] = (counts[t.artist] || 0) + 1; });
+  assert.ok(Object.values(counts).every((n) => n <= 2));
+});
+test('каверы, караоке и speed up не попадают в волну, если их нет в лайках; лайкнутая версия — попадает', async () => {
+  const { oddVersion } = await import('../src/main/wave.js');
+  assert.ok(oddVersion({ title: 'Song (Sped Up)' }));
+  assert.ok(oddVersion({ title: 'Song - Karaoke Version' }));
+  assert.ok(oddVersion({ title: 'Песня (кавер)' }));
+  assert.ok(!oddVersion({ title: 'Cover Me Up' }), 'песня со словом cover в названии — не кавер');
+  assert.ok(oddVersion({ title: 'Numb (Piano Cover)' }));
+  assert.ok(oddVersion({ title: 'Numb - cover by Someone' }));
+  assert.ok(!oddVersion({ title: 'Speedway' }));
+  assert.ok(!oddVersion({ title: 'Slow Dancing in the Dark' }));
+  const w = new WaveMixer({ getSettings: () => ({}) });
+  const s = { generation: 0, policy: new WavePolicy(), candidates: [], excludedIds: new Set() };
+  w.session = s;
+  w.add(s, [{ track: track('k', 'ya', { title: 'Hit (Nightcore)' }), liked: false }, { track: track('l', 'ya', { title: 'Hit (Nightcore)' }), liked: true }, { track: track('o', 'ya', { title: 'Hit' }), liked: false }]);
+  assert.deepEqual(s.candidates.map((c) => c.track.id).sort(), ['ya:l', 'ya:o']);
 });

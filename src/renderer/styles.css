@@ -1514,3 +1514,12 @@ body.live-mode #pb-shuffle, body.live-mode #pb-repeat, body.live-mode #pb-radio,
   .trow, .tile .cover, .btn, .chip, .icbtn, .srow, .srow-ch, .ptab, .switch span, .rail .nav-btn, .rail .nav-btn svg, .playerbar .ic, .playerbar .play, .playerbar .cover-btn, .menu button, .toast, .trow .more { transition: none; }
   .tile:hover .cover, .playerbar .ic:hover, .playerbar .play:hover, .playerbar .cover-btn:hover, .rail .nav-btn:hover svg, .srow:hover .srow-ch { transform: none; }
 }
+
+/* Red: отладка волны */
+.wave-stats .ws-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.wave-stats .ws-grid div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 14px; background: var(--s2); }
+.wave-stats .ws-grid b { font-size: 18px; font-weight: 700; }
+.wave-stats .ws-grid span { font-size: 12px; color: var(--muted); }
+.wave-stats .ws-rows { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.wave-stats .ws-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.wave-stats .ws-row > span:first-child { display: inline-flex; gap: 6px; align-items: center; }

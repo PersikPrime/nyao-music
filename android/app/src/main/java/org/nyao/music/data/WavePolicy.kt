@@ -93,8 +93,15 @@ class WavePolicy(private val random: () -> Double = { Math.random() }) {
             fun cooled(group: List<WaveCandidate>): Boolean = group.none { c -> c.track.id in recentIds || heardIndex.has(c.track) }
             val freshKinds = groups.filter { cooled(it) }.map { kindOf(it) }.toSet()
             val cooledGroups = groups.filter { cooled(it) || kindOf(it) !in freshKinds }
-            val recentArtists = selected.takeLast(3).map { artistKey(it) }.filter { it.isNotEmpty() }
-            val choices = cooledGroups.filter { artistKey(it[0].track) !in recentArtists }.ifEmpty { cooledGroups }
+            // Разнообразие исполнителей: не чаще раза за 8 треков и не больше 2 раз за 30, иначе мягче (последние 3).
+            // Те же правила, что в wave-policy.js на ПК — общий тест держит их одинаковыми.
+            val near = selected.takeLast(8).map { artistKey(it) }.filter { it.isNotEmpty() }.toSet()
+            val counts = HashMap<String, Int>()
+            for (t in selected.takeLast(30)) { val k = artistKey(t); if (k.isNotEmpty()) counts[k] = (counts[k] ?: 0) + 1 }
+            val last3 = selected.takeLast(3).map { artistKey(it) }.filter { it.isNotEmpty() }.toSet()
+            val choices = cooledGroups.filter { val k = artistKey(it[0].track); k !in near && (counts[k] ?: 0) < 2 }
+                .ifEmpty { cooledGroups.filter { artistKey(it[0].track) !in last3 } }
+                .ifEmpty { cooledGroups }
             val available = choices.flatten().map { it.track.source }.distinct()
             val extras = available.filter { it != SOURCE_YA }
             fun weight(source: String): Double = if (SOURCE_YA in available && extras.isNotEmpty()) {

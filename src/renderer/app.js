@@ -268,8 +268,34 @@ function waveControlsHtml(compact = false) {
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span><span class="eyebrow">Своя волна Nyao · бета</span>${compact ? '' : '<span class="hint" style="display:block;margin-top:4px">Похожее по открытым данным (Last.fm, Deezer) — для всех сервисов сразу. Мы находим эти треки в твоих сервисах.</span>'}</span>
       <button class="switch ${s.waveNyao !== false ? 'on' : ''}" role="switch" aria-checked="${s.waveNyao !== false}" aria-label="Своя волна Nyao" data-action="wave-nyao" style="flex-shrink:0"><span></span></button></div>
-  </div>`;
+  </div>
+  ${!compact && state.versionInfo && state.versionInfo.channel === 'nightly' ? '<div class="card wave-stats" id="wave-stats"><span class="eyebrow">Отладка волны · только в Red</span><div class="hint" style="margin-top:6px">Включи волну — здесь появятся цифры этой сессии.</div></div>' : ''}`;
 }
+
+/** Red: цифры текущей волны — сколько из лайков, сколько скипов, повторы исполнителя и что скипают по источникам */
+const WAVE_BUCKET = { likes: 'лайки', artist: 'ещё от исполнителя', nyao: 'своя волна', rotor: 'Моя волна Яндекса', other: 'рекомендации' };
+async function fillWaveStats() {
+  const box = document.getElementById('wave-stats');
+  if (!box || !api.wave || !api.wave.stats) return;
+  const st = await api.wave.stats().catch(() => null);
+  if (!st || !document.body.contains(box)) return;
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  const rows = Object.entries(st.by).sort((a, b) => b[1].started - a[1].started).slice(0, 8).map(([k, v]) => {
+    const [src, bucket] = k.split(':');
+    return `<div class="ws-row"><span>${badge(src)} ${esc(WAVE_BUCKET[bucket] || bucket)}</span><span>${v.started} · скипов ${pct(v.skipped, v.started)}%</span></div>`;
+  }).join('');
+  box.innerHTML = `<span class="eyebrow">Отладка волны · только в Red</span>
+    <div class="ws-grid">
+      <div><b>${(st.startMs / 1000).toFixed(1)} с</b><span>старт</span></div>
+      <div><b>${st.retuneMs ? (st.retuneMs / 1000).toFixed(1) + ' с' : '—'}</b><span>перенастройка</span></div>
+      <div><b>${st.started}</b><span>треков</span></div>
+      <div><b>${pct(st.fromLikes, st.started)}%</b><span>из лайков</span></div>
+      <div><b>${pct(st.skipped, st.started)}%</b><span>скипов до 30 с</span></div>
+      <div><b>${st.artistRepeats}</b><span>повторов исполнителя за 10</span></div>
+    </div>
+    ${rows ? `<div class="ws-rows">${rows}</div>` : ''}`;
+}
+setInterval(() => { if (document.getElementById('wave-stats')) fillWaveStats(); }, 4000);
 
 // ---------- Акцентный цвет ----------
 let accentPalette = paletteFor('lavender', { mac: IS_MAC });

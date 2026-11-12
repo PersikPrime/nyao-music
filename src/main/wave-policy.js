@@ -42,6 +42,18 @@ export function waveTargets(diversity, fresh) {
   const recent = liked * f * (diversity === 'favorite' ? 7 / 9 : 0.8);
   return { recent, library: liked - recent, related: 1 - liked };
 }
+export const ARTIST_GAP = 8, ARTIST_WINDOW = 30, ARTIST_MAX = 2;
+export function artistDiverse(groups, selected) {
+  const keyOf = g => artistKey(g[0].track);
+  const near = new Set(selected.slice(-ARTIST_GAP).map(artistKey).filter(Boolean));
+  const counts = new Map();
+  for (const t of selected.slice(-ARTIST_WINDOW)) { const k = artistKey(t); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
+  const strict = groups.filter(g => !near.has(keyOf(g)) && (counts.get(keyOf(g)) || 0) < ARTIST_MAX);
+  if (strict.length) return strict;
+  const last3 = new Set(selected.slice(-3).map(artistKey).filter(Boolean));
+  const soft = groups.filter(g => !last3.has(keyOf(g)));
+  return soft.length ? soft : groups;
+}
 export class WavePolicy {
   constructor({ random = Math.random } = {}) {
     this.random = random;
@@ -79,9 +91,9 @@ export class WavePolicy {
       // Cooldown competes WITHIN a category. Otherwise old unheard tracks erase the freshness target.
       const freshKinds = new Set(groups.filter(cooled).map(kindOf));
       const cooledGroups = groups.filter(g => cooled(g) || !freshKinds.has(kindOf(g)));
-      const recentArtists = this.selected.slice(-3).map(artistKey).filter(Boolean);
-      const diverse = cooledGroups.filter(g => !recentArtists.includes(artistKey(g[0].track)));
-      const choices = diverse.length ? diverse : cooledGroups;
+      // Разнообразие исполнителей: не чаще раза за 8 треков и не больше 2 раз за 30. Если так не из чего выбрать —
+      // мягче (последние 3), и только потом без ограничений. Те же правила в Android (WavePolicy.kt).
+      const choices = artistDiverse(cooledGroups, this.selected);
       const sources = [...new Set(choices.flat().map(c => c.track.source))];
       const extras = sources.filter(s => s !== 'ya');
       const weights = Object.fromEntries(sources.map(s => [s, sources.includes('ya') && extras.length ?

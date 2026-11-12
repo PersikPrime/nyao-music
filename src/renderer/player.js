@@ -158,7 +158,9 @@ export class Player extends EventTarget {
     if (this.mode !== 'wave') return;
     const generation = ++this.queueGeneration;
     this.loadingMore = false;
-    const tracks = await api.wave.start();
+    // перенастройка без полного перезапуска: текущий трек остаётся, хвост пересобирается из уже найденного
+    const cur0 = this.current;
+    const tracks = api.wave.retune ? await api.wave.retune(cur0 ? [cur0.id] : []) : await api.wave.start();
     if (generation !== this.queueGeneration || this.mode !== 'wave') return;
     const cur = this.current;
     this.queue = cur ? [cur, ...tracks.filter((t) => t.id !== cur.id)] : tracks;

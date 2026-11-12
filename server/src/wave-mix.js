@@ -43,7 +43,7 @@ export function waveMixer({ lastfmKey = '', fetch = globalThis.fetch, log = () =
     const u = `https://ws.audioscrobbler.com/2.0/?method=track.getsimilar&autocorrect=1&limit=30&format=json&api_key=${encodeURIComponent(lastfmKey)}&artist=${encodeURIComponent(firstArtist(artist))}&track=${encodeURIComponent(title)}`;
     const j = await json(u);
     const list = j && j.similartracks && Array.isArray(j.similartracks.track) ? j.similartracks.track : [];
-    return list.map((t) => ({ artist: t.artist && t.artist.name, title: t.name, score: 0.5 + 0.5 * Number(t.match || 0) })).filter((t) => t.artist && t.title);
+    return list.map((t) => ({ artist: t.artist && t.artist.name, title: t.name, duration: Number(t.duration) || 0, score: 0.5 + 0.5 * Number(t.match || 0) })).filter((t) => t.artist && t.title);
   }
 
   /** Last.fm: похожие исполнители и их популярное — запасной путь, если по треку пусто */
@@ -71,12 +71,12 @@ export function waveMixer({ lastfmKey = '', fetch = globalThis.fetch, log = () =
     const out = [];
     if (own) {
       const top = await json(`https://api.deezer.com/artist/${aid}/top?limit=10`);
-      for (const t of (top && top.data) || []) out.push({ artist: t.artist && t.artist.name, title: t.title, score: 0.6, own: true });
+      for (const t of (top && top.data) || []) out.push({ artist: t.artist && t.artist.name, title: t.title, duration: Number(t.duration) || 0, score: 0.6, own: true });
     }
     const rel = await json(`https://api.deezer.com/artist/${aid}/related?limit=10`);
     for (const r of shuffled((rel && rel.data) || []).slice(0, 3)) {
       const top = await json(`https://api.deezer.com/artist/${r.id}/top?limit=5`);
-      for (const t of (top && top.data) || []) out.push({ artist: r.name, title: t.title, score: 0.5, via: firstArtist(artist) });
+      for (const t of (top && top.data) || []) out.push({ artist: r.name, title: t.title, duration: Number(t.duration) || 0, score: 0.5, via: firstArtist(artist) });
     }
     return out.filter((t) => t.artist && t.title);
   }
@@ -117,7 +117,8 @@ export function waveMixer({ lastfmKey = '', fetch = globalThis.fetch, log = () =
       if ((perArtist.get(a) || 0) >= 2) continue;
       seen.add(key);
       perArtist.set(a, (perArtist.get(a) || 0) + 1);
-      out.push({ artist: c.artist, title: c.title, reason: c.reason });
+      // длительность помогает приложению отличить оригинал от кавера и чужой песни с тем же названием
+      out.push({ artist: c.artist, title: c.title, ...(c.duration > 0 ? { duration: c.duration } : {}), reason: c.reason });
       if (out.length >= size) break;
     }
     return out;
