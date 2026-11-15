@@ -14,9 +14,21 @@ import { releaseAgo } from './releases.js';
 import { arrangeSearch } from './search.js';
 import { createFriends } from './friends.js';
 import { createQol, startupVolume } from './qol.js';
+import { createUi2 } from './ui2.js';
 import { handoffPlan, queueSnapshot, REACTIONS, JOIN_BASE, trackLink, profileLink, livePosition, parseRoomCode, roomSyncPlan, queueForTransfer, PERIODS, num, plural as pl, minutesText, periodTitle, statFacts } from './social.js';
 
 const api = window.nyao;
+// заставка с логотипом (index.html, #splash): играет сама на CSS, здесь только убираем её из страницы
+{
+  const splash = document.getElementById('splash');
+  if (splash) {
+    const done = () => splash.remove();
+    splash.addEventListener('animationend', (e) => { if (e.animationName === 'splash-out') done(); });
+    setTimeout(done, 2600);
+  }
+}
+/** «Новый интерфейс» (ui2.js) — создаётся ниже, когда готовы все помощники */
+let ui2 = null;
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const view = $('#view');
@@ -545,6 +557,7 @@ function greeting() {
 }
 
 function renderHome() {
+  if (ui2 && ui2.on()) return ui2.home();
   if (layout() === 'player') return renderHomePlayer();
   const loggedAny = SERVICES.some(x => state.status[x.id]);
   const name = (state.status.ya && state.status.ya.name) || '';
@@ -611,6 +624,18 @@ function quickTile(q) {
 function homeName() {
   const n = (state.cloud.loggedIn && state.cloud.user && state.cloud.user.name) || (state.status.ya && state.status.ya.name) || '';
   return n.split(' ')[0];
+}
+/** Быстрые плитки (лайки, волна, плейлисты) — для новой главной */
+function quickGridHtml() {
+  if (!state.lib.lists && !state.lib.counts) return qgridSkeleton();
+  const waveOn = player.mode === 'wave' && player.playing;
+  const tiles = [
+    ...likedEntries().slice(0, 4).map((l) => ({ ...l, icon: Q_ICON.heart, attrs: `data-action="open-pl" data-id="${esc(l.id)}"` })),
+    ...(state.lib.lists || []).slice(0, 12).map((p) => ({ title: p.title, source: p.source, cover: p.cover, sub: p.source === 'mix' ? `Мой микс · ${p.count || 0}` : srcName(p.source), icon: Q_ICON.list, attrs: `data-action="open-pl" data-id="${esc(p.id)}"` })),
+    { title: 'История', source: 'mix', sub: 'Что играло недавно', icon: Q_ICON.list, attrs: 'data-action="go" data-route="history"' }
+  ].slice(0, 8);
+  void waveOn;
+  return `<section class="qgrid">${tiles.map(quickTile).join('')}</section>`;
 }
 function renderHomePlayer() {
   const loggedAny = SERVICES.some(x => state.status[x.id]);
@@ -1018,6 +1043,7 @@ function renderArtist() {
     view.innerHTML = `<div class="page-view"><div class="artist-hero"><button class="back" data-action="back">${ICONS.back}Назад</button><div class="in">${st.error ? `<h1 class="artist-name" style="font-size:32px">Не удалось открыть исполнителя</h1><span class="muted">${esc(st.error)}</span>` : '<div class="skeleton" style="height:80px;width:50%"></div>'}</div></div></div>`;
     return;
   }
+  if (ui2 && ui2.on()) return ui2.artist();
   const pref = sourcePref();
   const kinds = [['album', 'Альбомы'], ['single', 'Синглы и EP'], ['compilation', 'Сборники']].filter(([k]) => a.albums.some((x) => x.kind === k));
   const kind = kinds.some(([k]) => k === st.kind) ? st.kind : (kinds[0] || ['album'])[0];
@@ -1140,6 +1166,7 @@ function renderAlbum() {
     view.innerHTML = `<div class="page-view"><section class="album-head"><button class="back" data-action="back">${ICONS.back}Назад</button>${st.error ? `<div class="info"><h1 style="font-size:32px">Не удалось открыть альбом</h1><span class="muted">${esc(st.error)}</span></div>` : '<div class="skeleton cover" style="width:240px;height:240px"></div>'}</section></div>`;
     return;
   }
+  if (ui2 && ui2.on()) return ui2.album();
   const pref = sourcePref();
   lists['album'] = al.tracks;
   const total = al.tracks.reduce((s, r) => s + (r.duration || 0), 0);
@@ -1651,6 +1678,7 @@ function sectionTitle(sec) {
 function renderSettings() {
   const sec = state.params && state.params.section;
   if (sec) return renderSettingsSection(sec);
+  if (ui2 && ui2.on()) { ui2.settings(); refreshLastfm(); return; }
   const c = state.cloud;
   const u = c.user || {};
   const prof = state.social && state.social.profile;
@@ -2006,7 +2034,7 @@ function devCardHtml() {
     group('Приколы', `<div class="hint">Ломают вид и поведение, но приложение остаётся рабочим. Только в этом окне: перезапуск, плашка «Сбросить приколы» или Ctrl+Shift+Backspace — и всё как было.</div>
       <div class="dev-btns">${PRANKS.map(([id, title, hint]) => `<button class="btn ${pranks.has(id) ? 'primary' : ''}" data-action="dev-prank" data-v="${id}" title="${esc(hint)}">${pranks.has(id) ? '✓ ' : ''}${esc(title)}</button>`).join('')}</div>
       ${pranks.active().length ? '<div class="dev-btns"><button class="btn" data-action="dev-prank-reset">Сбросить все приколы</button></div>' : ''}`),
-    group('Флаги', `<div class="pref-row"><span><b>Spotify (librespot)</b><span class="hint">Экспериментальный нативный плеер. Добавляет отдельную привязку Spotify в сервисах. Только nightly на ПК.</span></span><button class="switch ${state.spotify?.native?.flag ? 'on' : ''}" role="switch" aria-checked="${!!state.spotify?.native?.flag}" aria-label="Spotify (librespot)" data-action="dev-librespot-flag"><span></span></button></div>${state.spotify?.native?.flag ? '<button class="btn" data-action="set-sec" data-sec="svc:sp-native">Открыть Spotify (librespot)</button>' : ''}`)
+    group('Флаги', `<div class="pref-row"><span><b>Новый интерфейс</b><span class="hint">Пробный вид главной, исполнителя, альбома и настроек, плавающий плеер и новый вход (аккаунт или гость). Данные и плеер те же — выключил, и всё как было.</span></span><button class="switch ${state.settings.uiFable ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.uiFable}" aria-label="Новый интерфейс" data-action="dev-ui2"><span></span></button></div>${state.settings.uiFable ? '<div class="dev-btns"><button class="btn" data-action="dev-ui2-welcome">Показать новый вход</button></div>' : ''}<div class="pref-row"><span><b>Spotify (librespot)</b><span class="hint">Экспериментальный нативный плеер. Добавляет отдельную привязку Spotify в сервисах. Только nightly на ПК.</span></span><button class="switch ${state.spotify?.native?.flag ? 'on' : ''}" role="switch" aria-checked="${!!state.spotify?.native?.flag}" aria-label="Spotify (librespot)" data-action="dev-librespot-flag"><span></span></button></div>${state.spotify?.native?.flag ? '<button class="btn" data-action="set-sec" data-sec="svc:sp-native">Открыть Spotify (librespot)</button>' : ''}`)
   ].join('');
 }
 async function loadDevInfo() {
@@ -3771,6 +3799,14 @@ async function handleAction(el, e) {
     case 'vk-log':
       api.vkLog && api.vkLog();
       break;
+    case 'dev-ui2':
+      state.settings = await api.settings.set({ uiFable: !state.settings.uiFable });
+      ui2.apply();
+      renderSettings();
+      break;
+    case 'dev-ui2-welcome':
+      ui2.welcome();
+      break;
     case 'dev-librespot-flag':
     case 'native-save-id':
     case 'native-login':
@@ -4147,6 +4183,19 @@ $('.vol').addEventListener('wheel', (e) => {
   volEl.value = Math.max(0, Math.min(100, Number(volEl.value) + (e.deltaY < 0 ? 5 : -5)));
   volEl.dispatchEvent(new Event('input'));
 }, { passive: false });
+ui2 = createUi2({
+  api, state, player, view, lists, $, esc, fmt, ICONS, SERVICES, MOODS, RI, TG_ICON, ACCENTS, paletteFor, IS_MAC, Ribbon, normalizeEq,
+  coverHtml, badge, artistLink, pick, sourcePref, favOf, greeting, homeName, continueHtml, releasesHtml, quickGridHtml, shelfSkeleton,
+  injectOutage, accentColor, loadLiked, svcDot, nyaoAvatar, layout, addonsOn, isDev, srcName, mergedRowHtml, tracksHtml, profileTabs, cloudLogin,
+  lyricsName: () => LYRIC_PROVIDERS[(lyricsOrder().find((p) => p.on) || { id: 'ya' }).id].name,
+  setSettings: async (patch) => { state.settings = await api.settings.set(patch); return state.settings; },
+  loginSvc: async (svc) => {
+    try { await api.auth.login(svc); toast(`${srcName(svc)}: вход выполнен`); } catch (err) { toast(err.message, true); }
+    await afterAuthChange();
+  },
+  openSection: (sec) => go('settings', { section: sec }),
+  rerender: () => { if (RENDER[state.route]) RENDER[state.route](); }
+});
 const qol = createQol({ player, settings: () => state.settings, applyVolume: (v) => player.setVolume(v), toast });
 /** Таймер сна: меню у кнопки с луной */
 function openSleepMenu(r) {
@@ -4641,6 +4690,7 @@ function openMixBuilder() {
 // ---------- Старт ----------
 (async function init() {
   state.settings = await api.settings.get();
+  ui2.apply();
   refreshAccent();
   if (IS_MAC) bgRibbon = new Ribbon($('#bg-ribbon'), { lines: 20, cy: 0.58, amp: 1, width: 1.7, accent: accentColor(), alpha: 0.9 });
   eq.apply(state.settings.eq);
@@ -4740,7 +4790,9 @@ function openMixBuilder() {
   window.__nyaoReady = true;
   // обновился с версии, где вида ещё не было: один раз предлагаем выбрать
   if (state.settings.onboarded && !state.settings.layout) askLayout();
-  if (!state.settings.onboarded) {
+  // новый интерфейс: вместо старого приветствия — выбор «аккаунт или гость», пока человек не выбрал
+  if (ui2.on() && !state.cloud.loggedIn && !state.settings.guest) ui2.welcome();
+  else if (!state.settings.onboarded) {
     // Кто уже входил в аккаунты в прошлых сборках — тому приветствие не показываем
     if (state.status.ya || state.status.yt) state.settings = await api.settings.set({ onboarded: true });
     else openOnboarding();

@@ -8,8 +8,21 @@
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Unbounded:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="theme-mac.css">
+<link rel="stylesheet" href="ui2.css">
 </head>
 <body>
+<!-- Заставка: логотип рисуется и уезжает на своё место в заголовке (ui2.css, убирается в app.js) -->
+<div id="splash" aria-hidden="true">
+  <svg class="sp-logo" viewBox="0 0 120 120">
+    <rect width="120" height="120" rx="27" fill="#13111C"/>
+    <rect x="1" y="1" width="118" height="118" rx="26" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="2"/>
+    <g fill="none" stroke-width="11" stroke-linecap="round">
+      <path class="w1" pathLength="1" d="M20 52c13-22 27-22 40 0s27 22 40 0" stroke="#FFD60A"/>
+      <path class="w2" pathLength="1" d="M20 68c13-22 27-22 40 0s27 22 40 0" stroke="#F0574A"/>
+      <path class="w3" pathLength="1" d="M20 60c13-22 27-22 40 0s27 22 40 0" stroke="#D8CEFF"/>
+    </g>
+  </svg>
+</div>
 <!-- Фон для темы macOS: цветные пятна и живая лента под стеклом -->
 <div class="backdrop" aria-hidden="true">
   <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="blob b4"></div>
