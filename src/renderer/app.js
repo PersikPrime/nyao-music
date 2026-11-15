@@ -4185,7 +4185,7 @@ $('.vol').addEventListener('wheel', (e) => {
   volEl.dispatchEvent(new Event('input'));
 }, { passive: false });
 ui2 = createUi2({
-  api, state, player, view, lists, $, esc, fmt, ICONS, SERVICES, MOODS, RI, TG_ICON, ACCENTS, paletteFor, IS_MAC, Ribbon, normalizeEq,
+  api, state, player, view, lists, $, esc, fmt, ICONS, SERVICES, MOODS, DIVERSITY, RI, TG_ICON, ACCENTS, paletteFor, IS_MAC, Ribbon, normalizeEq,
   coverHtml, badge, artistLink, pick, sourcePref, favOf, greeting, homeName, continueHtml, releasesHtml, quickGridHtml, shelfSkeleton,
   injectOutage, accentColor, loadLiked, svcDot, nyaoAvatar, layout, addonsOn, isDev, srcName, mergedRowHtml, tracksHtml, profileTabs, cloudLogin,
   lyricsName: () => LYRIC_PROVIDERS[(lyricsOrder().find((p) => p.on) || { id: 'ya' }).id].name,

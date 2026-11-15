@@ -691,11 +691,11 @@ export class FullScreen {
     const art = this.$('.fs-art');
     const from = this.sourceRect();
     const done = () => {
-      // полный экран успели закрыть, пока летела обложка, — не прячем интерфейс заново (иначе чёрное окно)
-      if (!this.open) return;
-      document.body.classList.add('fs-on');
+      // обложку в плашке возвращаем всегда, иначе в плеере остаётся пустой квадрат
       const src = this.sourceEl();
       if (src) src.style.visibility = '';
+      // полный экран успели закрыть, пока летела обложка, — не прячем интерфейс заново (иначе чёрное окно)
+      if (this.open) document.body.classList.add('fs-on');
     };
     const to = art && art.getBoundingClientRect ? art.getBoundingClientRect() : null;
     if (!this.canAnimate() || !to || !to.width || !this.open) return done();

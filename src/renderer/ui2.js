@@ -196,7 +196,8 @@ export function createUi2(c) {
     </div>`;
   }
 
-  // ---------- Настройки: всё на одном экране ----------
+  // ---------- Настройки: всё на одном экране (макет «6 · Настройки» со страницы Fable) ----------
+  const WAVE_LINE = (y) => `M0 ${y}c22-22 44-22 66 0s44 22 66 0 44-22 66 0 44 22 62 0`;
   function settings() {
     const cl = state.cloud;
     const u = cl.user || {};
@@ -204,45 +205,76 @@ export function createUi2(c) {
     const s = state.settings;
     const connected = SERVICES.filter((x) => state.status[x.id]);
     const curAccent = s.accent || 'lavender';
-    const tile = (sec, icon, title, sub, extra = '') => `<button class="u2-tile" data-action="set-sec" data-sec="${sec}"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="${icon}"/></svg></span><b>${title}</b><span class="s">${sub}</span>${extra}</button>`;
+    const eq = c.normalizeEq(s.eq);
+    const ownOn = s.waveNyao !== false;
+    const div = (c.DIVERSITY.find((d) => d[0] === s.waveDiversity) || c.DIVERSITY[0])[1].toLowerCase();
+    const mood = s.waveMood ? (c.MOODS.find((m) => m[0] === s.waveMood) || [0, ''])[1].toLowerCase() : '';
+    const sw = (on, action, label) => `<button class="switch ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="${label}" data-action="${action}"><span></span></button>`;
+    const tile = (sec, icon, title, sub, k) => `<button class="u2-tile" data-k="${esc(k)}" data-action="set-sec" data-sec="${sec}"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="${icon}"/></svg></span><b>${title}</b><span class="s">${sub}</span></button>`;
     const upd = state.update.info && state.update.info.available;
+    const tabs = state.route === 'prefs' ? '' : `<div class="u2-stabs"><button class="on" data-action="go" data-route="settings">Профиль</button><button data-action="go" data-route="friends">Друзья</button><button data-action="go" data-route="together">Вместе</button></div>`;
     view.innerHTML = `<div class="scroll u2-settings">
-      ${state.route === 'prefs' ? '<h1 class="page">Настройки</h1>' : c.profileTabs('settings')}
+      <div class="u2-shead">
+        <h1 class="page">Настройки</h1>${tabs}
+        <label class="search-field u2-sfind">${ICONS.search}<input type="search" data-u2find placeholder="Найти настройку: «эквалайзер», «трей», «Last.fm»…" aria-label="Найти настройку"></label>
+      </div>
       <div class="u2-bento">
-        <section class="u2-box span2 u2-prof">
+        <section class="u2-box span2 u2-prof" data-k="аккаунт nyao профиль приватность устройства статистика telegram вход выход">
           ${c.nyaoAvatar('u2-av')}
-          <div class="tx"><b>${esc(cl.loggedIn ? u.name || 'Аккаунт Nyao' : 'Гость')}</b>
+          <div class="tx"><button class="u2-name" data-action="set-sec" data-sec="account" title="Аккаунт Nyao: вход, выход, синхронизация">${esc(cl.loggedIn ? u.name || 'Аккаунт Nyao' : 'Гость')}</button>
             <span class="hint">${cl.loggedIn ? (prof ? '@' + esc(prof.nick) + ' · ' : '') + 'аккаунт Nyao · синхронизация включена' : cl.logging ? 'Подтверди вход в Telegram' : 'История и настройки — только на этом компьютере'}</span>
             <div class="row">${cl.loggedIn
-              ? '<button class="btn sm" data-action="go" data-route="profile">Профиль и приватность</button><button class="btn sm" data-action="open-connect">Устройства</button><button class="btn sm" data-action="go" data-route="stats">Статистика</button>'
-              : cl.logging ? '<button class="btn sm" data-action="cloud-cancel">Отмена</button>' : `<button class="btn sm primary tg" data-action="cloud-login">${c.TG_ICON}Войти через Telegram</button><button class="btn sm" data-action="go" data-route="stats">Статистика</button>`}</div>
+              ? '<button class="u2-pill" data-action="go" data-route="profile">Профиль и приватность</button><button class="u2-pill" data-action="open-connect">Устройства</button><button class="u2-pill" data-action="go" data-route="stats">Статистика</button>'
+              : cl.logging ? '<button class="u2-pill" data-action="cloud-cancel">Отмена</button>' : `<button class="u2-pill tg" data-action="cloud-login">${c.TG_ICON}Войти через Telegram</button><button class="u2-pill" data-action="go" data-route="stats">Статистика</button>`}</div>
           </div>
         </section>
-        <section class="u2-box span2">
+        <section class="u2-box span2" data-k="сервисы яндекс youtube soundcloud vk spotify вход подключить">
           <div class="u2-h"><h2>Сервисы</h2><span class="hint">подключено ${connected.length} из ${SERVICES.length}</span></div>
           <div class="u2-svcs">${SERVICES.map((x) => { const acc = state.status[x.id]; return `<button class="${acc ? 'on' : ''}" data-action="set-sec" data-sec="svc:${x.id}">${c.svcDot(x, !!acc)}<span><b>${esc(x.id === 'ya' ? 'Яндекс' : x.name.replace(' Музыка', '').replace(' Music', ''))}</b><i>${acc ? 'подключено' : 'войти'}</i></span></button>`; }).join('')}</div>
         </section>
-        <section class="u2-box span2 rows2">
+        <section class="u2-box" data-k="звук эквалайзер громкость переход нормализация воспроизведение">
+          <div class="u2-h"><h2>Звук</h2><button class="link" data-action="set-sec" data-sec="sound">Открыть</button></div>
+          <div class="u2-eq ${eq.on ? 'on' : ''}" aria-hidden="true">${eq.gains.map((g) => `<i style="height:${Math.round(34 + (eq.on ? g : 0) * 2.6)}px"></i>`).join('')}</div>
+          <div class="row"><span class="u2-lbl">Эквалайзер</span>${sw(eq.on, 'eq-toggle', 'Эквалайзер')}</div>
+        </section>
+        <section class="u2-box" data-k="моя волна характер настроение свежесть своя волна nyao">
+          <div class="u2-h"><h2>Моя волна</h2><button class="link" data-action="set-sec" data-sec="wave">Открыть</button></div>
+          <svg class="u2-wv" viewBox="0 0 260 60" fill="none" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="${WAVE_LINE(30)}"/><path d="${WAVE_LINE(40)}" opacity=".5"/><path d="${WAVE_LINE(20)}" opacity=".3"/></svg>
+          <span class="hint">Характер: ${esc(div)}${mood ? ' · ' + esc(mood) : ''} · свежесть ${s.waveFresh ?? 60}%</span>
+          <div class="row"><span class="u2-lbl">Своя волна Nyao</span>${sw(ownOn, 'wave-nyao', 'Своя волна Nyao')}</div>
+        </section>
+        <section class="u2-box span2" data-k="оформление акцентный цвет тема вид запуск плеер волна">
           <div class="u2-h"><h2>Оформление</h2><button class="link" data-action="set-sec" data-sec="view">Открыть</button></div>
           <span class="hint">Акцентный цвет — меняется сразу во всём приложении</span>
           <div class="u2-swatches" role="radiogroup" aria-label="Акцентный цвет">${c.ACCENTS.map(([id, label]) => {
             const p = id === 'cover' ? null : c.paletteFor(id, { mac: c.IS_MAC });
             return `<button class="accent-sw u2-sw ${curAccent === id ? 'on' : ''}" role="radio" aria-checked="${curAccent === id}" aria-label="${esc(label)}" title="${esc(label)}" data-action="set-accent" data-v="${id}"><i style="${p ? `background:${p.a}` : ''}" class="${p ? '' : 'cover'}"></i></button>`;
           }).join('')}</div>
-          <div class="row" style="margin-top:auto"><span class="hint" style="flex:1">Что главное при запуске</span>
-            <div class="pill-seg" role="radiogroup" aria-label="Вид приложения">${[['wave', 'Моя волна'], ['player', 'Плеер']].map(([v, l]) => `<button role="radio" aria-checked="${c.layout() === v}" class="${c.layout() === v ? 'on' : ''}" data-action="set-layout" data-v="${v}">${l}</button>`).join('')}</div></div>
+          <div class="row"><span class="u2-lbl" style="flex:1">Что главное при запуске</span>
+            <div class="pill-seg u2-seg" role="radiogroup" aria-label="Вид приложения">${[['wave', 'Моя волна'], ['player', 'Плеер']].map(([v, l]) => `<button role="radio" aria-checked="${c.layout() === v}" class="${c.layout() === v ? 'on' : ''}" data-action="set-layout" data-v="${v}">${l}</button>`).join('')}</div></div>
         </section>
-        ${tile('sound', c.RI.sound, 'Звук и воспроизведение', c.normalizeEq(s.eq).on ? 'Эквалайзер включён' : 'Эквалайзер, громкость, переходы')}
-        ${tile('wave', 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0', 'Моя волна', `${s.waveMood ? (c.MOODS.find((m) => m[0] === s.waveMood) || [0, ''])[1] + ' · ' : ''}${s.waveNyao !== false ? 'своя волна Nyao включена' : 'только сервисы'}`)}
-        ${tile('lyrics', c.RI.lyrics, 'Текст песни', esc(c.lyricsName()))}
-        ${tile('keys', c.RI.keys, 'Управление и окно', 'Горячие клавиши, трей, полный экран')}
-        ${tile('addons', c.RI.puzzle, 'Дополнения', c.addonsOn() ? `Включено ${c.addonsOn()}` : 'Last.fm, оверлей для OBS')}
-        ${tile('discord', 'M7 8c3-1.5 7-1.5 10 0l2 8c-1.5 1.2-3 1.8-4.5 2l-1-2M7 8l-2 8c1.5 1.2 3 1.8 4.5 2l1-2M9.5 13v.5M14.5 13v.5', 'Статус в Discord', s.discordRpc ? 'Включён' : 'Выключен')}
-        <button class="u2-box span2 u2-upd ${upd ? 'new' : ''}" data-action="set-sec" data-sec="updates"><span class="tx"><b>Nyao Music ${esc(state.version || '')}</b><span class="s">${upd ? 'Есть новая версия — открыть обновления' : 'Обновления и канал'}</span></span><span class="btn sm ${upd ? 'primary' : ''}">${upd ? 'Обновить' : 'Открыть'}</span></button>
-        <button class="u2-box span2 u2-upd" data-action="set-sec" data-sec="about"><span class="tx"><b>О приложении</b><span class="s">Что нового, приветствие, лицензии</span></span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
-        ${c.isDev() ? `<button class="u2-box span2 u2-upd" data-action="set-sec" data-sec="dev"><span class="tx"><b>Разработчик</b><span class="s">Тесты, диагностика, флаги — здесь же выключается новый интерфейс</span></span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>` : ''}
+        ${tile('lyrics', c.RI.lyrics, 'Текст песни', esc(c.lyricsName()), 'текст песни lyrics караоке синхронизация')}
+        ${tile('keys', c.RI.keys, 'Управление и окно', 'Горячие клавиши, трей, полный экран', 'управление окно горячие клавиши трей полный экран автозапуск')}
+        ${tile('addons', c.RI.puzzle, 'Дополнения', c.addonsOn() ? `Включено ${c.addonsOn()}` : 'Last.fm, оверлей для OBS', 'дополнения аддоны плагины last.fm lastfm obs оверлей')}
+        ${tile('discord', 'M7 8c3-1.5 7-1.5 10 0l2 8c-1.5 1.2-3 1.8-4.5 2l-1-2M7 8l-2 8c1.5 1.2 3 1.8 4.5 2l1-2M9.5 13v.5M14.5 13v.5', 'Статус в Discord', s.discordRpc ? 'Включён — друзья видят, что играет' : 'Выключен', 'discord статус')}
+        <section class="u2-box span2 u2-upd ${upd ? 'new' : 'acc'}" data-k="обновления версия канал nightly red"><span class="tx"><b>Nyao Music ${esc(state.version || '')}</b><span class="s">${upd ? 'Есть новая версия' : 'Обновления и канал'}</span></span><button class="u2-pill solid" data-action="set-sec" data-sec="updates">${upd ? 'Обновить' : 'Проверить обновления'}</button></section>
+        <button class="u2-box span2 u2-upd" data-k="о приложении лицензии что нового приветствие" data-action="set-sec" data-sec="about"><span class="tx"><b>О приложении</b><span class="s">Что нового, приветствие, лицензии</span></span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        ${c.isDev() ? `<button class="u2-box span4 u2-upd" data-k="разработчик флаги диагностика тесты новый интерфейс" data-action="set-sec" data-sec="dev"><span class="tx"><b>Разработчик</b><span class="s">Тесты, диагностика, флаги — здесь же выключается новый интерфейс</span></span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>` : ''}
       </div>
+      <div class="hint u2-nofind" hidden>Ничего не нашлось — попробуй другое слово</div>
     </div>`;
+    // поиск по настройкам: прячем плитки, где нет слова
+    const find = view.querySelector('[data-u2find]');
+    if (find) find.addEventListener('input', () => {
+      const q = find.value.trim().toLowerCase();
+      let shown = 0;
+      view.querySelectorAll('.u2-bento > [data-k]').forEach((el) => {
+        const hit = !q || (el.dataset.k + ' ' + el.textContent).toLowerCase().includes(q);
+        el.hidden = !hit;
+        if (hit) shown++;
+      });
+      view.querySelector('.u2-nofind').hidden = shown > 0;
+    });
   }
 
   // ---------- Вход: аккаунт или гость → сервисы ----------
