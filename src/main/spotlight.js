@@ -13,6 +13,7 @@ import zlib from 'node:zlib';
 
 export const MODEL = 'spotlight-v1';
 const BASE = `https://github.com/PersikPrime/nyao-music/releases/download/${MODEL}/`;
+const JOURNAL_EVENTS = new Set(['trackStarted', 'trackFinished', 'skip', 'like', 'dislike']);
 const FILES = ['manifest.json', 'weights.bin', 'vectors.i8.gz', 'scales.f32', 'vocab.tsv.gz'];
 
 // ---------- ключ трека: те же правила, что в spotlight/keys.py (проверяется test/spotlight.test.js) ----------
@@ -235,6 +236,7 @@ export class Spotlight {
     this.pending = null; // трек, который играет сейчас: что о нём думала модель
     this.cache = { sig: '', top: [] };
     this.logFile = path.join(dir, 'spotlight-shadow.jsonl');
+    this.journalFile = path.join(dir, 'wave-journal.jsonl');
     this.reset();
   }
   reset() { this.stats = { judged: 0, unknown: 0, inTop: { n: 0, skipped: 0 }, outTop: { n: 0, skipped: 0 }, ranks: [] }; }
@@ -302,6 +304,31 @@ export class Spotlight {
     this.cache = { sig, top };
     return top;
   }
+  /**
+   * Свой набор данных: что играло в волне и чем закончилось — в том же виде, что открытые данные для обучения.
+   * Только на этом компьютере (wave-journal.jsonl): без токенов и аккаунтов, только трек и реакция.
+   * Отправлять куда-то — отдельное решение, по галочке; сейчас файл никуда не уходит.
+   */
+  journal(type, track, seconds = 0) {
+    if (!track || !JOURNAL_EVENTS.has(type)) return;
+    const key = trackKey(track.artist, track.title);
+    if (!key) return;
+    const e = { at: Date.now(), type, key, artist: track.artist, title: track.title, source: track.source || '', reason: track.waveReason || '' };
+    if (type === 'skip' || type === 'trackFinished') e.seconds = Math.round(seconds || 0);
+    if (track.duration) e.duration = Math.round(track.duration);
+    this.journalWrites = (this.journalWrites || 0) + 1;
+    fs.promises.appendFile(this.journalFile, JSON.stringify(e) + '\n')
+      .then(() => { if (this.journalWrites % 200 === 0) return this.trimJournal(); })
+      .catch(() => {});
+  }
+  /** Не даём файлу расти бесконечно: держим последние ~100 тысяч событий (это годы прослушиваний) */
+  async trimJournal() {
+    const st = await fs.promises.stat(this.journalFile);
+    if (st.size < 40 * 1024 * 1024) return;
+    const lines = (await fs.promises.readFile(this.journalFile, 'utf8')).split('\n').filter(Boolean);
+    await fs.promises.writeFile(this.journalFile + '.tmp', lines.slice(-100000).join('\n') + '\n');
+    await fs.promises.rename(this.journalFile + '.tmp', this.journalFile);
+  }
   rank(p) {
     if (p.rank !== null) return;
     const top = this.suggest(p.history);
@@ -313,6 +340,7 @@ export class Spotlight {
    * played — история до этого трека.
    */
   observe(type, track, played, seconds) {
+    this.journal(type, track, seconds);
     if (!this.model || !track) return;
     if (type === 'trackStarted') {
       const id = this.model.idOf(track);

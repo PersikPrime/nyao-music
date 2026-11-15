@@ -50,4 +50,8 @@ test('spotlight: тень считает скипы в топе модели и 
   assert.equal(st.medianRank, 1);
   await new Promise(r => setTimeout(r, 50));
   assert.equal(fs.readFileSync(path.join(tmp, 'spotlight-shadow.jsonl'), 'utf8').trim().split('\n').length, 2);
+  const journal = fs.readFileSync(path.join(tmp, 'wave-journal.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.deepEqual(journal.map(e => e.type), ['trackStarted', 'trackFinished', 'trackStarted', 'skip']);
+  assert.equal(journal[3].seconds, 5);
+  assert.equal(journal[2].key, 'неизвестныи|трек');
 });
