@@ -646,8 +646,35 @@ export class FullScreen {
     // и уже туда уезжает обложка
     this.closing = true;
     Promise.resolve(back)
-      .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+      .then(() => this.windowSettled())
       .then(() => this.animateClose());
+  }
+
+  /**
+   * Ждём, пока окно на самом деле вернётся к обычному размеру. Команда «выйти из полного экрана» отвечает сразу,
+   * а окно сжимается ещё несколько кадров: если померить плашку плеера раньше, обложка улетит мимо неё.
+   * Сначала ждём, что размер начал меняться (если он ещё во весь экран), потом — что перестал. Не дольше 0,7 с.
+   */
+  windowSettled() {
+    if (typeof requestAnimationFrame !== 'function' || typeof window === 'undefined') return Promise.resolve();
+    const size = () => `${window.innerWidth}x${window.innerHeight}`;
+    const sc = window.screen || {};
+    const full = () => Math.abs(window.innerWidth - (sc.width || 0)) <= 2 && Math.abs(window.innerHeight - (sc.height || 0)) <= 2;
+    const t0 = performance.now();
+    return new Promise((resolve) => {
+      let last = size();
+      let still = 0;
+      const tick = () => {
+        const now = size();
+        const waited = performance.now() - t0;
+        if (now === last && !(full() && waited < 450)) still++;
+        else still = 0;
+        last = now;
+        if (still >= 3 || waited > 700) resolve();
+        else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
   }
 
   // ---------- Разворот из плашки плеера и обратно ----------
@@ -741,7 +768,7 @@ export class FullScreen {
     const halo = this.$('.fs-halo');
     if (halo && halo.animate) halo.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: 'ease-in', fill: 'forwards' });
     // обратно в плашку: сжимается и докатывается на четверть оборота
-    const landed = this.flight(to, from);
+    let landed = this.flight(to, from);
     const fly = art.animate([{ transform: 'translate(0px, 0px) scale(1) rotate(0deg)' }, { transform: `${landed} rotate(-90deg)` }], { duration: 420, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' });
     const roll = this.$('.fs-roll');
     const end = () => {
@@ -753,6 +780,11 @@ export class FullScreen {
     // встала на место — печенька разворачивается в квадрат обложки плашки и докручивается ровно
     const unfold = () => {
       if (!roll || !this.el || this.open) return end();
+      // плашка могла сдвинуться, пока обложка летела (окно ещё меняло размер) — сверяемся с её местом сейчас
+      const wrap = art.parentElement;
+      const base = wrap && wrap.getBoundingClientRect ? wrap.getBoundingClientRect() : null;
+      const now = this.sourceRect();
+      if (base && base.width && now) landed = this.flight(now, base);
       const m = /matrix\(([^,]+),\s*([^,]+)/.exec(getComputedStyle(roll).transform || '');
       const ang = m ? (Math.atan2(Number(m[2]), Number(m[1])) * 180) / Math.PI : 0; // печенька всё время медленно катится
       roll.style.clipPath = 'none'; // обрезает уже сама обложка: она не вращается вместе с печенькой

@@ -21,6 +21,17 @@
    Плеер вынут из потока и висит над контентом: контент и боковые панели идут до низа окна,
    а снизу у них отступ под «таблетку». В теме macOS плеер и так плавающий — её не трогаем. */
 body.ui2:not(.mac) .playerbar { position: absolute; left: 88px; right: 16px; bottom: 14px; height: 76px; margin: 0; border: 1px solid #222228; border-radius: 24px; background: #0e0e11; box-shadow: 0 18px 40px rgba(0, 0, 0, .8); padding: 0 16px 0 12px; z-index: 6; }
+/* в «таблетке» 76px обычные кнопки упирались в верхний край: чуть меньше кнопки и плотнее ряд с прогрессом,
+   чтобы сверху и снизу был воздух — высота дока и всё, что в нём есть, остаются как были */
+body.ui2:not(.mac) .playerbar .center { gap: 0; }
+body.ui2:not(.mac) .playerbar .controls { gap: 4px; }
+body.ui2:not(.mac) .playerbar .play { width: 40px; height: 40px; }
+body.ui2:not(.mac) .playerbar .play svg { width: 18px; height: 18px; }
+body.ui2:not(.mac) .playerbar .ic { width: 36px; height: 36px; }
+body.ui2:not(.mac) .playerbar .progress { height: 16px; }
+body.ui2:not(.mac) .playerbar .progress input { height: 14px; }
+body.ui2:not(.mac) .playerbar .now .cover { width: 52px; height: 52px; border-radius: 14px; }
+body.ui2:not(.mac) .playerbar .cover-btn { border-radius: 14px; }
 body.ui2:not(.mac) .view .scroll, body.ui2:not(.mac) .page-view { padding-bottom: 124px; }
 body.ui2:not(.mac) .drawer, body.ui2:not(.mac) .wave-tune { bottom: 104px; }
 body.ui2:not(.mac) .connect-pop { bottom: 104px; }
