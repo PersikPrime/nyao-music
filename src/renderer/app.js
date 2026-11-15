@@ -293,7 +293,28 @@ async function fillWaveStats() {
       <div><b>${pct(st.skipped, st.started)}%</b><span>скипов до 30 с</span></div>
       <div><b>${st.artistRepeats}</b><span>повторов исполнителя за 10</span></div>
     </div>
-    ${rows ? `<div class="ws-rows">${rows}</div>` : ''}`;
+    ${rows ? `<div class="ws-rows">${rows}</div>` : ''}
+    ${spotlightHtml(st.spotlight)}`;
+}
+
+/** Red: нейросеть в тени — угадывает ли она то, что ты дослушиваешь */
+function spotlightHtml(sp) {
+  if (!sp) return '';
+  const head = '<span class="eyebrow" style="display:block;margin-top:14px">Нейросеть Nyao Spotlight · в тени</span>';
+  if (sp.state === 'downloading') return `${head}<div class="hint" style="margin-top:6px">Скачиваю модель… ${sp.progress}%</div>`;
+  if (sp.state === 'loading' || sp.state === 'idle') return `${head}<div class="hint" style="margin-top:6px">Загружаю модель…</div>`;
+  if (sp.state === 'error') return `${head}<div class="hint" style="margin-top:6px">Не получилось: ${esc(sp.error)}</div>`;
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '—');
+  const total = sp.judged + sp.unknown;
+  return `${head}
+    <div class="ws-grid">
+      <div><b>${pct(sp.judged, total)}</b><span>треков знает</span></div>
+      <div><b>${pct(sp.inTop.n, sp.judged)}</b><span>были в её топ-200</span></div>
+      <div><b>${sp.medianRank ?? '—'}</b><span>обычное место в топе</span></div>
+      <div><b>${pct(sp.inTop.skipped, sp.inTop.n)}</b><span>скипов: из её топа</span></div>
+      <div><b>${pct(sp.outTop.skipped, sp.outTop.n)}</b><span>скипов: остальное</span></div>
+    </div>
+    ${sp.suggest && sp.suggest.length ? `<div class="hint" style="margin-top:8px">Сейчас предложила бы: ${sp.suggest.map(esc).join(' · ')}</div>` : ''}`;
 }
 setInterval(() => { if (document.getElementById('wave-stats')) fillWaveStats(); }, 4000);
 

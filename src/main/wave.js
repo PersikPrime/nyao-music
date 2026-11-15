@@ -38,8 +38,8 @@ const LIKED_REASONS = new Set(['Недавний лайк', 'Из любимог
 const normalTitle = (t) => String(t || '').toLowerCase().replace(/\s*[([].*?[)\]]\s*/g, ' ').replace(/\s+/g, ' ').trim();
 const newStats = (startMs) => ({ startMs, retuneMs: 0, started: 0, fromLikes: 0, skipped: 0, liked: 0, artistRepeats: 0, lastArtists: [], by: {} });
 export class WaveMixer {
-  constructor({ ya, yt, sc, vk = null, sp = null, getSettings, getRecent = async () => new Set(), getHistory = () => [], getFavorites = async () => [], profile = null, isDown = () => false, nyao = null }) {
-    Object.assign(this, { ya, yt, sc, vk, sp, getSettings, getRecent, getHistory, getFavorites, profile, isDown, nyao });
+  constructor({ ya, yt, sc, vk = null, sp = null, getSettings, getRecent = async () => new Set(), getHistory = () => [], getFavorites = async () => [], profile = null, isDown = () => false, nyao = null, spotlight = null }) {
+    Object.assign(this, { ya, yt, sc, vk, sp, getSettings, getRecent, getHistory, getFavorites, profile, isDown, nyao, spotlight });
     this.generation = 0;
     this.session = null;
     try { this.state = profile?.get() || {}; } catch { this.state = {}; }
@@ -54,6 +54,7 @@ export class WaveMixer {
     const t0 = Date.now();
     const out = await this.startFresh(queueIds);
     this.stats = newStats(Date.now() - t0);
+    this.spotlight?.ensure();
     return out;
   }
   /**
@@ -317,6 +318,8 @@ export class WaveMixer {
     if (!track) return;
     const now = Date.now();
     this.count(type, track, played);
+    // Red: модель в тени — смотрит, угадала бы она этот трек (история — до него)
+    try { this.spotlight?.observe(type, track, this.state.played, played); } catch { /* тень не мешает волне */ }
     if (type === 'dislike') {
       this.state.disliked = [track, ...this.state.disliked.filter(t => !sameRecording(t, track))].slice(0, 500);
       this.session?.policy.block(track);

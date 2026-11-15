@@ -36,6 +36,7 @@ import { Popups, popupFor } from './popup.js';
 import { mergeArtists as mergeFavArtists } from './freshness.js';
 import { transferPlaylist, TARGETS } from './transfer.js';
 import { findMatch } from './match.js';
+import { Spotlight } from './spotlight.js';
 import { mergeArtists } from '../renderer/search.js';
 import os from 'node:os';
 import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch, refreshVkSession } from './auth.js';
@@ -503,7 +504,9 @@ function initProviders() {
     },
     getFavorites: async () => readFav(),
     // своя волна Nyao (nightly): похожее с сервера, без входа в аккаунт Nyao тоже работает
-    nyao: { mix: (body) => cloud.request('POST', '/wave/mix', body), mood: (body) => cloud.request('POST', '/wave/mood', body) }
+    nyao: { mix: (body) => cloud.request('POST', '/wave/mix', body), mood: (body) => cloud.request('POST', '/wave/mood', body) },
+    // Red: нейросеть Nyao Spotlight в тени — считается на этом компьютере, история никуда не уходит
+    spotlight: readVersion().channel === 'nightly' ? new Spotlight({ dir: app.getPath('userData'), log: (m) => console.log(m) }) : null
   });
   streams = new StreamService({ ya, yt, sc, vk, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch, vk: vkSessionFetch } });
   catalog = new Catalog({ ya, yt });
@@ -1339,7 +1342,7 @@ function registerIpc() {
   handle('wave:start', () => wave.start());
   handle('wave:more', (queueIds) => wave.more(queueIds || []));
   handle('wave:retune', (queueIds) => wave.retune(queueIds || []));
-  handle('wave:stats', () => wave.stats || null);
+  handle('wave:stats', () => (wave.stats ? { ...wave.stats, spotlight: wave.spotlight?.status() || null } : null));
   handle('wave:feedback', (type, track, played) => wave.feedback(type, track, played));
 
   handle('catalog:artist', (ref) => catalog.artist(ref));
