@@ -17,11 +17,14 @@
   #splash .sp-logo, #splash .sp-logo path { animation: none; opacity: 1; stroke-dashoffset: 0; }
 }
 
-/* ---------- Плавающий плеер ---------- */
-body.ui2 .playerbar { height: 76px; margin: -90px 16px 14px 88px; border: 1px solid #222228; border-radius: 24px; background: #0e0e11; box-shadow: 0 18px 40px rgba(0, 0, 0, .8); padding: 0 16px 0 12px; }
-body.ui2 .view .scroll, body.ui2 .page-view { padding-bottom: 124px; }
-body.ui2 .drawer { padding-bottom: 104px; }
-body.ui2 .rail { padding-bottom: 16px; }
+/* ---------- Плавающий плеер ----------
+   Плеер вынут из потока и висит над контентом: контент и боковые панели идут до низа окна,
+   а снизу у них отступ под «таблетку». В теме macOS плеер и так плавающий — её не трогаем. */
+body.ui2:not(.mac) .playerbar { position: absolute; left: 88px; right: 16px; bottom: 14px; height: 76px; margin: 0; border: 1px solid #222228; border-radius: 24px; background: #0e0e11; box-shadow: 0 18px 40px rgba(0, 0, 0, .8); padding: 0 16px 0 12px; z-index: 6; }
+body.ui2:not(.mac) .view .scroll, body.ui2:not(.mac) .page-view { padding-bottom: 124px; }
+body.ui2:not(.mac) .drawer, body.ui2:not(.mac) .wave-tune { bottom: 104px; }
+body.ui2:not(.mac) .connect-pop { bottom: 104px; }
+body.ui2:not(.mac) .toast { bottom: 108px; }
 
 /* ---------- Главная ---------- */
 .u2-home { gap: 22px; }
@@ -120,7 +123,8 @@ body.ui2 .rail { padding-bottom: 16px; }
 
 /* ---------- Настройки плитками ---------- */
 .u2-settings > * { max-width: 1180px; }
-.u2-bento { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.u2-bento { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 16px; }
+.u2-box.rows2 { grid-row: span 2; }
 .u2-box { border-radius: 28px; background: var(--s1); border: 1px solid #1c1c21; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; color: var(--text); text-align: left; min-width: 0; }
 .u2-box.span2 { grid-column: span 2; }
 .u2-box .u2-h { padding: 0; margin: 0; }
@@ -140,10 +144,10 @@ body.ui2 .rail { padding-bottom: 16px; }
 .u2-svcs b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .u2-svcs i { font-style: normal; font-size: 12px; color: var(--muted); }
 .u2-svcs button.on i { color: #8fe3b0; }
-.u2-tile { border-radius: 28px; background: var(--s1); border: 1px solid #1c1c21; padding: 16px 20px; min-height: 128px; display: flex; flex-direction: column; gap: 6px; color: var(--text); text-align: left; min-width: 0; transition: background .18s ease, transform .25s var(--ease-spring, ease); }
+.u2-tile { border-radius: 28px; background: var(--s1); border: 1px solid #1c1c21; padding: 16px 18px; min-height: 104px; display: flex; flex-direction: column; gap: 4px; color: var(--text); text-align: left; min-width: 0; transition: background .18s ease, transform .25s var(--ease-spring, ease); }
 .u2-tile:hover, button.u2-box:hover { background: var(--s2); }
 .u2-tile:active { transform: scale(.98); }
-.u2-tile .ic { width: 34px; height: 34px; border-radius: 12px; background: var(--s3); color: var(--accent); display: grid; place-items: center; margin-bottom: auto; }
+.u2-tile .ic { width: 34px; height: 34px; border-radius: 12px; background: var(--s3); color: var(--accent); display: grid; place-items: center; margin-bottom: 10px; }
 .u2-tile b { font-size: 15px; }
 .u2-tile .s { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .u2-swatches { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -209,4 +213,3 @@ body.ui2 .rail { padding-bottom: 16px; }
 .u2-w-svc .foot .hint { flex: 1; }
 @media (max-width: 1000px) { .u2-w-main .cards { grid-template-columns: 1fr; } .u2-w-svc { grid-template-columns: 1fr; gap: 20px; } .u2-w-svc .wave { min-height: 240px; } .u2-w-svc main { padding: 0 8px; } }
 .u2-svcs .dot { width: 26px; height: 26px; font-size: 10px; line-height: 1; }
-.u2-tile { min-height: 148px; }

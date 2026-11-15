@@ -691,6 +691,8 @@ export class FullScreen {
     const art = this.$('.fs-art');
     const from = this.sourceRect();
     const done = () => {
+      // полный экран успели закрыть, пока летела обложка, — не прячем интерфейс заново (иначе чёрное окно)
+      if (!this.open) return;
       document.body.classList.add('fs-on');
       const src = this.sourceEl();
       if (src) src.style.visibility = '';
@@ -724,6 +726,7 @@ export class FullScreen {
     const to = this.sourceRect();
     const finish = () => {
       this.closing = false;
+      if (!this.open) document.body.classList.remove('fs-on');
       const src = this.sourceEl();
       if (src) src.style.visibility = '';
       if (!this.open) this.el.hidden = true;

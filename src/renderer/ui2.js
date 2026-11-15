@@ -222,33 +222,39 @@ export function createUi2(c) {
           <div class="u2-h"><h2>Сервисы</h2><span class="hint">подключено ${connected.length} из ${SERVICES.length}</span></div>
           <div class="u2-svcs">${SERVICES.map((x) => { const acc = state.status[x.id]; return `<button class="${acc ? 'on' : ''}" data-action="set-sec" data-sec="svc:${x.id}">${c.svcDot(x, !!acc)}<span><b>${esc(x.id === 'ya' ? 'Яндекс' : x.name.replace(' Музыка', '').replace(' Music', ''))}</b><i>${acc ? 'подключено' : 'войти'}</i></span></button>`; }).join('')}</div>
         </section>
-        ${tile('sound', c.RI.sound, 'Звук и воспроизведение', c.normalizeEq(s.eq).on ? 'Эквалайзер включён' : 'Эквалайзер, громкость, переходы')}
-        ${tile('wave', 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0', 'Моя волна', `${s.waveMood ? (c.MOODS.find((m) => m[0] === s.waveMood) || [0, ''])[1] + ' · ' : ''}${s.waveNyao !== false ? 'своя волна Nyao включена' : 'только сервисы'}`)}
-        <section class="u2-box span2">
+        <section class="u2-box span2 rows2">
           <div class="u2-h"><h2>Оформление</h2><button class="link" data-action="set-sec" data-sec="view">Открыть</button></div>
           <span class="hint">Акцентный цвет — меняется сразу во всём приложении</span>
           <div class="u2-swatches" role="radiogroup" aria-label="Акцентный цвет">${c.ACCENTS.map(([id, label]) => {
             const p = id === 'cover' ? null : c.paletteFor(id, { mac: c.IS_MAC });
             return `<button class="accent-sw u2-sw ${curAccent === id ? 'on' : ''}" role="radio" aria-checked="${curAccent === id}" aria-label="${esc(label)}" title="${esc(label)}" data-action="set-accent" data-v="${id}"><i style="${p ? `background:${p.a}` : ''}" class="${p ? '' : 'cover'}"></i></button>`;
           }).join('')}</div>
-          <div class="row"><span class="hint" style="flex:1">Что главное при запуске</span>
+          <div class="row" style="margin-top:auto"><span class="hint" style="flex:1">Что главное при запуске</span>
             <div class="pill-seg" role="radiogroup" aria-label="Вид приложения">${[['wave', 'Моя волна'], ['player', 'Плеер']].map(([v, l]) => `<button role="radio" aria-checked="${c.layout() === v}" class="${c.layout() === v ? 'on' : ''}" data-action="set-layout" data-v="${v}">${l}</button>`).join('')}</div></div>
         </section>
+        ${tile('sound', c.RI.sound, 'Звук и воспроизведение', c.normalizeEq(s.eq).on ? 'Эквалайзер включён' : 'Эквалайзер, громкость, переходы')}
+        ${tile('wave', 'M3 12c2-4 4-4 6 0s4 4 6 0 4-4 6 0', 'Моя волна', `${s.waveMood ? (c.MOODS.find((m) => m[0] === s.waveMood) || [0, ''])[1] + ' · ' : ''}${s.waveNyao !== false ? 'своя волна Nyao включена' : 'только сервисы'}`)}
         ${tile('lyrics', c.RI.lyrics, 'Текст песни', esc(c.lyricsName()))}
         ${tile('keys', c.RI.keys, 'Управление и окно', 'Горячие клавиши, трей, полный экран')}
         ${tile('addons', c.RI.puzzle, 'Дополнения', c.addonsOn() ? `Включено ${c.addonsOn()}` : 'Last.fm, оверлей для OBS')}
         ${tile('discord', 'M7 8c3-1.5 7-1.5 10 0l2 8c-1.5 1.2-3 1.8-4.5 2l-1-2M7 8l-2 8c1.5 1.2 3 1.8 4.5 2l1-2M9.5 13v.5M14.5 13v.5', 'Статус в Discord', s.discordRpc ? 'Включён' : 'Выключен')}
         <button class="u2-box span2 u2-upd ${upd ? 'new' : ''}" data-action="set-sec" data-sec="updates"><span class="tx"><b>Nyao Music ${esc(state.version || '')}</b><span class="s">${upd ? 'Есть новая версия — открыть обновления' : 'Обновления и канал'}</span></span><span class="btn sm ${upd ? 'primary' : ''}">${upd ? 'Обновить' : 'Открыть'}</span></button>
         <button class="u2-box span2 u2-upd" data-action="set-sec" data-sec="about"><span class="tx"><b>О приложении</b><span class="s">Что нового, приветствие, лицензии</span></span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
-        ${c.isDev() ? tile('dev', c.RI.dev, 'Разработчик', 'Тесты, диагностика, флаги') : ''}
+        ${c.isDev() ? `<button class="u2-box span2 u2-upd" data-action="set-sec" data-sec="dev"><span class="tx"><b>Разработчик</b><span class="s">Тесты, диагностика, флаги — здесь же выключается новый интерфейс</span></span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>` : ''}
       </div>
     </div>`;
   }
 
   // ---------- Вход: аккаунт или гость → сервисы ----------
   let welcomeEl = null;
-  function welcome() {
+  let welcomeClose = null;
+  /** Уже вошёл в аккаунт Nyao (вход пришёл с другой стороны) — экран выбора не нужен */
+  function closeWelcome() {
+    if (welcomeClose && welcomeEl && welcomeEl.dataset.step !== 'svc') welcomeClose();
+  }
+  function welcome(force = false) {
     if (welcomeEl) return;
+    if (!force && state.cloud.loggedIn) return;
     const el = document.createElement('div');
     welcomeEl = el;
     el.className = 'u2-welcome';
@@ -257,11 +263,14 @@ export function createUi2(c) {
     el.setAttribute('aria-label', 'Вход в Nyao Music');
     let step = state.cloud.loggedIn ? 'svc' : 'choose';
     const close = async () => {
+      welcomeClose = null;
       await c.setSettings({ onboarded: true, guest: !state.cloud.loggedIn });
       el.classList.remove('in');
       setTimeout(() => { el.remove(); welcomeEl = null; c.rerender(); }, 260);
     };
+    welcomeClose = close;
     const draw = () => {
+      el.dataset.step = step;
       if (step === 'choose' || step === 'wait') {
         const ribbon = [0, 1, 2].map((g) => `<path d="${strand(g, 3, 1440, 900)}" stroke="${['#FFD60A', '#F0574A', '#D8CEFF'][g]}" opacity=".5"/>`).join('');
         el.innerHTML = `<svg class="bg" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" fill="none" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">${ribbon}</svg><span class="shade" aria-hidden="true"></span>
@@ -324,5 +333,5 @@ export function createUi2(c) {
     requestAnimationFrame(() => el.classList.add('in'));
   }
 
-  return { on, home, artist, album, settings, welcome, apply: () => document.body.classList.toggle('ui2', on()) };
+  return { on, home, artist, album, settings, welcome, closeWelcome, apply: () => document.body.classList.toggle('ui2', on()) };
 }

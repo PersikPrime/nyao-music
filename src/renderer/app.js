@@ -1512,6 +1512,7 @@ async function loadCloud() {
   if (!st) return;
   state.cloud.loggedIn = st.loggedIn;
   state.cloud.user = st.user;
+  if (st.loggedIn && ui2) ui2.closeWelcome();
   await loadStatus();
   renderAccounts();
   if (st.loggedIn) {
@@ -3805,7 +3806,7 @@ async function handleAction(el, e) {
       renderSettings();
       break;
     case 'dev-ui2-welcome':
-      ui2.welcome();
+      ui2.welcome(true);
       break;
     case 'dev-librespot-flag':
     case 'native-save-id':
@@ -4369,6 +4370,8 @@ setInterval(() => {
 player.audio.addEventListener('seeked', () => roomPush());
 api.win.onFullscreen((on) => {
   if (!on) fullscreen.close();
+  // подстраховка: окно вышло из полноэкранного режима — интерфейс плеера должен быть виден
+  if (!on && !fullscreen.open) document.body.classList.remove('fs-on');
 });
 $('#pb-full').onclick = () => fullscreen.toggle();
 // ---------- Запоминание сессии: трек, место и очередь переживают закрытие приложения ----------
@@ -4791,8 +4794,11 @@ function openMixBuilder() {
   // обновился с версии, где вида ещё не было: один раз предлагаем выбрать
   if (state.settings.onboarded && !state.settings.layout) askLayout();
   // новый интерфейс: вместо старого приветствия — выбор «аккаунт или гость», пока человек не выбрал
-  if (ui2.on() && !state.cloud.loggedIn && !state.settings.guest) ui2.welcome();
-  else if (!state.settings.onboarded) {
+  if (ui2.on() && !state.settings.guest) {
+    // статус аккаунта Nyao приходит не сразу — без него вход показался бы и тем, кто уже вошёл
+    const st = api.cloud ? await api.cloud.status().catch(() => null) : null;
+    if (st && !st.loggedIn && !state.cloud.loggedIn) ui2.welcome();
+  } else if (!state.settings.onboarded) {
     // Кто уже входил в аккаунты в прошлых сборках — тому приветствие не показываем
     if (state.status.ya || state.status.yt) state.settings = await api.settings.set({ onboarded: true });
     else openOnboarding();
