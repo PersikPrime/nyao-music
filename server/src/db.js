@@ -312,7 +312,64 @@ export const SCHEMA = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
-  `CREATE INDEX IF NOT EXISTS fs_videos_key ON fs_videos (track_key)`
+  `CREATE INDEX IF NOT EXISTS fs_videos_key ON fs_videos (track_key)`,
+  // флаги функций (Автоматор → приложения без релиза)
+  `CREATE TABLE IF NOT EXISTS feature_flags (
+    key TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    enabled BOOLEAN NOT NULL DEFAULT false,
+    audience TEXT NOT NULL DEFAULT 'devs',
+    percent INTEGER NOT NULL DEFAULT 100,
+    user_ids TEXT NOT NULL DEFAULT '',
+    channels TEXT NOT NULL DEFAULT 'nightly',
+    platforms TEXT NOT NULL DEFAULT '',
+    by_user BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // Spotlight: какая модель в каком канале и сводки теневого режима (только счётчики, по согласию)
+  `CREATE TABLE IF NOT EXISTS spotlight_models (
+    version TEXT PRIMARY KEY,
+    notes TEXT NOT NULL DEFAULT '',
+    hit10 REAL,
+    active_channels TEXT NOT NULL DEFAULT '',
+    by_user BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS spotlight_reports (
+    session TEXT PRIMARY KEY,
+    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    build INTEGER NOT NULL DEFAULT 0,
+    judged INTEGER NOT NULL DEFAULT 0,
+    unknown INTEGER NOT NULL DEFAULT 0,
+    in_top INTEGER NOT NULL DEFAULT 0,
+    in_top_skipped INTEGER NOT NULL DEFAULT 0,
+    out_top INTEGER NOT NULL DEFAULT 0,
+    out_top_skipped INTEGER NOT NULL DEFAULT 0,
+    median_rank INTEGER,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS spotlight_reports_at ON spotlight_reports (updated_at)`,
+  // каталог дополнений: пакет лежит в /data/addons/<sha256>.json
+  `CREATE TABLE IF NOT EXISTS addons_catalog (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    author TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    permissions TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    verified BOOLEAN NOT NULL DEFAULT false,
+    channels TEXT NOT NULL DEFAULT 'nightly',
+    note TEXT NOT NULL DEFAULT '',
+    sha256 TEXT NOT NULL,
+    size INTEGER NOT NULL DEFAULT 0,
+    installs INTEGER NOT NULL DEFAULT 0,
+    by_user BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`
 ];
 
 export async function migrate(pool) {

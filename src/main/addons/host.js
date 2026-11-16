@@ -34,6 +34,7 @@ export class AddonHost {
    * @param {object} o
    * @param {string} o.builtinDir  папка встроенных дополнений (src/addons)
    * @param {string|null} o.devDir папка для разработки — только в Nyao Music Red, иначе null
+   * @param {string} [o.catalogDir] куда ставятся дополнения из каталога Nyao (проверенные модератором)
    * @param {string} o.dataDir     куда складывать хранилища дополнений
    * @param {{get:Function,set:Function}} o.settings
    * @param {import('./pages.js').AddonPages} o.pages
@@ -78,6 +79,7 @@ export class AddonHost {
       }
     };
     read(this.builtinDir, 'builtin');
+    if (this.catalogDir) read(this.catalogDir, 'catalog');
     if (this.devDir) read(this.devDir, 'dev');
     for (const [id, a] of this.addons) if (!found.has(id) || found.get(id).dir !== a.dir) this.stop(id);
     const next = new Map();

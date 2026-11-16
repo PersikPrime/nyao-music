@@ -24,7 +24,8 @@ const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/
 
 export function createUi2(c) {
   const { state, player, view, lists, esc, fmt, ICONS, SERVICES } = c;
-  const on = () => !!(state.settings && state.settings.uiFable);
+  // свой переключатель в «Разработчике» важнее; не трогали — решает флаг ui2 из Автоматора
+  const on = () => !!state.settings && (state.settings.uiFable === true || (state.settings.uiFable !== false && !!(state.flags && state.flags.ui2)));
   const svcName = (id) => (id === 'ya' ? 'Яндекс' : (SERVICES.find((x) => x.id === id) || {}).name || id);
 
   // ---------- Главная ----------

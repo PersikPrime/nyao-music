@@ -7,6 +7,9 @@ import { pkce } from './telegram.js';
 import { Hub } from './hub.js';
 import { summarize, periodRange } from './stats.js';
 import { fsvideoPublicRoutes, fsvideoStore, serveFsVideo } from './fsvideo.js';
+import { flagsPublicRoutes } from './flags.js';
+import { spotlightPublicRoutes } from './spotlight.js';
+import { addonsPublicRoutes } from './addons-catalog.js';
 import { socialRoutes } from './social.js';
 import { lyricsRoutes, lrclibError } from './lyrics.js';
 import { lyricsPage } from './lyrics-web.js';
@@ -496,6 +499,9 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     ...share,
     ...legacy,
     ...fsvideoPublicRoutes({ q, HttpError, clip, publicUrl, limit: fsvLimit }),
+    ...flagsPublicRoutes({ q, optionalAuth: (req) => (req.headers.authorization ? auth(req).catch(() => null) : null) }),
+    ...spotlightPublicRoutes({ q, HttpError, readJson }),
+    ...addonsPublicRoutes({ q, HttpError, dataDir }),
     ...admin.routes
   ];
 

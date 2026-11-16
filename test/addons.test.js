@@ -136,3 +136,8 @@ test('страницы: отдают файлы и данные, не выпус
   }
   assert.equal(pages.running, false);
 });
+
+test('сервер проверяет дополнения теми же правилами: addon-manifest.js — копия manifest.js', async () => {
+  const fs = await import('node:fs');
+  assert.equal(fs.readFileSync(new URL('../server/src/addon-manifest.js', import.meta.url), 'utf8'), fs.readFileSync(new URL('../src/main/addons/manifest.js', import.meta.url), 'utf8'));
+});

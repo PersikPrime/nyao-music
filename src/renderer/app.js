@@ -326,7 +326,9 @@ function spotlightHtml(sp) {
       <div><b>${pct(sp.inTop.skipped, sp.inTop.n)}</b><span>скипов: из её топа</span></div>
       <div><b>${pct(sp.outTop.skipped, sp.outTop.n)}</b><span>скипов: остальное</span></div>
     </div>
-    ${sp.suggest && sp.suggest.length ? `<div class="hint" style="margin-top:8px">Сейчас предложила бы: ${sp.suggest.map(esc).join(' · ')}</div>` : ''}`;
+    ${sp.suggest && sp.suggest.length ? `<div class="hint" style="margin-top:8px">Сейчас предложила бы: ${sp.suggest.map(esc).join(' · ')}</div>` : ''}
+    <div class="pref-row" style="margin-top:10px"><span><b>Делиться цифрами</b><span class="hint">${esc(sp.version || 'spotlight')} · раз в 10 минут уходят только эти счётчики — без треков и истории. Нужен вход в аккаунт Nyao.</span></span>
+      <button class="switch ${state.settings.spotlightShare ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.spotlightShare}" aria-label="Делиться цифрами Spotlight" data-action="toggle-spotlight-share"><span></span></button></div>`;
 }
 setInterval(() => { if (document.getElementById('wave-stats')) fillWaveStats(); }, 4000);
 
@@ -1855,7 +1857,7 @@ function addonDetailHtml(a) {
   return `
     <div class="ad-cookie" style="--ad-c:${esc(a.color)}" aria-hidden="true"><span>${addonGlyph(a.icon, 120)}</span></div>
     <div class="ad-head">
-      <span class="ad-eyebrow">${a.source === 'builtin' ? 'ОТ NYAO' : 'СВОЁ · ИЗ ПАПКИ'} · ВЕРСИЯ ${esc(a.version)}</span>
+      <span class="ad-eyebrow">${a.source === 'builtin' ? 'ОТ NYAO' : a.source === 'catalog' ? 'ИЗ КАТАЛОГА' : 'СВОЁ · ИЗ ПАПКИ'} · ВЕРСИЯ ${esc(a.version)}</span>
       <h2>${esc(a.name)}</h2>
       <p>${esc(a.description)}</p>
     </div>
@@ -1875,12 +1877,49 @@ function addonDetailHtml(a) {
       </div>
     </div>
     ${state.addonLogs && state.addonLogs.id === a.id ? `<div class="ad-group"><div class="ad-label">ЖУРНАЛ</div><div class="ad-log">${state.addonLogs.lines.length ? state.addonLogs.lines.map((l) => `<div><time>${new Date(l.at).toLocaleTimeString('ru-RU')}</time>${esc(l.text)}</div>`).join('') : '<div>Пока пусто</div>'}</div></div>` : ''}
-    ${a.native ? '' : `<div class="row-actions"><button class="btn" data-action="addon-logs" data-id="${esc(a.id)}">${state.addonLogs && state.addonLogs.id === a.id ? 'Скрыть журнал' : 'Журнал'}</button></div>`}`;
+    ${a.native ? '' : `<div class="row-actions"><button class="btn" data-action="addon-logs" data-id="${esc(a.id)}">${state.addonLogs && state.addonLogs.id === a.id ? 'Скрыть журнал' : 'Журнал'}</button>${a.source === 'catalog' ? `<button class="btn" data-action="addon-uninstall" data-id="${esc(a.id)}">Удалить</button>` : ''}</div>`}`;
+}
+
+/** Каталог дополнений Nyao: проверенные модератором; ставятся в один клик, права — при включении */
+function addonCatalogHtml() {
+  const c = state.addonCatalog;
+  const head = `<div class="ad-cookie" style="--ad-c:#C6B8FF" aria-hidden="true"><span>${addonGlyph('puzzle', 120)}</span></div>
+    <div class="ad-head"><span class="ad-eyebrow">КАТАЛОГ NYAO</span><h2>Дополнения</h2><p>Каждое проходит проверку перед публикацией. Ставится в один клик, а доступ дополнение попросит, когда включишь. Входы в сервисы закрыты для всех.</p></div>`;
+  if (!c || c.loading) return `${head}<div class="hint">Загружаю каталог…</div>`;
+  if (c.error) return `${head}<div class="ad-note bad">${addonGlyph('bell', 20)}<span><b>Каталог не открылся</b><span>${esc(c.error)}</span></span><button class="btn" data-action="addon-catalog" data-force="1">Ещё раз</button></div>`;
+  if (!c.items.length) return `${head}<div class="ad-empty"><b>Пока пусто</b><span class="hint">Первые дополнения появятся здесь после проверки.</span></div>`;
+  const card = (x) => {
+    const net = x.permissions.filter((p) => p.startsWith('net:')).map((p) => p.slice(4));
+    const btn = x.installed
+      ? x.installed !== x.version ? `<button class="btn primary" data-action="addon-install" data-id="${esc(x.id)}">Обновить до ${esc(x.version)}</button>` : `<button class="btn" data-action="addon-sel" data-id="${esc(x.id)}">Открыть</button>`
+      : `<button class="btn primary" data-action="addon-install" data-id="${esc(x.id)}">Установить</button>`;
+    return `<div class="ad-cat">
+      <span class="ad-cat-t"><b>${esc(x.name)}${x.verified ? ' <span class="ad-pill local" title="Код прочитан командой Nyao">✓ проверено</span>' : ''}</b>
+        <span class="hint">${esc(x.author || 'автор не указан')} · ${esc(x.version)} · ${x.installs} установок</span>
+        <span>${esc(x.description || '')}</span>
+        ${net.length ? `<span class="hint">Отправляет данные: ${net.map(esc).join(', ')}</span>` : '<span class="hint">В сеть не ходит</span>'}</span>
+      ${btn}
+    </div>`;
+  };
+  return `${head}<div class="ad-cats">${c.items.map(card).join('')}</div>`;
+}
+async function loadAddonCatalog(force = false) {
+  if (!api.addons || !api.addons.catalog) return;
+  state.addonCatalog = { loading: true, items: [] };
+  renderAddons(true);
+  try {
+    const r = await api.addons.catalog(force);
+    state.addonCatalog = { items: (r && r.items) || [] };
+  } catch (e) {
+    state.addonCatalog = { items: [], error: String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '') };
+  }
+  if (state.addonSel === '__catalog') renderAddons(true);
 }
 function renderAddons(keepScroll = false) {
   const items = state.addons.items;
-  const sel = items.find((a) => a.id === state.addonSel) || items[0];
-  state.addonSel = sel ? sel.id : null;
+  const catalogOpen = state.addonSel === '__catalog';
+  const sel = catalogOpen ? null : items.find((a) => a.id === state.addonSel) || items[0];
+  if (!catalogOpen) state.addonSel = sel ? sel.id : null;
   const row = (a) => `<div class="ad-row ${sel && a.id === sel.id ? 'sel' : ''} ${a.enabled ? 'on' : ''}">
       <button class="ad-row-main" data-action="addon-sel" data-id="${esc(a.id)}">
         <span class="ad-ic" style="--ad-c:${esc(a.color || '#3A3A40')}">${addonGlyph(a.icon, 22)}</span>
@@ -1889,7 +1928,8 @@ function renderAddons(keepScroll = false) {
       ${a.status === 'error' ? '' : `<button class="switch ${a.enabled ? 'on' : ''}" role="switch" aria-checked="${a.enabled}" aria-label="${esc(a.name)}" data-action="addon-toggle" data-id="${esc(a.id)}"><span></span></button>`}
     </div>`;
   const own = items.filter((a) => a.source === 'builtin');
-  const dev = items.filter((a) => a.source !== 'builtin');
+  const fromCatalog = items.filter((a) => a.source === 'catalog');
+  const dev = items.filter((a) => a.source === 'dev');
   const old = keepScroll && $('.ad-main-scroll', view);
   const top = old ? old.scrollTop : 0;
   view.innerHTML = `<div class="lib addons">
@@ -1899,12 +1939,14 @@ function renderAddons(keepScroll = false) {
         <div class="hint ad-count">Включено ${addonsOn()} из ${items.filter((a) => a.status !== 'error').length}</div>
         <div class="ad-label">ОТ NYAO</div>
         <div class="lib-list">${own.map(row).join('')}</div>
+        ${fromCatalog.length ? `<div class="ad-label">ИЗ КАТАЛОГА</div><div class="lib-list">${fromCatalog.map(row).join('')}</div>` : ''}
+        <div class="lib-list"><div class="ad-row ${catalogOpen ? 'sel' : ''}"><button class="ad-row-main" data-action="addon-catalog"><span class="ad-ic" style="--ad-c:#C6B8FF">${addonGlyph('puzzle', 22)}</span><span class="lib-row-meta"><b>Каталог дополнений</b><span>Проверенные дополнения от других авторов</span></span></button></div></div>
         ${state.addons.dev ? `<div class="ad-label">СВОИ · ТОЛЬКО В RED</div>
         <div class="lib-list">${dev.map(row).join('') || '<div class="hint ad-devhint">Положи папку с manifest.json и addon.js — дополнение появится здесь. Как писать: docs/addons.md в репозитории.</div>'}</div>
-        <div class="row-actions ad-dev"><button class="btn" data-action="addon-dev-open">Открыть папку</button><button class="btn" data-action="addon-rescan">Перечитать</button></div>` : `<div class="ad-soon"><b>Сторонние — скоро</b><span>Каталог откроется, когда обкатаем API в Nyao Music Red. Каждое дополнение будет проходить проверку.</span></div>`}
+        <div class="row-actions ad-dev"><button class="btn" data-action="addon-dev-open">Открыть папку</button><button class="btn" data-action="addon-rescan">Перечитать</button></div>` : ''}
       </div>
     </aside>
-    <section class="lib-main ad-main"><div class="lib-main-scroll ad-main-scroll"><div class="ad-body ${keepScroll ? '' : 'in'}">${addonDetailHtml(sel)}</div></div></section>
+    <section class="lib-main ad-main"><div class="lib-main-scroll ad-main-scroll"><div class="ad-body ${keepScroll ? '' : 'in'}">${catalogOpen ? addonCatalogHtml() : addonDetailHtml(sel)}</div></div></section>
   </div>`;
   if (top) $('.ad-main-scroll', view).scrollTop = top;
   if (sel && sel.native === 'lastfm') refreshLastfm();
@@ -2037,7 +2079,7 @@ function devCardHtml() {
     group('Приколы', `<div class="hint">Ломают вид и поведение, но приложение остаётся рабочим. Только в этом окне: перезапуск, плашка «Сбросить приколы» или Ctrl+Shift+Backspace — и всё как было.</div>
       <div class="dev-btns">${PRANKS.map(([id, title, hint]) => `<button class="btn ${pranks.has(id) ? 'primary' : ''}" data-action="dev-prank" data-v="${id}" title="${esc(hint)}">${pranks.has(id) ? '✓ ' : ''}${esc(title)}</button>`).join('')}</div>
       ${pranks.active().length ? '<div class="dev-btns"><button class="btn" data-action="dev-prank-reset">Сбросить все приколы</button></div>' : ''}`),
-    group('Флаги', `<div class="pref-row"><span><b>Новый интерфейс</b><span class="hint">Пробный вид главной, исполнителя, альбома и настроек, плавающий плеер и новый вход (аккаунт или гость). Данные и плеер те же — выключил, и всё как было.</span></span><button class="switch ${state.settings.uiFable ? 'on' : ''}" role="switch" aria-checked="${!!state.settings.uiFable}" aria-label="Новый интерфейс" data-action="dev-ui2"><span></span></button></div>${state.settings.uiFable ? '<div class="dev-btns"><button class="btn" data-action="dev-ui2-welcome">Показать новый вход</button></div>' : ''}<div class="pref-row"><span><b>Spotify (librespot)</b><span class="hint">Экспериментальный нативный плеер. Добавляет отдельную привязку Spotify в сервисах. Только nightly на ПК.</span></span><button class="switch ${state.spotify?.native?.flag ? 'on' : ''}" role="switch" aria-checked="${!!state.spotify?.native?.flag}" aria-label="Spotify (librespot)" data-action="dev-librespot-flag"><span></span></button></div>${state.spotify?.native?.flag ? '<button class="btn" data-action="set-sec" data-sec="svc:sp-native">Открыть Spotify (librespot)</button>' : ''}`)
+    group('Флаги', `<div class="pref-row"><span><b>Новый интерфейс</b><span class="hint">Пробный вид главной, исполнителя, альбома и настроек, плавающий плеер и новый вход (аккаунт или гость). Данные и плеер те же — выключил, и всё как было.</span></span><button class="switch ${ui2.on() ? 'on' : ''}" role="switch" aria-checked="${ui2.on()}" aria-label="Новый интерфейс" data-action="dev-ui2"><span></span></button></div>${ui2.on() ? '<div class="dev-btns"><button class="btn" data-action="dev-ui2-welcome">Показать новый вход</button></div>' : ''}<div class="pref-row"><span><b>Spotify (librespot)</b><span class="hint">Экспериментальный нативный плеер. Добавляет отдельную привязку Spotify в сервисах. Только nightly на ПК.</span></span><button class="switch ${state.spotify?.native?.flag ? 'on' : ''}" role="switch" aria-checked="${!!state.spotify?.native?.flag}" aria-label="Spotify (librespot)" data-action="dev-librespot-flag"><span></span></button></div>${state.spotify?.native?.flag ? '<button class="btn" data-action="set-sec" data-sec="svc:sp-native">Открыть Spotify (librespot)</button>' : ''}`)
   ].join('');
 }
 async function loadDevInfo() {
@@ -3339,6 +3381,34 @@ async function handleAction(el, e) {
     case 'addon-dev-open':
       await api.addons.openDev();
       break;
+    case 'addon-catalog':
+      state.addonSel = '__catalog';
+      renderAddons();
+      await loadAddonCatalog(!!el.dataset.force);
+      break;
+    case 'addon-install': {
+      const x = (state.addonCatalog && state.addonCatalog.items.find((i) => i.id === el.dataset.id)) || null;
+      el.disabled = true;
+      try {
+        await api.addons.install(el.dataset.id);
+        await loadAddons();
+        toast(`«${x ? x.name : el.dataset.id}» установлено — включи его, когда будешь готов`);
+        await loadAddonCatalog();
+      } catch (e) {
+        el.disabled = false;
+        toast(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), true);
+      }
+      break;
+    }
+    case 'addon-uninstall': {
+      const a = state.addons.items.find((i) => i.id === el.dataset.id);
+      if (!(await askConfirm(`Удалить «${a ? a.name : el.dataset.id}»? Его настройки останутся, если поставишь снова.`, 'Удалить'))) break;
+      await api.addons.uninstall(el.dataset.id);
+      state.addonSel = null;
+      await loadAddons();
+      toast('Удалено');
+      break;
+    }
     case 'addon-rescan':
       await api.addons.rescan();
       await loadAddons();
@@ -3375,6 +3445,10 @@ async function handleAction(el, e) {
     case 'toggle-globalkeys':
       state.settings = await api.settings.set({ globalKeys: state.settings.globalKeys === false });
       renderSettings();
+      break;
+    case 'toggle-spotlight-share':
+      state.settings = await api.settings.set({ spotlightShare: !state.settings.spotlightShare });
+      fillWaveStats();
       break;
     case 'toggle-fsvideo':
       state.settings = await api.settings.set({ fsVideo: state.settings.fsVideo === false });
@@ -3808,7 +3882,7 @@ async function handleAction(el, e) {
       api.vkLog && api.vkLog();
       break;
     case 'dev-ui2':
-      state.settings = await api.settings.set({ uiFable: !state.settings.uiFable });
+      state.settings = await api.settings.set({ uiFable: !ui2.on() });
       ui2.apply();
       renderSettings();
       break;
@@ -4706,6 +4780,14 @@ function openMixBuilder() {
 (async function init() {
   state.settings = await api.settings.get();
   ui2.apply();
+  // флаги функций из Автоматора: пришли позже — перерисуем, если поменялся вид
+  const pullFlags = (force) => api.flags && api.flags.get(force).then((f) => {
+    const was = ui2.on();
+    state.flags = f && typeof f === 'object' ? f : {};
+    if (ui2.on() !== was) { ui2.apply(); if (state.route) go(state.route, state.params || {}, false); }
+  }).catch(() => {});
+  pullFlags(false);
+  setInterval(() => pullFlags(false), 30 * 60_000);
   refreshAccent();
   if (IS_MAC) bgRibbon = new Ribbon($('#bg-ribbon'), { lines: 20, cy: 0.58, amp: 1, width: 1.7, accent: accentColor(), alpha: 0.9 });
   eq.apply(state.settings.eq);

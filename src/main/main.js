@@ -507,6 +507,7 @@ function initProviders() {
   addons = new AddonHost({
     builtinDir: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'addons'),
     devDir: addonDev,
+    catalogDir: catalogDir(),
     dataDir: path.join(app.getPath('userData'), 'addons-data'),
     settings,
     pages: new AddonPages({ log: (m) => console.log('[nyao]', m) }),
@@ -538,8 +539,114 @@ function initProviders() {
     // Red: нейросеть Nyao Spotlight в тени — считается на этом компьютере, история никуда не уходит
     spotlight: readVersion().channel === 'nightly' ? new Spotlight({ dir: app.getPath('userData'), log: (m) => console.log(m) }) : null
   });
+  startSpotlightSync();
   streams = new StreamService({ ya, yt, sc, vk, fetchBySource: { ya: fetchFn, yt: nodeFetch, sc: nodeFetch, vk: vkSessionFetch } });
   catalog = new Catalog({ ya, yt });
+}
+
+// ---------- Red: Spotlight — модель из Автоматора и сводки тени по согласию ----------
+// Какую модель слушает канал, решают в Автоматоре; файлы всё равно из релиза GitHub и сверяются по sha256.
+// Сводка — только счётчики этой сессии (без треков) и только если в настройках включено «Делиться цифрами Spotlight».
+const spotlightSession = crypto.randomUUID();
+let spotlightSent = 0;
+function startSpotlightSync() {
+  if (!wave || !wave.spotlight || startSpotlightSync.on) return;
+  startSpotlightSync.on = true;
+  const pickModel = async () => {
+    try {
+      const { version } = await cloud.request('GET', '/spotlight/model?channel=nightly');
+      if (version && wave.spotlight.setVersion(version) && wave.state?.played?.length) wave.spotlight.ensure();
+    } catch { /* сервер недоступен — остаёмся на своей модели */ }
+  };
+  const report = async () => {
+    const sp = wave.spotlight;
+    if (!settings.get().spotlightShare || !cloud.loggedIn || sp.state !== 'ready') return;
+    const st = sp.status();
+    const seen = st.judged + st.unknown;
+    if (seen <= spotlightSent) return;
+    try {
+      await cloud.request('POST', '/spotlight/report', { session: spotlightSession, model: st.version, build: readVersion().build || 0, judged: st.judged, unknown: st.unknown, inTop: st.inTop, outTop: st.outTop, medianRank: st.medianRank });
+      spotlightSent = seen;
+    } catch { /* попробуем в следующий раз */ }
+  };
+  setTimeout(pickModel, 5000);
+  setInterval(pickModel, 3 * 3600_000).unref?.();
+  setInterval(report, 10 * 60_000).unref?.();
+  app.on('before-quit', () => { report(); });
+}
+
+// ---------- Флаги функций из Автоматора ----------
+// Включают пробные функции части пользователей без релиза. Если сервер молчит — последние известные флаги.
+let remoteFlags = { at: 0, flags: {} };
+async function fetchFlags(force = false) {
+  if (!force && Date.now() - remoteFlags.at < 15 * 60_000) return remoteFlags.flags;
+  try {
+    const r = await cloud.request('GET', `/flags?${new URLSearchParams({ channel: readVersion().channel || 'stable', platform: process.platform })}`);
+    remoteFlags = { at: Date.now(), flags: r && r.flags && typeof r.flags === 'object' ? r.flags : {} };
+  } catch {
+    remoteFlags.at = Date.now() - 10 * 60_000; // повторим через 5 минут
+  }
+  return remoteFlags.flags;
+}
+
+// ---------- Каталог дополнений ----------
+// Список и пакеты — с сервера Nyao; пакет сверяется с sha256 из списка, манифест — теми же правилами, что у папки разработчика.
+// Ставится в userData/addons-catalog/<id>; права дополнение всё равно просит у человека при включении.
+// Отозванное в каталоге дополнение выключается и удаляется.
+const catalogDir = () => path.join(app.getPath('userData'), 'addons-catalog');
+let addonCatalog = { at: 0, items: [], revoked: [] };
+async function fetchAddonCatalog(force = false) {
+  if (!force && Date.now() - addonCatalog.at < 10 * 60_000) return addonCatalog;
+  const r = await cloud.request('GET', `/addons/catalog?channel=${readVersion().channel || 'stable'}`);
+  addonCatalog = { at: Date.now(), items: Array.isArray(r.items) ? r.items : [], revoked: Array.isArray(r.revoked) ? r.revoked : [] };
+  await dropRevokedAddons();
+  return addonCatalog;
+}
+async function dropRevokedAddons() {
+  let removed = false;
+  for (const { id, reason } of addonCatalog.revoked) {
+    const dir = path.join(catalogDir(), id);
+    if (!/^[a-z0-9]+(\.[a-z0-9][a-z0-9-]*)+$/.test(id) || !fs.existsSync(dir)) continue;
+    fs.rmSync(dir, { recursive: true, force: true });
+    removed = true;
+    send('addons:toast', { id, name: id, text: `Дополнение отозвано из каталога и удалено${reason ? `: ${reason}` : ''}` });
+  }
+  if (removed && addons) await addons.scan();
+}
+async function installCatalogAddon(id) {
+  const entry = (await fetchAddonCatalog()).items.find((x) => x.id === id) || (await fetchAddonCatalog(true)).items.find((x) => x.id === id);
+  if (!entry) throw new Error('Этого дополнения нет в каталоге');
+  const base = cloud ? cloud.base : API_BASE;
+  const res = await net.fetch(`${base}/addons/bundle/${encodeURIComponent(id)}?channel=${readVersion().channel || 'stable'}`, { signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error(`Каталог ответил ${res.status}`);
+  const text = await res.text();
+  if (crypto.createHash('sha256').update(text).digest('hex') !== entry.sha256) throw new Error('Пакет не совпал с каталогом — не ставим');
+  const files = JSON.parse(text).files || {};
+  const { validateManifest } = await import('./addons/manifest.js');
+  const v = validateManifest(JSON.parse(Buffer.from(files['manifest.json'] || '', 'base64').toString('utf8') || 'null'));
+  if (!v.ok) throw new Error(`Манифест: ${v.error}`);
+  if (v.manifest.id !== id || v.manifest.native || id.startsWith('nyao.')) throw new Error('Пакет не того дополнения');
+  const SAFE = /^[A-Za-z0-9_][A-Za-z0-9_.-]*(\/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$/;
+  const dir = path.join(catalogDir(), id);
+  const tmp = `${dir}.part`;
+  fs.rmSync(tmp, { recursive: true, force: true });
+  for (const [p, b64] of Object.entries(files)) {
+    if (!SAFE.test(p)) throw new Error(`Плохое имя файла в пакете: ${p}`);
+    const out = path.join(tmp, p);
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, Buffer.from(String(b64), 'base64'));
+  }
+  if (addons) addons.stop(id);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.renameSync(tmp, dir);
+  if (addons) await addons.scan();
+  return { id, version: v.manifest.version };
+}
+function uninstallCatalogAddon(id) {
+  if (!/^[a-z0-9]+(\.[a-z0-9][a-z0-9-]*)+$/.test(String(id))) throw new Error('Плохой id');
+  if (addons) addons.stop(id);
+  fs.rmSync(path.join(catalogDir(), id), { recursive: true, force: true });
+  return addons ? addons.scan() : null;
 }
 
 // ---------- Отложенные лайки SoundCloud ----------
@@ -969,6 +1076,18 @@ function registerIpc() {
   handle('addons:state', (st) => addons.setState(st));
   handle('addons:menuClick', (id, itemId, track) => addons.menuClick(String(id), String(itemId), track));
   handle('addons:rescan', () => addons.scan());
+  handle('addons:catalog', async (force) => {
+    const c = await fetchAddonCatalog(!!force);
+    const installed = Object.fromEntries(addons.list().filter((a) => a.source === 'catalog').map((a) => [a.id, a.version || '']));
+    return { items: c.items.map((x) => ({ ...x, installed: installed[x.id] || null })) };
+  });
+  handle('addons:install', (id) => installCatalogAddon(String(id)));
+  handle('addons:uninstall', (id) => uninstallCatalogAddon(String(id)));
+  handle('flags:get', (force) => fetchFlags(!!force));
+  // стоят дополнения из каталога — раз в шесть часов сверяемся, не отозвали ли их
+  const revokeCheck = () => { if (fs.existsSync(catalogDir()) && fs.readdirSync(catalogDir()).length) fetchAddonCatalog(true).catch(() => {}); };
+  setTimeout(revokeCheck, 30_000);
+  setInterval(revokeCheck, 6 * 3600_000).unref?.();
   handle('addons:openDev', () => {
     if (!addons.devDir) throw new Error('Папка для своих дополнений есть только в Nyao Music Red');
     fs.mkdirSync(addons.devDir, { recursive: true });

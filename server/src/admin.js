@@ -9,6 +9,9 @@ import { labelRoutes } from './admin-label.js';
 import { pushAdminRoutes } from './admin-push.js';
 import { profileAdminRoutes } from './admin-profiles.js';
 import { fsvideoAdminRoutes } from './fsvideo.js';
+import { flagsAdminRoutes } from './flags.js';
+import { spotlightAdminRoutes } from './spotlight.js';
+import { addonsAdminRoutes } from './addons-catalog.js';
 
 export const PERMISSIONS = [
   'users.read', 'users.sessions', 'users.edit', 'users.ban',
@@ -21,7 +24,7 @@ export const PERMISSIONS = [
   'audit.read', 'audit.all',
   'stats.read', 'automator.read',
   'profiles.read', 'profiles.moderate',
-  'media.read', 'media.write'
+  'media.read', 'media.write', 'flags.read', 'flags.write', 'spotlight.read', 'spotlight.write', 'addons.read', 'addons.write'
 ];
 
 const all = () => [...PERMISSIONS];
@@ -808,7 +811,10 @@ export function adminRoutes(ctx) {
     ...labelRoutes({ ...ctx, guard, getSetting, setSetting }),
     ...pushAdminRoutes({ ...ctx, guard }),
     ...profileAdminRoutes({ ...ctx, guard }),
-    ...fsvideoAdminRoutes({ ...ctx, guard })
+    ...fsvideoAdminRoutes({ ...ctx, guard }),
+    ...flagsAdminRoutes({ ...ctx, guard }),
+    ...spotlightAdminRoutes({ ...ctx, guard }),
+    ...addonsAdminRoutes({ ...ctx, guard })
   ];
 
   function needGithub() {

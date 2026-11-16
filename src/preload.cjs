@@ -52,6 +52,9 @@ contextBridge.exposeInMainWorld('nyao', {
     state: (s) => call('addons:state', s),
     menuClick: (id, itemId, track) => call('addons:menuClick', id, itemId, track),
     rescan: () => call('addons:rescan'),
+    catalog: (force) => call('addons:catalog', force),
+    install: (id) => call('addons:install', id),
+    uninstall: (id) => call('addons:uninstall', id),
     openDev: () => call('addons:openDev'),
     onChanged: (cb) => ipcRenderer.on('addons:changed', () => cb()),
     onToast: (cb) => on('addons:toast', cb)
@@ -78,6 +81,7 @@ contextBridge.exposeInMainWorld('nyao', {
     onChange: (cb) => ipcRenderer.on('status', (_e, s) => cb(s))
   },
   fsvideo: { get: (artist, title) => call('fsvideo:get', artist, title) },
+  flags: { get: (force) => call('flags:get', force) },
   openExternal: (url) => call('open:external', url),
   vkLog: () => call('vk:openLog'),
   // ссылки nyao:// и music.withnyao.app/share/…: приглашение, комната, профиль, трек

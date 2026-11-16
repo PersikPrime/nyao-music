@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = {
   normalize: false,      // выравнивать громкость треков (по данным Яндекса и YouTube)
   fade: 0,               // плавные переходы между треками, секунд (0 — выкл)
   fsAutoHide: false,
+  spotlightShare: false, // Red: отправлять счётчики теневого Spotlight (без треков) — только по согласию
   fsVideo: true,         // «Видео в полном экране» (пока только Red): ролик из Автоматора вместо обложки
   accent: 'lavender',     // акцентный цвет: lavender | coral | mint | sun | cover     // полноэкранный режим: прятать кнопки, если мышь не двигается
   startVolume: 'last', // громкость при запуске: 'last' или 0..1

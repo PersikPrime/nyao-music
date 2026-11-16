@@ -12,7 +12,8 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 
 export const MODEL = 'spotlight-v1';
-const BASE = `https://github.com/PersikPrime/nyao-music/releases/download/${MODEL}/`;
+const releaseBase = (version) => `https://github.com/PersikPrime/nyao-music/releases/download/${version}/`;
+const BASE = releaseBase(MODEL);
 const JOURNAL_EVENTS = new Set(['trackStarted', 'trackFinished', 'skip', 'like', 'dislike']);
 const FILES = ['manifest.json', 'weights.bin', 'vectors.i8.gz', 'scales.f32', 'vocab.tsv.gz'];
 
@@ -227,8 +228,8 @@ const sha256 = (file) => new Promise((resolve, reject) => {
 });
 
 export class Spotlight {
-  constructor({ dir, fetch = globalThis.fetch, log = () => {}, base = BASE }) {
-    Object.assign(this, { dir: path.join(dir, MODEL), fetch, log, base });
+  constructor({ dir, fetch = globalThis.fetch, log = () => {}, base = BASE, version = MODEL }) {
+    Object.assign(this, { root: dir, version, dir: path.join(dir, version), fetch, log, base });
     this.model = null;
     this.state = 'idle'; // idle → downloading → loading → ready | error
     this.progress = 0;
@@ -239,10 +240,29 @@ export class Spotlight {
     this.journalFile = path.join(dir, 'wave-journal.jsonl');
     this.reset();
   }
+  /**
+   * Модель, которую выбрали в Автоматоре для канала (spotlight-vN). Файлы — из релиза с тем же именем, сверка та же.
+   * Уже загруженная другая модель выгружается; цифры тени начинаются заново — они про конкретную модель.
+   */
+  setVersion(version) {
+    if (!/^spotlight-v\d{1,4}$/.test(String(version || '')) || version === this.version || this.loading) return false;
+    this.version = version;
+    this.dir = path.join(this.root, version);
+    this.base = releaseBase(version);
+    this.model = null;
+    this.state = 'idle';
+    this.progress = 0;
+    this.error = '';
+    this.pending = null;
+    this.cache = { sig: '', top: [] };
+    this.reset();
+    this.log(`[spotlight] модель канала: ${version}`);
+    return true;
+  }
   reset() { this.stats = { judged: 0, unknown: 0, inTop: { n: 0, skipped: 0 }, outTop: { n: 0, skipped: 0 }, ranks: [] }; }
   status() {
     const suggest = this.cache.top.slice(0, 5).map(x => this.model?.name(x.id)).filter(Boolean);
-    return { state: this.state, progress: this.progress, error: this.error, ...this.stats, ranks: undefined, medianRank: median(this.stats.ranks), suggest };
+    return { version: this.version, state: this.state, progress: this.progress, error: this.error, ...this.stats, ranks: undefined, medianRank: median(this.stats.ranks), suggest };
   }
   /** Скачать (если нужно) и загрузить модель. Повторные вызовы ждут того же. */
   ensure() {
