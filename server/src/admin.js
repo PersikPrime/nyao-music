@@ -8,6 +8,7 @@ import { lyricsAdminRoutes } from './admin-lyrics.js';
 import { labelRoutes } from './admin-label.js';
 import { pushAdminRoutes } from './admin-push.js';
 import { profileAdminRoutes } from './admin-profiles.js';
+import { fsvideoAdminRoutes } from './fsvideo.js';
 
 export const PERMISSIONS = [
   'users.read', 'users.sessions', 'users.edit', 'users.ban',
@@ -19,7 +20,8 @@ export const PERMISSIONS = [
   'push.read', 'push.test', 'push.broadcast',
   'audit.read', 'audit.all',
   'stats.read', 'automator.read',
-  'profiles.read', 'profiles.moderate'
+  'profiles.read', 'profiles.moderate',
+  'media.read', 'media.write'
 ];
 
 const all = () => [...PERMISSIONS];
@@ -805,7 +807,8 @@ export function adminRoutes(ctx) {
     ...lyricsAdminRoutes({ ...ctx, guard }),
     ...labelRoutes({ ...ctx, guard, getSetting, setSetting }),
     ...pushAdminRoutes({ ...ctx, guard }),
-    ...profileAdminRoutes({ ...ctx, guard })
+    ...profileAdminRoutes({ ...ctx, guard }),
+    ...fsvideoAdminRoutes({ ...ctx, guard })
   ];
 
   function needGithub() {

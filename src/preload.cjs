@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('nyao', {
     get: (force) => call('status:get', force),
     onChange: (cb) => ipcRenderer.on('status', (_e, s) => cb(s))
   },
+  fsvideo: { get: (artist, title) => call('fsvideo:get', artist, title) },
   openExternal: (url) => call('open:external', url),
   vkLog: () => call('vk:openLog'),
   // ссылки nyao:// и music.withnyao.app/share/…: приглашение, комната, профиль, трек

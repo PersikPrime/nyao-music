@@ -24,7 +24,7 @@ import { StreamService } from './stream.js';
 import { findLyricsChain, LYRICS_PROVIDERS } from './lyrics.js';
 import { Catalog } from './catalog.js';
 import { DiscordRPC, DISCORD_APP_ID } from './discord.js';
-import { NyaoCloud, API_BASE } from './cloud.js';
+import { NyaoCloud, API_BASE, LEGACY_API_BASE } from './cloud.js';
 import { LastFm } from './lastfm.js';
 import { AddonHost, ADDON_SCHEME } from './addons/host.js';
 import { AddonPages } from './addons/pages.js';
@@ -172,6 +172,36 @@ function sendStatus() {
 }
 const up = (id) => !svcStatus.outages.includes(id) && !netBlocked.includes(id);
 setInterval(pollStatus, 2 * 60_000).unref?.();
+
+// «Видео в полном экране»: ролик к треку из Автоматора. Запрос без токена — ролики общие, сервер отдаёт их по каналу.
+// Адрес ролика принимаем только с сервера Nyao (https), ответы держим 10 минут.
+const fsVideoCache = new Map();
+async function fsVideoFor(artist, title) {
+  const a = String(artist || '').slice(0, 300);
+  const t = String(title || '').slice(0, 300);
+  if (!a || !t) return null;
+  const channel = readVersion().channel || 'stable';
+  const key = `${channel}|${a}|${t}`.toLowerCase();
+  const hit = fsVideoCache.get(key);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.video;
+  let video = null;
+  try {
+    const base = cloud ? cloud.base : API_BASE;
+    const res = await net.fetch(`${base}/media/fsvideo?${new URLSearchParams({ artist: a, title: t, channel })}`, { headers: { 'X-Nyao-Build': String(readVersion().build || 0) }, signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return hit ? hit.video : null;
+    const v = (await res.json()).video;
+    if (v && v.url) {
+      const url = new URL(v.url, base);
+      const allowed = [API_BASE, LEGACY_API_BASE, base].map((b) => new URL(b).host);
+      if (url.protocol === 'https:' && allowed.includes(url.host)) video = { ...v, url: url.href };
+    }
+  } catch {
+    return hit ? hit.video : null;
+  }
+  fsVideoCache.set(key, { at: Date.now(), video });
+  if (fsVideoCache.size > 300) fsVideoCache.delete(fsVideoCache.keys().next().value);
+  return video;
+}
 setInterval(probeServices, 60_000).unref?.();
 setTimeout(probeServices, 8_000).unref?.();
 let ya, yt, sc, vk, sp, spEngine, wave, streams, catalog, win, cloud, lastfm, radio, live, addons;
@@ -636,6 +666,7 @@ function registerIpc() {
   handle('win:maximize', () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   handle('win:close', () => win.close());
   handle('status:get', (force) => (force ? pollStatus() : svcStatus));
+  handle('fsvideo:get', (artist, title) => fsVideoFor(artist, title));
   handle('win:fullscreen', (on) => {
     win.setFullScreen(!!on);
     return win.isFullScreen();

@@ -97,6 +97,8 @@ export class FullScreen {
     el.className = 'fs';
     el.hidden = true;
     el.innerHTML = `
+      <video class="fs-video" muted playsinline preload="auto" disablepictureinpicture aria-hidden="true"></video>
+      <div class="fs-vdim" aria-hidden="true"></div>
       <div class="fs-art-wrap">
         <div class="fs-halo" aria-hidden="true"></div>
         <div class="fs-art"><div class="fs-roll"><img alt=""></div></div>
@@ -321,7 +323,11 @@ export class FullScreen {
   layout() {
     if (!this.open || !this.el) return;
     const box = this.$('.fs-lyrics');
-    if (box && !box.classList.contains('plain')) {
+    if (box && this.videoOn && !box.classList.contains('plain')) {
+      // в режиме видео текущая строка стоит сверху окошка из трёх строк
+      box.style.paddingTop = '0px';
+      box.style.paddingBottom = `${box.clientHeight}px`;
+    } else if (box && !box.classList.contains('plain')) {
       // меряем без старых отступов: блок не сжимается меньше своих отступов, и прежние (от развёрнутого
       // на весь экран текста) не давали ему вернуться к прежней высоте
       box.style.paddingTop = '0px';
@@ -380,6 +386,7 @@ export class FullScreen {
 
   setExpand(on) {
     if (!this.el || this.el.classList.contains('expand') === on) return;
+    if (on && this.videoOn) return; // поверх ролика текст не разворачиваем — три строки внизу
     if (on) this.measureExpanded();
     this.el.classList.toggle('expand', on);
     clearTimeout(this.expandTimer);
@@ -633,6 +640,7 @@ export class FullScreen {
     if (this.card) this.closeCard();
     else this.endPick();
     this.open = false;
+    this.setVideoOn(false);
     this.el.classList.remove('expand');
     this.scrolling = false;
     document.body.classList.remove('fs-on');
@@ -903,7 +911,103 @@ export class FullScreen {
     if (this.picking && !this.card) this.endPick();
     this.tried = [];
     this.loadLyrics();
+    this.safe(() => this.loadVideo(t));
     this.safe(() => this.tick());
+  }
+
+  /**
+   * «Видео в полном экране»: ролик к треку из Автоматора. Обложка уезжает влево, ролик проявляется на весь экран,
+   * название — вниз слева, три строки текста — вниз справа, кнопки и прогресс — одной полосой внизу.
+   * Ролик без звука и идёт по времени песни: фрагмент [startMs, endMs) песни ↔ ролик с offsetMs.
+   */
+  loadVideo(t) {
+    const v = this.$('.fs-video');
+    this.video = null;
+    this.setVideoOn(false);
+    if (!v) return;
+    v.removeAttribute('src');
+    v.load();
+    if (typeof this.d.video !== 'function') return;
+    let p;
+    try {
+      p = this.d.video(t);
+    } catch {
+      p = null;
+    }
+    this.withTimeout(Promise.resolve(p), 8000).then((meta) => {
+      if (!meta || !meta.url || this.trackId !== t.id || !this.el) return;
+      this.video = meta;
+      v.src = meta.url;
+      v.oncanplay = () => this.tick();
+      v.onerror = () => {
+        // ролик не открылся — остаёмся с обложкой
+        this.video = null;
+        this.setVideoOn(false);
+      };
+      this.el.style.setProperty('--fs-dim', String(Math.max(0, Math.min(0.85, (Number(meta.dim) || 0) / 100))));
+    });
+  }
+
+  /** Настройку переключили — перечитать ролик для текущего трека */
+  refreshVideo() {
+    const t = this.d.player.current;
+    if (this.open && this.el && t) this.safe(() => this.loadVideo(t));
+  }
+
+  setVideoOn(on) {
+    on = !!on;
+    if (!this.el || this.videoOn === on) return;
+    this.videoOn = on;
+    if (on) this.setExpand(false);
+    this.el.classList.toggle('video-on', on);
+    this.el.classList.add('vswap');
+    clearTimeout(this.vswapTimer);
+    this.vswapTimer = setTimeout(() => this.el && this.el.classList.remove('vswap'), 750);
+    const v = this.$('.fs-video');
+    if (!on && v && !v.paused) v.pause();
+    this.lastLine = -2;
+    // разметка поменялась — текст перемеряем после перехода
+    requestAnimationFrame(() => {
+      this.layout();
+      this.tick(true);
+    });
+  }
+
+  /** Где сейчас должен быть ролик (мс) или null, если в этот момент песни его нет */
+  videoTarget(posMs) {
+    const m = this.video;
+    if (!m) return null;
+    const whole = m.mode === 'whole';
+    const start = whole ? 0 : Number(m.startMs) || 0;
+    const end = whole || !m.endMs ? Infinity : Number(m.endMs);
+    if (posMs < start || posMs >= end) return null;
+    const v = this.$('.fs-video');
+    const vdur = Number(m.durationMs) || (v && Number.isFinite(v.duration) ? v.duration * 1000 : 0);
+    const off = Number(m.offsetMs) || 0;
+    let target = off + (posMs - start);
+    if (vdur > 0) {
+      if (m.loop) target = off + ((posMs - start) % Math.max(500, vdur - off));
+      else if (target >= vdur - 60) return null;
+    }
+    return target;
+  }
+
+  syncVideo(pos) {
+    const v = this.$('.fs-video');
+    if (!v || !this.video) return this.setVideoOn(false);
+    const target = this.videoTarget(pos * 1000);
+    // ролик ещё не загрузился — пока обложка; oncanplay позовёт tick ещё раз
+    if (target == null || v.readyState < 2) return this.setVideoOn(false);
+    this.setVideoOn(true);
+    if (Math.abs(v.currentTime * 1000 - target) > 350) {
+      try {
+        v.currentTime = target / 1000;
+      } catch {
+        // ещё не готов к перемотке — поправим на следующем тике
+      }
+    }
+    if (this.d.player.playing && v.paused) v.play().catch(() => {});
+    else if (!this.d.player.playing && !v.paused) v.pause();
   }
 
   /** Загрузить текст текущего трека; opts.exclude — пропустить эти источники («другой источник») */
@@ -1065,6 +1169,7 @@ export class FullScreen {
     const pos = a.currentTime || 0;
     // пока тянут ползунок, он стоит под курсором, а не там, где играет
     if (this.seeking == null) this.paintProgress(dur ? Math.min(1, pos / dur) : 0, dur);
+    this.safe(() => this.syncVideo(pos));
     const d = this.lyrics;
     if (!d || !d.synced || !this.showLyrics) return;
     const time = pos + 0.25;
@@ -1078,11 +1183,13 @@ export class FullScreen {
       el.classList.toggle('on', i === idx);
       el.classList.toggle('past', i < idx);
       el.classList.toggle('next', i === idx + 1);
+      el.classList.toggle('next2', i === idx + 2);
     });
     if (this.scrolling) return; // человек листает сам — не мешаем
     const on = box.querySelector('p.on') || box.querySelector('p');
     if (!on) return;
-    const top = on.offsetTop - box.clientHeight / 2 + on.offsetHeight / 2;
+    // в режиме видео текущая строка — первая из трёх, прошедшая уезжает вверх и гаснет
+    const top = this.videoOn ? on.offsetTop : on.offsetTop - box.clientHeight / 2 + on.offsetHeight / 2;
     if (typeof box.scrollTo === 'function') box.scrollTo({ top, behavior: force ? 'auto' : 'smooth' });
     else box.scrollTop = top;
   }

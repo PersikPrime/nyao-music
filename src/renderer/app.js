@@ -1798,6 +1798,8 @@ function controlCardHtml() {
       <button class="switch ${s.closeToTray ? 'on' : ''}" role="switch" aria-checked="${!!s.closeToTray}" aria-label="Сворачивать в трей при закрытии" data-action="toggle-tray"><span></span></button></div>
     <div class="pref-row"><span><b>Прятать кнопки в полноэкранном режиме</b><span class="hint">Если мышь не двигается 3 секунды, кнопки исчезают и остаются обложка и текст</span></span>
       <button class="switch ${s.fsAutoHide ? 'on' : ''}" role="switch" aria-checked="${!!s.fsAutoHide}" aria-label="Прятать кнопки в полноэкранном режиме" data-action="toggle-fshide"><span></span></button></div>
+    ${state.versionInfo && state.versionInfo.channel === 'nightly' ? `<div class="pref-row"><span><b>Видео в полном экране</b><span class="hint">У некоторых треков вместо обложки — ролик на весь экран, без звука и в такт песне. Только в Red.</span></span>
+      <button class="switch ${s.fsVideo !== false ? 'on' : ''}" role="switch" aria-checked="${s.fsVideo !== false}" aria-label="Видео в полном экране" data-action="toggle-fsvideo"><span></span></button></div>` : ''}
   </section>`;
 }
 
@@ -3374,6 +3376,11 @@ async function handleAction(el, e) {
       state.settings = await api.settings.set({ globalKeys: state.settings.globalKeys === false });
       renderSettings();
       break;
+    case 'toggle-fsvideo':
+      state.settings = await api.settings.set({ fsVideo: state.settings.fsVideo === false });
+      fullscreen.refreshVideo();
+      renderSettings();
+      break;
     case 'toggle-fshide':
       state.settings = await api.settings.set({ fsAutoHide: !state.settings.fsAutoHide });
       renderSettings();
@@ -4267,6 +4274,11 @@ const fullscreen = new FullScreen({
   ensureLyrics: (opts) => ensureLyrics(opts).then((d) => (pranks.has('karaoke') ? fakeWords(d) : d)),
   source: () => $('#pb-cover'), // обложка в плашке плеера: из неё разворачивается полный экран и в неё сворачивается
   autoHide: () => !!(state.settings && state.settings.fsAutoHide),
+  // ролик к треку из Автоматора — пока только в Red и если не выключен в настройках
+  video: (t) => {
+    if (!api.fsvideo || !(state.versionInfo && state.versionInfo.channel === 'nightly') || (state.settings && state.settings.fsVideo === false)) return Promise.resolve(null);
+    return api.fsvideo.get(t.artist || '', t.title || '').catch(() => null);
+  },
   like: () => player.toggleLike(),
   toast: (m, err) => toast(m, err),
   trackLink: (t) => trackLink(t),

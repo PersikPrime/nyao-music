@@ -64,3 +64,24 @@ test('backgroundFrom: фон почти чёрный, но в тоне обло�
   const m = backgroundFrom([200, 40, 40]).match(/rgb\((\d+), (\d+), (\d+)\)/);
   assert.ok(m && Number(m[1]) > Number(m[2]) && Number(m[1]) < 100);
 });
+
+test('видео в полном экране: где должен быть ролик по времени песни', () => {
+  const fs = new FullScreen({ icons: {}, api: {}, player: {} });
+  fs.$ = () => null;
+  fs.video = { mode: 'part', startMs: 30000, endMs: 60000, offsetMs: 2000, loop: true, durationMs: 12000 };
+  assert.equal(fs.videoTarget(29999), null, 'до фрагмента — обложка');
+  assert.equal(fs.videoTarget(30000), 2000, 'начало фрагмента — с места offset');
+  assert.equal(fs.videoTarget(35000), 7000);
+  assert.equal(fs.videoTarget(40000), 2000, 'по кругу: ролик 12 с, с offset 2 с — круг 10 с');
+  assert.equal(fs.videoTarget(60000), null, 'конец фрагмента — обратно обложка');
+  fs.video = { ...fs.video, loop: false };
+  assert.equal(fs.videoTarget(39000), 11000);
+  assert.equal(fs.videoTarget(40000), null, 'без цикла ролик кончился — обложка');
+  fs.video = { mode: 'whole', startMs: 0, endMs: 0, offsetMs: 0, loop: true, durationMs: 8000 };
+  assert.equal(fs.videoTarget(0), 0);
+  assert.equal(fs.videoTarget(17000), 1000, 'вся песня — с начала и по кругу');
+  fs.video = { mode: 'part', startMs: 5000, endMs: 0, offsetMs: 0, loop: true, durationMs: 0 };
+  assert.equal(fs.videoTarget(500000), 495000, 'без конца — до конца песни');
+  fs.video = null;
+  assert.equal(fs.videoTarget(1000), null);
+});

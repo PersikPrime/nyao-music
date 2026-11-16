@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { pkce } from './telegram.js';
 import { Hub } from './hub.js';
 import { summarize, periodRange } from './stats.js';
+import { fsvideoPublicRoutes, fsvideoStore, serveFsVideo } from './fsvideo.js';
 import { socialRoutes } from './social.js';
 import { lyricsRoutes, lrclibError } from './lyrics.js';
 import { lyricsPage } from './lyrics-web.js';
@@ -116,6 +117,8 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
   const imgLimit = limiter(900);
   const waveLimit = limiter(40);
   const moodLimit = limiter(60);
+  const fsvLimit = limiter(240);
+  const fsvStore = fsvideoStore(dataDir);
 
   const q = (sql, params) => db.query(sql, params);
 
@@ -492,6 +495,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     ...social,
     ...share,
     ...legacy,
+    ...fsvideoPublicRoutes({ q, HttpError, clip, publicUrl, limit: fsvLimit }),
     ...admin.routes
   ];
 
@@ -504,6 +508,9 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       // файлы зеркала отдаём потоком, с поддержкой докачки
       const dl = /^\/dl\/([^/]+)\/([^/]+)$/.exec(url.pathname);
       if (dl && (req.method === 'GET' || req.method === 'HEAD')) return serveFile(req, res, mirror && mirror.file(dl[1], dl[2]));
+      // ролики для полного экрана — потоком, с перемоткой
+      const fsv = /^\/media\/fsv\/([^/]+)$/.exec(url.pathname);
+      if (fsv && (req.method === 'GET' || req.method === 'HEAD')) return serveFsVideo(req, res, fsvStore, fsv[1]);
       // тексты песен: сайт на lyrics.withnyao.app (все страницы — одна, дальше разбирается сама), API — на своём домене
       const host = String(req.headers.host || '').split(':')[0].toLowerCase();
       if (req.method === 'GET' && lyricsHosts.includes(host) && !/^\/(api|auth)\//.test(url.pathname)) {

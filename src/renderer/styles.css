@@ -826,6 +826,44 @@ body.fs-on .toast { z-index: 1000; }
 /* узкое окно: печенька меньше, чтобы тексту хватило места */
 @media (max-width: 1100px) { .fs { --fs-size: min(70vh, 46vw); } }
 
+/* ---------- Видео в полном экране (ролик из Автоматора) ----------
+   обложка уезжает влево, ролик проявляется на весь экран; название — вниз слева, три строки текста — вниз справа,
+   кнопки и прогресс — одной полосой внизу */
+.fs-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; opacity: 0; pointer-events: none; transition: opacity .9s ease; background: #000; }
+.fs-vdim { position: absolute; inset: 0; z-index: 0; opacity: 0; pointer-events: none; transition: opacity .9s ease; background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0) 46%), rgba(0,0,0,var(--fs-dim, .45)); }
+.fs-video:not([src]) { display: none; }
+.fs.video-on .fs-video, .fs.video-on .fs-vdim { opacity: 1; }
+.fs-art-wrap { transition: translate .9s cubic-bezier(.6, 0, .2, 1), opacity .9s ease; }
+.fs.video-on .fs-art-wrap { translate: calc(-100% - 40vw) 0; opacity: 0; }
+.fs.video-on .fs-stage { left: clamp(40px, 5vw, 88px); right: clamp(40px, 5vw, 88px); display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 42%); grid-template-rows: 1fr auto auto; column-gap: 48px; row-gap: 22px; padding: 0 0 clamp(26px, 4.5vh, 46px); }
+.fs.video-on .fs-head { grid-column: 1; grid-row: 2; align-self: end; text-shadow: 0 2px 18px rgba(0,0,0,.45); }
+.fs.video-on .fs-title { font-size: clamp(30px, 3.4vw, 54px); }
+.fs.video-on .fs-right { grid-column: 2; grid-row: 2; align-self: end; height: clamp(124px, 17vh, 176px); }
+.fs.video-on .fs-right::before, .fs.video-on .fs-credit, .fs.video-on .fs-now { display: none; }
+.fs.video-on:has(.fs-lyrics.plain) .fs-right { visibility: hidden; }
+.fs.video-on .fs-lyrics { gap: 12px; -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 78%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0, #000 78%, transparent 100%); }
+.fs.video-on .fs-lyrics p { max-width: none; text-align: right; transform-origin: right center; font-size: clamp(19px, 1.5vw, 25px); text-shadow: 0 2px 14px rgba(0,0,0,.55); transition: color .35s, opacity .5s ease, transform .45s cubic-bezier(.2, .8, .2, 1); }
+.fs.video-on .fs-lyrics p.on { transform: scale(1.1); }
+.fs.video-on .fs-lyrics p:not(.on):not(.next):not(.next2) { opacity: 0; }
+.fs.video-on .fs-bottom { grid-column: 1 / -1; grid-row: 3; flex-direction: row; align-items: center; gap: 14px; max-height: none; }
+.fs.video-on .fs-controls { display: contents; }
+.fs.video-on .fs-controls > * { transition: opacity .4s, background .2s, transform .2s cubic-bezier(.2, .8, .2, 1); }
+.fs.video-on [data-fs="prev"] { order: 1; }
+.fs.video-on .fs-play { order: 2; width: 76px; height: 52px; }
+.fs.video-on [data-fs="next"] { order: 3; }
+.fs.video-on .fs-seek { order: 4; flex: 1; min-width: 0; margin: 0 10px; }
+.fs.video-on .fs-gap { display: none; }
+.fs.video-on .fs-like { order: 5; }
+.fs.video-on .fs-lyr { order: 6; }
+.fs.video-on [data-fs="more"] { order: 7; }
+.fs.video-on .fs-btn { width: 48px; height: 48px; }
+.fs.video-on .fs-btn svg { width: 24px; height: 24px; }
+.fs.idle.video-on .fs-controls > * { opacity: 0; pointer-events: none; }
+/* смена раскладки (сетка ↔ колонка) не анимируется сама — блоки мягко проявляются на новых местах */
+.fs.vswap .fs-stage > * { animation: fs-vswap .7s cubic-bezier(.2, .8, .2, 1); }
+@keyframes fs-vswap { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .fs-video, .fs-vdim, .fs-art-wrap { transition: none; } .fs.vswap .fs-stage > * { animation: none; } }
+
 /* Очередь в полном экране — панель справа */
 .fs-queue { position: absolute; top: 84px; right: 24px; bottom: 24px; width: min(400px, 40vw); z-index: 3; display: flex; flex-direction: column; padding: 18px 12px 12px; box-sizing: border-box; border-radius: 24px; background: rgba(12, 10, 14, .82); backdrop-filter: blur(28px) saturate(1.2); -webkit-backdrop-filter: blur(28px) saturate(1.2); border: 1px solid rgba(255,255,255,.1); box-shadow: -30px 0 80px rgba(0,0,0,.5); transform: translateX(calc(100% + 40px)); visibility: hidden; transition: transform .45s cubic-bezier(.2, .8, .2, 1), visibility 0s linear .45s; }
 .fs.queue .fs-queue { transform: none; visibility: visible; transition: transform .45s cubic-bezier(.2, .8, .2, 1), visibility 0s; }

@@ -286,7 +286,33 @@ export const SCHEMA = [
     reviewed_by BIGINT,
     reason TEXT NOT NULL DEFAULT ''
   )`,
-  `CREATE INDEX IF NOT EXISTS profile_moderation_status ON profile_moderation (status, created_at)`
+  `CREATE INDEX IF NOT EXISTS profile_moderation_status ON profile_moderation (status, created_at)`,
+  // видео в полном экране: ролики к трекам из Nyao Automator (сам файл — в <dataDir>/fsvideo)
+  `CREATE TABLE IF NOT EXISTS fs_videos (
+    id BIGSERIAL PRIMARY KEY,
+    track_key TEXT NOT NULL,
+    artist TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'part',
+    start_ms INTEGER NOT NULL DEFAULT 0,
+    end_ms INTEGER NOT NULL DEFAULT 0,
+    offset_ms INTEGER NOT NULL DEFAULT 0,
+    loop BOOLEAN NOT NULL DEFAULT true,
+    dim INTEGER NOT NULL DEFAULT 45,
+    channels TEXT NOT NULL DEFAULT 'nightly',
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    file TEXT,
+    size BIGINT NOT NULL DEFAULT 0,
+    mime TEXT,
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    views INTEGER NOT NULL DEFAULT 0,
+    by_user BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS fs_videos_key ON fs_videos (track_key)`
 ];
 
 export async function migrate(pool) {
