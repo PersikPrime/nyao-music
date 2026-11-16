@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
-import { looseKey } from './track-key.js';
+import { looseKey, norm, soften } from './track-key.js';
 
 // за Cloudflare тело запроса не больше 100 МБ — оставляем запас
 export const MAX_VIDEO = 95 * 1024 * 1024;
@@ -51,9 +51,30 @@ export async function compressVideo(src, dst) {
 
 
 /** Ключ для роликов: как у текстов, плюс без хвоста « - Radio Edit / Remastered / Live» — сервисы пишут его по-разному */
+const stripTail = (title) => String(title || '').replace(/\s+[-–—]\s+[^-–—]*\b(edit|remaster(ed)?|version|live|mono|stereo)\b[^-–—]*$/i, '');
 export function videoKey(artist, title) {
-  const t = String(title || '').replace(/\s+[-–—]\s+[^-–—]*\b(edit|remaster(ed)?|version|live|mono|stereo)\b[^-–—]*$/i, '');
-  return looseKey(artist, t);
+  return looseKey(artist, stripTail(title));
+}
+
+/** Ключ названия без исполнителя: сервисы по-разному пишут, кто первый и через что перечислены соавторы */
+export function videoTitleKey(title) {
+  return soften(norm(stripTail(title)));
+}
+
+// «rusino, Hatsune Miku», «Hatsune Miku & rusino», «rusino feat. Hatsune Miku», «rusino x Miku», а ещё «(feat. …)» в названии
+const ARTIST_SPLIT = /\s*(?:,|&|;|\/|\+|\s(?:feat|ft|featuring|with|vs|x|and|и)\.?\s)\s*/iu;
+/** Все исполнители трека — каждый отдельным нормализованным именем */
+export function videoArtists(artist, title = '') {
+  const parts = String(artist || '').split(ARTIST_SPLIT);
+  const feat = /[([]\s*(?:feat|ft|featuring|with)\.?\s+([^)\]]+)[)\]]|(?:^|\s)(?:feat|ft)\.?\s+(.+)$/iu.exec(String(title || ''));
+  if (feat) parts.push(...String(feat[1] || feat[2]).split(ARTIST_SPLIT));
+  return new Set(parts.map((p) => soften(norm(p))).filter(Boolean));
+}
+/** Тот же трек: название совпало и есть хотя бы один общий исполнитель */
+export function sameTrack(a, b) {
+  if (!a.titleKey || a.titleKey !== b.titleKey) return false;
+  for (const x of a.artists) if (b.artists.has(x)) return true;
+  return false;
 }
 
 /** Тип файла по первым байтам: mp4 («ftyp» на 4-м байте) или webm (EBML) */
@@ -191,9 +212,9 @@ export function fsvideoAdminRoutes({ q, HttpError, readJson, clip, guard, public
     ['POST', /^\/admin\/fsvideos$/, guard('media.write', async ({ req, s, a }) => {
       const m = readMeta(await readJson(req), HttpError, clip);
       const { rows } = await q(
-        `INSERT INTO fs_videos (track_key, artist, title, mode, start_ms, end_ms, offset_ms, loop, dim, channels, enabled, by_user)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-        [m.key, m.artist, m.title, m.mode, m.startMs, m.endMs, m.offsetMs, m.loop, m.dim, m.channels, m.enabled, s.uid]
+        `INSERT INTO fs_videos (track_key, artist, title, mode, start_ms, end_ms, offset_ms, loop, dim, channels, enabled, by_user, title_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+        [m.key, m.artist, m.title, m.mode, m.startMs, m.endMs, m.offsetMs, m.loop, m.dim, m.channels, m.enabled, s.uid, videoTitleKey(m.title)]
       );
       await a.audit('fsvideo.create', { type: 'fsvideo', id: rows[0].id, params: { artist: m.artist, title: m.title, mode: m.mode } });
       return rowOut(rows[0], publicUrl);
@@ -204,9 +225,9 @@ export function fsvideoAdminRoutes({ q, HttpError, readJson, clip, guard, public
       await one(id);
       const m = readMeta(await readJson(req), HttpError, clip);
       const { rows } = await q(
-        `UPDATE fs_videos SET track_key = $2, artist = $3, title = $4, mode = $5, start_ms = $6, end_ms = $7, offset_ms = $8, loop = $9, dim = $10, channels = $11, enabled = $12, updated_at = now()
+        `UPDATE fs_videos SET track_key = $2, artist = $3, title = $4, mode = $5, start_ms = $6, end_ms = $7, offset_ms = $8, loop = $9, dim = $10, channels = $11, enabled = $12, title_key = $13, updated_at = now()
           WHERE id = $1 RETURNING *`,
-        [id, m.key, m.artist, m.title, m.mode, m.startMs, m.endMs, m.offsetMs, m.loop, m.dim, m.channels, m.enabled]
+        [id, m.key, m.artist, m.title, m.mode, m.startMs, m.endMs, m.offsetMs, m.loop, m.dim, m.channels, m.enabled, videoTitleKey(m.title)]
       );
       await a.audit('fsvideo.edit', { type: 'fsvideo', id, params: { mode: m.mode, startMs: m.startMs, endMs: m.endMs, enabled: m.enabled, channels: m.channels } });
       return rowOut(rows[0], publicUrl);
@@ -272,14 +293,19 @@ export function fsvideoPublicRoutes({ q, HttpError, clip, publicUrl = '', limit 
   return [
     ['GET', /^\/media\/fsvideo$/, async ({ url, ip }) => {
       limit(ip);
-      const key = videoKey(clip(url.searchParams.get('artist'), 300), clip(url.searchParams.get('title'), 300));
+      const artist = clip(url.searchParams.get('artist'), 300);
+      const title = clip(url.searchParams.get('title'), 300);
+      const key = videoKey(artist, title);
       if (!key) throw new HttpError(400, 'Нужны artist и title');
       const channel = url.searchParams.get('channel') === 'nightly' ? 'nightly' : 'stable';
+      const want = { titleKey: videoTitleKey(title), artists: videoArtists(artist, title) };
+      // кандидаты — по названию (и по старому ключу); исполнителей сверяем здесь: любой общий соавтор подходит
       const { rows } = await q(
-        `SELECT * FROM fs_videos WHERE track_key = $1 AND enabled = true AND file IS NOT NULL ORDER BY updated_at DESC LIMIT 5`,
-        [key]
+        `SELECT * FROM fs_videos WHERE (title_key = $1 OR track_key = $2 OR title_key = '') AND enabled = true AND file IS NOT NULL ORDER BY updated_at DESC LIMIT 50`,
+        [want.titleKey, key]
       );
-      const r = rows.find((x) => String(x.channels || '').split(',').includes(channel));
+      const r = rows.find((x) => String(x.channels || '').split(',').includes(channel)
+        && (x.track_key === key || sameTrack(want, { titleKey: videoTitleKey(x.title), artists: videoArtists(x.artist, x.title) })));
       if (!r) return { video: null };
       q('UPDATE fs_videos SET views = views + 1 WHERE id = $1', [r.id]).catch(() => {});
       const o = rowOut(r, publicUrl);

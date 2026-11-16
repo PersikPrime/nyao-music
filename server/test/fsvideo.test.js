@@ -1,7 +1,7 @@
 // Видео в полном экране: Автоматор заводит ролик и грузит файл, плеер находит его по названию трека из любого сервиса.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { videoKey, sniffVideo } from '../src/fsvideo.js';
+import { videoKey, sniffVideo, videoArtists, videoTitleKey, sameTrack } from '../src/fsvideo.js';
 import { setupAdmin } from './helpers-admin.js';
 
 test('fsvideo: ключ одинаковый для «- Radio Edit», «(Radio Edit)» и кириллицы/латиницы', () => {
@@ -11,6 +11,16 @@ test('fsvideo: ключ одинаковый для «- Radio Edit», «(Radio E
   assert.equal(sniffVideo(Buffer.from('000000186674797069736f6d0000', 'hex')), 'mp4');
   assert.equal(sniffVideo(Buffer.from('1a45dfa3010000000000001f', 'hex')), 'webm');
   assert.equal(sniffVideo(Buffer.from('<html><body>nope')), null);
+});
+
+test('fsvideo: соавторы в любом порядке и написании', () => {
+  const t = (artist, title) => ({ titleKey: videoTitleKey(title), artists: videoArtists(artist, title) });
+  const admin = t('rusino, Hatsune Miku', 'Looping the Rooms');
+  for (const [a, ti] of [['rusino', 'Looping the Rooms'], ['Hatsune Miku, rusino', 'Looping the Rooms'], ['rusino & Hatsune Miku', 'Looping the Rooms'], ['rusino feat. Hatsune Miku', 'Looping the Rooms'], ['Hatsune Miku', 'Looping the Rooms (feat. rusino)'], ['rusino x 初音ミク', 'Looping The Rooms']]) {
+    assert.ok(sameTrack(t(a, ti), admin), `${a} — ${ti}`);
+  }
+  assert.ok(!sameTrack(t('Other Artist', 'Looping the Rooms'), admin), 'тот же титул, другой исполнитель');
+  assert.ok(!sameTrack(t('rusino', 'Other Song'), admin));
 });
 
 test('fsvideo: права, загрузка, поиск плеером, перемотка, удаление', async () => {

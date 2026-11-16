@@ -183,7 +183,8 @@ async function fsVideoFor(artist, title) {
   const channel = readVersion().channel || 'stable';
   const key = `${channel}|${a}|${t}`.toLowerCase();
   const hit = fsVideoCache.get(key);
-  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.video;
+  // нашёлся — помним 10 минут; не нашёлся — только минуту, чтобы свежий ролик из Автоматора появился сразу
+  if (hit && Date.now() - hit.at < (hit.video ? 10 * 60_000 : 60_000)) return hit.video;
   let video = null;
   try {
     const base = cloud ? cloud.base : API_BASE;
