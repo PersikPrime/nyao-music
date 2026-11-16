@@ -176,7 +176,7 @@ setInterval(pollStatus, 2 * 60_000).unref?.();
 // «Видео в полном экране»: ролик к треку из Автоматора. Запрос без токена — ролики общие, сервер отдаёт их по каналу.
 // Адрес ролика принимаем только с сервера Nyao (https), ответы держим 10 минут.
 const fsVideoCache = new Map();
-async function fsVideoFor(artist, title) {
+async function fsVideoFor(artist, title, force = false) {
   const a = String(artist || '').slice(0, 300);
   const t = String(title || '').slice(0, 300);
   if (!a || !t) return null;
@@ -184,7 +184,7 @@ async function fsVideoFor(artist, title) {
   const key = `${channel}|${a}|${t}`.toLowerCase();
   const hit = fsVideoCache.get(key);
   // нашёлся — помним 10 минут; не нашёлся — только минуту, чтобы свежий ролик из Автоматора появился сразу
-  if (hit && Date.now() - hit.at < (hit.video ? 10 * 60_000 : 60_000)) return hit.video;
+  if (hit && !force && Date.now() - hit.at < (hit.video ? 10 * 60_000 : 60_000)) return hit.video;
   let video = null;
   try {
     const base = cloud ? cloud.base : API_BASE;
@@ -774,7 +774,7 @@ function registerIpc() {
   handle('win:maximize', () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
   handle('win:close', () => win.close());
   handle('status:get', (force) => (force ? pollStatus() : svcStatus));
-  handle('fsvideo:get', (artist, title) => fsVideoFor(artist, title));
+  handle('fsvideo:get', (artist, title, force) => fsVideoFor(artist, title, !!force));
   handle('win:fullscreen', (on) => {
     win.setFullScreen(!!on);
     return win.isFullScreen();

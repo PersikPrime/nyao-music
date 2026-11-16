@@ -105,6 +105,11 @@ test('fsvideo: сервер пережимает ролик — без звук�
     fs.writeFileSync(out, Buffer.from(await file.arrayBuffer()));
     const streams = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', out]).toString().trim();
     assert.equal(streams, 'video', 'звуковой дорожки нет');
+    // у плеера осталась ссылка на исходник, которого уже нет — сервер ведёт на сжатый файл
+    const stale = `http://127.0.0.1:${server.address().port}/media/fsv/${made.json.id}-000000000000.mp4`;
+    const redir = await fetch(stale, { redirect: 'manual' });
+    assert.equal(redir.status, 302);
+    assert.equal(redir.headers.get('location'), new URL(pub.json.video.url, 'http://x').pathname);
   } finally {
     server.close();
   }

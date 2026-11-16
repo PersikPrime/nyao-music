@@ -315,8 +315,17 @@ export function fsvideoPublicRoutes({ q, HttpError, clip, publicUrl = '', limit 
 }
 
 /** Файл ролика потоком, с перемоткой. Имя со случайной частью — можно кешировать навсегда */
-export function serveFsVideo(req, res, store, name) {
+export async function serveFsVideo(req, res, store, name, q = null) {
   const file = store.path(name);
+  if (file && !fs.existsSync(file) && q) {
+    // файл заменили (сервер пережал ролик или загрузили новый), а у плеера старая ссылка — ведём на актуальный
+    const { rows } = await q('SELECT file FROM fs_videos WHERE id = $1', [Number(FILE_RE.exec(name)[1])]).catch(() => ({ rows: [] }));
+    const cur = rows.length && rows[0].file;
+    if (cur && cur !== name && store.path(cur) && fs.existsSync(store.path(cur))) {
+      res.writeHead(302, { Location: `/media/fsv/${cur}`, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+      return res.end();
+    }
+  }
   if (!file || !fs.existsSync(file)) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
     return res.end('Нет такого ролика');

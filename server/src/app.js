@@ -516,7 +516,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
       if (dl && (req.method === 'GET' || req.method === 'HEAD')) return serveFile(req, res, mirror && mirror.file(dl[1], dl[2]));
       // ролики для полного экрана — потоком, с перемоткой
       const fsv = /^\/media\/fsv\/([^/]+)$/.exec(url.pathname);
-      if (fsv && (req.method === 'GET' || req.method === 'HEAD')) return serveFsVideo(req, res, fsvStore, fsv[1]);
+      if (fsv && (req.method === 'GET' || req.method === 'HEAD')) return serveFsVideo(req, res, fsvStore, fsv[1], q);
       // тексты песен: сайт на lyrics.withnyao.app (все страницы — одна, дальше разбирается сама), API — на своём домене
       const host = String(req.headers.host || '').split(':')[0].toLowerCase();
       if (req.method === 'GET' && lyricsHosts.includes(host) && !/^\/(api|auth)\//.test(url.pathname)) {

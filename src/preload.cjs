@@ -80,7 +80,7 @@ contextBridge.exposeInMainWorld('nyao', {
     get: (force) => call('status:get', force),
     onChange: (cb) => ipcRenderer.on('status', (_e, s) => cb(s))
   },
-  fsvideo: { get: (artist, title) => call('fsvideo:get', artist, title) },
+  fsvideo: { get: (artist, title, force) => call('fsvideo:get', artist, title, force) },
   flags: { get: (force) => call('flags:get', force) },
   openExternal: (url) => call('open:external', url),
   vkLog: () => call('vk:openLog'),

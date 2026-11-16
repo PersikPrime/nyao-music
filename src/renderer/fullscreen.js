@@ -920,7 +920,7 @@ export class FullScreen {
    * название — вниз слева, три строки текста — вниз справа, кнопки и прогресс — одной полосой внизу.
    * Ролик без звука и идёт по времени песни: фрагмент [startMs, endMs) песни ↔ ролик с offsetMs.
    */
-  loadVideo(t) {
+  loadVideo(t, force = false) {
     const v = this.$('.fs-video');
     this.video = null;
     this.setVideoOn(false);
@@ -930,7 +930,7 @@ export class FullScreen {
     if (typeof this.d.video !== 'function') return;
     let p;
     try {
-      p = this.d.video(t);
+      p = this.d.video(t, force);
     } catch {
       p = null;
     }
@@ -941,9 +941,10 @@ export class FullScreen {
       this.videoSrcSet = false;
       v.oncanplay = () => this.tick();
       v.onerror = () => {
-        // ролик не открылся — остаёмся с обложкой
+        // ролик не открылся — остаёмся с обложкой; один раз переспрашиваем сервер (файл могли заменить)
         this.video = null;
         this.setVideoOn(false);
+        if (!force && this.trackId === t.id) this.loadVideo(t, true);
       };
       this.el.style.setProperty('--fs-dim', String(Math.max(0, Math.min(0.85, (Number(meta.dim) || 0) / 100))));
     });

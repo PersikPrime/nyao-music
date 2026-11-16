@@ -4349,9 +4349,9 @@ const fullscreen = new FullScreen({
   source: () => $('#pb-cover'), // обложка в плашке плеера: из неё разворачивается полный экран и в неё сворачивается
   autoHide: () => !!(state.settings && state.settings.fsAutoHide),
   // ролик к треку из Автоматора — пока только в Red и если не выключен в настройках
-  video: (t) => {
+  video: (t, force) => {
     if (!api.fsvideo || !(state.versionInfo && state.versionInfo.channel === 'nightly') || (state.settings && state.settings.fsVideo === false)) return Promise.resolve(null);
-    return api.fsvideo.get(t.artist || '', t.title || '').catch(() => null);
+    return api.fsvideo.get(t.artist || '', t.title || '', !!force).catch(() => null);
   },
   like: () => player.toggleLike(),
   toast: (m, err) => toast(m, err),
