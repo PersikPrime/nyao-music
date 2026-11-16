@@ -1,4 +1,4 @@
-# Диагностика сервера: достаёт ли он до Telegram и до ретранслятора. Только чтение, ничего не меняет.
+# Диагностика сервера (сейчас — ролики полного экрана). Только чтение, ничего не меняет.
 name: Server diag
 
 on:
@@ -26,16 +26,17 @@ jobs:
         run: |
           SSH="ssh -i $HOME/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 ${USER_:-deploy}@$HOST"
           cat > probe.mjs <<'JS'
-          const t = Date.now();
-          try {
-            const r = await fetch('http://127.0.0.1:8080/wave/mix', { method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(40000),
-              body: JSON.stringify({ seeds: [{ artist: 'Shaderism', title: 'Paracosm Influx' }, { artist: 'Пошлая Молли', title: 'Буду твоим пёсиком' }, { artist: 'Crystal Castles', title: 'Intimate' }], size: 12 }) });
-            const j = await r.json();
-            console.log(`::notice::/wave/mix: HTTP ${r.status} за ${Date.now() - t} мс, треков ${(j.tracks || []).length}`);
-            for (const x of (j.tracks || []).slice(0, 8)) console.log(`::notice::  ${x.artist} — ${x.title} (${x.reason})`);
-            if (j.error) console.log(`::error::${j.error}`);
-          } catch (e) { console.log(`::error::/wave/mix: ${e.message}`); }
-          console.log(`::notice::LASTFM_KEY: ${process.env.LASTFM_KEY ? 'есть' : 'нет'}`);
+          // ролики полного экрана: что лежит в базе и находит ли их плеер
+          import pg from 'pg';
+          const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+          const { rows } = await pool.query('SELECT id, artist, title, track_key, title_key, mode, channels, enabled, file IS NOT NULL AS has_file, proc, size, views FROM fs_videos ORDER BY id');
+          for (const r of rows) console.log(`::notice::#${r.id} «${r.artist}» — «${r.title}» key=${r.track_key} tkey=${r.title_key} ${r.mode} ch=${r.channels} on=${r.enabled} file=${r.has_file} proc=${r.proc} size=${r.size} views=${r.views}`);
+          for (const r of rows) {
+            const u = `http://127.0.0.1:8080/media/fsvideo?${new URLSearchParams({ artist: r.artist, title: r.title, channel: 'nightly' })}`;
+            const j = await (await fetch(u)).json().catch((e) => ({ error: e.message }));
+            console.log(`::notice::lookup #${r.id}: ${j.video ? 'найден #' + j.video.id + ' ' + j.video.url : JSON.stringify(j)}`);
+          }
+          await pool.end();
           JS
           $SSH "cd $REMOTE_DIR && docker compose exec -T api node --input-type=module -" < probe.mjs
-          $SSH "cd $REMOTE_DIR && docker compose logs --since 20m api 2>&1 | grep -iE 'wave|img' | tail -15" | sed 's/^/::warning::log /' || true
+          $SSH "cd $REMOTE_DIR && docker compose logs --since 20m api 2>&1 | grep -iE 'fsvideo|fsv|ffmpeg|EACCES' | tail -25" | sed 's/^/::warning::log /' || true
