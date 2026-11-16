@@ -47,6 +47,9 @@ services:
       # баннеры профилей и кэш картинок: без тома они пропадали при каждом деплое
       - banners:/data/banners
       - imgcache:/data/imgcache
+      # ролики «Видео в полном экране» и пакеты каталога дополнений — тоже на томах, иначе стираются при деплое
+      - fsvideo:/data/fsvideo
+      - addons:/data/addons
 
   # сайт music.withnyao.app (лендинг и загрузки): релизы берёт из API, файлы отдаёт зеркало сервера
   site:
@@ -86,5 +89,7 @@ volumes:
   status:
   banners:
   imgcache:
+  fsvideo:
+  addons:
   caddy_data:
   caddy_config:
