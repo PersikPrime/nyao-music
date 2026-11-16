@@ -135,6 +135,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ runner.os }}
+          retention-days: 2  # файлы и так лежат в релизе; место под артефакты общее на аккаунт
           path: |
             dist/*.exe
             dist/*.zip

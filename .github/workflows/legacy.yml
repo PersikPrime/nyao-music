@@ -49,3 +49,4 @@ jobs:
         with:
           name: NyaoLegacy-probe
           path: legacy/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 2  # файлы и так лежат в релизе; место под артефакты общее на аккаунт

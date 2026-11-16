@@ -63,6 +63,7 @@ jobs:
         with:
           name: ${{ steps.ver.outputs.name }}
           path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 2  # файлы и так лежат в релизе; место под артефакты общее на аккаунт
 
       # Релиз с APK: тег v0.2.17 и т. д. Если в релизе уже есть APK этой сборки — он заменяется
       - name: Релиз
