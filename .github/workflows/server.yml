@@ -134,7 +134,7 @@ jobs:
             $SSH "cd $REMOTE_DIR && docker compose up -d --no-deps --force-recreate caddy" || echo "::warning::Не удалось перезапустить Caddy с новым Caddyfile"
           fi
           # том /data/status создан Docker'ом от root, а сервер работает как node: Automator пишет статус сам — отдаём ему папку
-          $SSH "cd $REMOTE_DIR && docker compose exec -T -u root api sh -c 'mkdir -p /data/status /data/banners /data/imgcache && chown -R node /data/status /data/banners /data/imgcache'" || echo "::warning::Не удалось отдать /data/status и /data/banners пользователю node — техработы и баннеры профилей не заработают"
+          $SSH "cd $REMOTE_DIR && docker compose exec -T -u root api sh -c 'mkdir -p /data/status /data/banners /data/imgcache /data/fsvideo /data/addons && chown -R node /data/status /data/banners /data/imgcache /data/fsvideo /data/addons'" || echo "::warning::Не удалось отдать /data/status и /data/banners пользователю node — техработы, баннеры профилей, ролики полного экрана и каталог дополнений не заработают"
 
       - name: Проверка
         run: |

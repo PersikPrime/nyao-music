@@ -61,3 +61,41 @@ test('fsvideo: права, загрузка, поиск плеером, пере
     server.close();
   }
 });
+
+test('fsvideo: сервер пережимает ролик — без звука, меньше, оригинал удаляется', { skip: !(await import('node:child_process')).spawnSync('ffmpeg', ['-version']).stdout?.length && 'нет ffmpeg' }, async () => {
+  const { execFileSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fsv-'));
+  const src = path.join(tmp, 'clip.mp4');
+  // «тяжёлый» исходник: шумная картинка с высоким битрейтом и звуком
+  execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '4', '-c:v', 'libx264', '-preset', 'ultrafast', '-b:v', '12M', '-c:a', 'aac', '-shortest', src]);
+  const { server, call, raw, login } = await setupAdmin({ admins: '777:owner' });
+  try {
+    const owner = await login(777);
+    const made = await call('POST', '/admin/fsvideos', { token: owner.token, body: { artist: 'Rick Astley', title: 'Never Gonna Give You Up', mode: 'whole' } });
+    const buf = fs.readFileSync(src);
+    const up = await raw('PUT', `/admin/fsvideos/${made.json.id}/file?w=1280&h=720&ms=4000`, buf, owner.token);
+    assert.equal(up.status, 200, up.text);
+    assert.equal(up.json.proc, 'processing');
+    let v;
+    for (let i = 0; i < 120; i++) {
+      v = (await call('GET', '/admin/fsvideos', { token: owner.token })).json.items[0];
+      if (v.proc !== 'processing') break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.equal(v.proc, 'done', v.proc);
+    assert.equal(v.origSize, buf.length);
+    assert.ok(v.file.size < buf.length / 2, `${buf.length} → ${v.file.size}`);
+    assert.equal(v.file.width, 1280);
+    const pub = await call('GET', '/media/fsvideo?artist=Rick%20Astley&title=Never%20Gonna%20Give%20You%20Up&channel=nightly');
+    const file = await fetch(`http://127.0.0.1:${server.address().port}${new URL(pub.json.video.url, 'http://x').pathname}`);
+    const out = path.join(tmp, 'out.mp4');
+    fs.writeFileSync(out, Buffer.from(await file.arrayBuffer()));
+    const streams = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', out]).toString().trim();
+    assert.equal(streams, 'video', 'звуковой дорожки нет');
+  } finally {
+    server.close();
+  }
+});

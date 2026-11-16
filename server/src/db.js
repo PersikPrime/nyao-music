@@ -313,6 +313,8 @@ export const SCHEMA = [
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS fs_videos_key ON fs_videos (track_key)`,
+  `ALTER TABLE fs_videos ADD COLUMN IF NOT EXISTS proc TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE fs_videos ADD COLUMN IF NOT EXISTS orig_size BIGINT NOT NULL DEFAULT 0`,
   // флаги функций (Автоматор → приложения без релиза)
   `CREATE TABLE IF NOT EXISTS feature_flags (
     key TEXT PRIMARY KEY,

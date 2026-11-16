@@ -936,8 +936,9 @@ export class FullScreen {
     }
     this.withTimeout(Promise.resolve(p), 8000).then((meta) => {
       if (!meta || !meta.url || this.trackId !== t.id || !this.el) return;
+      // сам файл не трогаем, пока до фрагмента далеко: начнём грузить за 15 секунд (см. syncVideo)
       this.video = meta;
-      v.src = meta.url;
+      this.videoSrcSet = false;
       v.oncanplay = () => this.tick();
       v.onerror = () => {
         // ролик не открылся — остаёмся с обложкой
@@ -995,6 +996,11 @@ export class FullScreen {
   syncVideo(pos) {
     const v = this.$('.fs-video');
     if (!v || !this.video) return this.setVideoOn(false);
+    // грузим ролик только когда он скоро понадобится: и трафик, и место в кэше — только под то, что увидят
+    if (!this.videoSrcSet && (this.videoTarget(pos * 1000) != null || this.videoTarget(pos * 1000 + 15000) != null)) {
+      this.videoSrcSet = true;
+      v.src = this.video.url;
+    }
     const target = this.videoTarget(pos * 1000);
     // ролик ещё не загрузился — пока обложка; oncanplay позовёт tick ещё раз
     if (target == null || v.readyState < 2) return this.setVideoOn(false);

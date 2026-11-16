@@ -5,6 +5,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { looseKey } from './track-key.js';
 
@@ -13,6 +14,41 @@ export const MAX_VIDEO = 95 * 1024 * 1024;
 const MIME = { mp4: 'video/mp4', webm: 'video/webm' };
 const FILE_RE = /^(\d+)-([a-f0-9]{12})\.(mp4|webm)$/;
 const CHANNELS = ['nightly', 'stable'];
+
+// ---------- Сжатие: ролик — это фон без звука, поэтому сервер пережимает его сам ----------
+// Без звуковой дорожки, не больше 1080p, H.264 с умеренным битрейтом и moov в начале файла (играет до полной загрузки).
+// Клип 81 МБ обычно становится 15–25 МБ. Нет ffmpeg или файл не читается — остаётся оригинал.
+const FFMPEG = process.env.NYAO_FFMPEG || 'ffmpeg';
+const FFPROBE = process.env.NYAO_FFPROBE || 'ffprobe';
+function run(cmd, args, { timeoutMs = 20 * 60_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let out = '';
+    let err = '';
+    let child;
+    try {
+      child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      return reject(e);
+    }
+    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err = (err + d).slice(-4000); });
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+    child.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve(out) : reject(new Error(err.split('\n').filter(Boolean).slice(-2).join(' ') || `код ${code}`)); });
+  });
+}
+export async function probeVideo(file) {
+  const out = await run(FFPROBE, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height:format=duration', '-of', 'json', file], { timeoutMs: 60_000 });
+  const j = JSON.parse(out);
+  const st = (j.streams || [])[0] || {};
+  return { width: Number(st.width) || 0, height: Number(st.height) || 0, durationMs: Math.round(Number(j.format && j.format.duration) * 1000) || 0 };
+}
+export async function compressVideo(src, dst) {
+  await run('nice', ['-n', '10', FFMPEG, '-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-map', '0:v:0', '-an', '-sn', '-dn',
+    '-vf', "scale='min(1920,iw)':-2:flags=bicubic", '-c:v', 'libx264', '-preset', 'medium', '-crf', '26',
+    '-maxrate', '3500k', '-bufsize', '7000k', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-threads', '2', dst]);
+}
+
 
 /** Ключ для роликов: как у текстов, плюс без хвоста « - Radio Edit / Remastered / Live» — сервисы пишут его по-разному */
 export function videoKey(artist, title) {
@@ -65,6 +101,9 @@ function rowOut(r, publicUrl) {
     dim: r.dim,
     channels: String(r.channels || '').split(',').filter(Boolean),
     enabled: !!r.enabled,
+    // сжатие на сервере: '' — не нужно/нет ffmpeg, processing, done, kept (оригинал и так компактный), failed: …
+    proc: r.proc || '',
+    origSize: Number(r.orig_size) || 0,
     file: r.file ? { url: `${publicUrl}/media/fsv/${r.file}`, size: Number(r.size) || 0, mime: r.mime, width: r.width, height: r.height, durationMs: r.duration_ms } : null,
     views: Number(r.views) || 0,
     createdAt: new Date(r.created_at).getTime(),
@@ -95,6 +134,43 @@ function readMeta(b, HttpError, clip) {
 
 export function fsvideoAdminRoutes({ q, HttpError, readJson, clip, guard, publicUrl = '', dataDir = '/data' }) {
   const store = fsvideoStore(dataDir);
+  // по одному ролику за раз: ffmpeg не должен съесть весь процессор сервера
+  let queue = Promise.resolve();
+  const compressLater = (id, name, origSize) => {
+    queue = queue.then(() => compressJob(id, name, origSize)).catch(() => {});
+    return queue;
+  };
+  async function compressJob(id, name, origSize) {
+    const src = store.path(name);
+    const tmp = path.join(store.dir, `.cmp-${id}-${crypto.randomBytes(4).toString('hex')}.mp4`);
+    const still = async () => ((await q('SELECT file FROM fs_videos WHERE id = $1', [id])).rows[0] || {}).file === name;
+    try {
+      if (!src || !(await still())) return;
+      await compressVideo(src, tmp);
+      const size = fs.statSync(tmp).size;
+      if (!(await still())) return;
+      if (!size || size > origSize * 0.9) {
+        // выигрыш меньше 10% — оставляем оригинал
+        await q("UPDATE fs_videos SET proc = 'kept' WHERE id = $1", [id]);
+        return;
+      }
+      const next = store.newName(id, 'mp4');
+      fs.renameSync(tmp, path.join(store.dir, next));
+      const meta = await probeVideo(path.join(store.dir, next)).catch(() => null);
+      await q(
+        `UPDATE fs_videos SET file = $2, size = $3, mime = 'video/mp4', proc = 'done', orig_size = $4,
+           width = COALESCE($5, width), height = COALESCE($6, height), duration_ms = COALESCE($7, duration_ms) WHERE id = $1`,
+        [id, next, size, origSize, meta && meta.width ? meta.width : null, meta && meta.height ? meta.height : null, meta && meta.durationMs ? meta.durationMs : null]
+      );
+      store.remove(name);
+    } catch (e) {
+      // ffmpeg не установлен — просто без сжатия; другая ошибка — видно в Автоматоре, играет оригинал
+      const proc = e && e.code === 'ENOENT' ? '' : `failed: ${String((e && e.message) || e).slice(0, 200)}`;
+      await q('UPDATE fs_videos SET proc = $2 WHERE id = $1 AND file = $3', [id, proc, name]).catch(() => {});
+    } finally {
+      fs.rm(tmp, { force: true }, () => {});
+    }
+  }
   const one = async (id) => {
     const { rows } = await q('SELECT * FROM fs_videos WHERE id = $1', [id]);
     if (!rows.length) throw new HttpError(404, 'Нет такого ролика');
@@ -171,11 +247,12 @@ export function fsvideoAdminRoutes({ q, HttpError, readJson, clip, guard, public
       const height = num(url.searchParams.get('h'), 0, 8000, 0);
       const durationMs = num(url.searchParams.get('ms'), 0, 3_600_000, 0);
       const { rows } = await q(
-        'UPDATE fs_videos SET file = $2, size = $3, mime = $4, width = $5, height = $6, duration_ms = $7, updated_at = now() WHERE id = $1 RETURNING *',
+        "UPDATE fs_videos SET file = $2, size = $3, mime = $4, width = $5, height = $6, duration_ms = $7, proc = 'processing', orig_size = $3, updated_at = now() WHERE id = $1 RETURNING *",
         [id, name, size, MIME[ext], width, height, durationMs]
       );
       if (cur.file && cur.file !== name) store.remove(cur.file);
       await a.audit('fsvideo.file', { type: 'fsvideo', id, params: { size, mime: MIME[ext], width, height, durationMs } });
+      compressLater(id, name, size);
       return rowOut(rows[0], publicUrl);
     }, { write: true }), true],
 
