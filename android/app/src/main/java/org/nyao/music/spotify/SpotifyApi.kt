@@ -105,11 +105,7 @@ class SpotifyApi(private val auth: SpotifyAuth) {
 
     suspend fun like(id: String, on: Boolean) {
         val method = if (on) "PUT" else "DELETE"
-        try {
-            request(method, "me/tracks", mapOf("ids" to id))
-        } catch (e: SpotifyException) {
-            if (e.code == 404 || e.code == 410) request(method, "me/library", mapOf("uris" to "spotify:track:$id")) else throw e
-        }
+        request(method, "me/library", mapOf("uris" to "spotify:track:$id"))
     }
 
     // ---------- Воспроизведение на устройстве Nyao ----------

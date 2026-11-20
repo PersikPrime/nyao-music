@@ -1,6 +1,5 @@
 {
   "name": "0.10",
-  "build": 129,
-  "channel": "nightly",
-  "displayVersion": "0.10.120.9"
+  "build": 130,
+  "channel": "nightly"
 }

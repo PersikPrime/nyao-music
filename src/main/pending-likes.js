@@ -21,11 +21,12 @@ export class PendingLikes {
   async drain() {
     const account = this.account();
     let sent = 0, dropped = 0, error = null;
+    const failures = new Map();
     const skip = new Set(); // не прошли в этот раз — повторим в следующий, но остальные не ждут
     for (let n = 0; n < 100 && account && this.account() === account; n++) {
       const item = this.list().find(x => !skip.has(x.revision));
       if (!item) break;
-      try { await this.send(item); }
+      try { await this.send(item); sent++; }
       catch (e) {
         const status = e && e.status;
         if ([400, 404, 410, 422].includes(status)) {
@@ -46,10 +47,10 @@ export class PendingLikes {
           error = e;
           break;
         }
+        failures.set(item.revision, e);
       }
       this.write(this.read().filter(x => x.revision !== item.revision));
-      sent++;
     }
-    return { sent, dropped, left: this.list().length, error };
+    return { sent, dropped, failures, left: this.list().length, error };
   }
 }

@@ -4092,7 +4092,7 @@ async function afterAuthChange() {
   likedPromise = null;
   artistCache.clear();
   if (isSettingsRoute()) renderSettings();
-  if (state.status.ya || state.status.yt) {
+  if (SERVICES.some(service => state.status[service.id])) {
     loadLiked();
     loadLibrary();
   }
@@ -4808,7 +4808,7 @@ function openMixBuilder() {
   await loadStatus();
   RENDER[state.route]();
   loadHome();
-  if (state.status.ya || state.status.yt) {
+  if (SERVICES.some(service => state.status[service.id])) {
     loadLiked();
     loadLibrary();
   }

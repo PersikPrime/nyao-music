@@ -296,12 +296,7 @@ export class SpotifyProvider {
 
   async like(track, on = true) {
     const method = on ? 'PUT' : 'DELETE';
-    try {
-      await this.request(method, 'me/tracks', { ids: track.srcId });
-    } catch (e) {
-      if (e.code !== 404 && e.code !== 410) throw e;
-      await this.request(method, 'me/library', { uris: `spotify:track:${track.srcId}` });
-    }
+    await this.request(method, 'me/library', { uris: `spotify:track:${track.srcId}` });
   }
 
   // ---------- Воспроизведение на устройстве Nyao ----------

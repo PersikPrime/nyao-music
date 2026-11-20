@@ -7,6 +7,7 @@ import { YTMusicProvider, STREAM_CLIENTS } from '../src/main/providers/ytmusic.j
 import { YandexProvider } from '../src/main/providers/yandex.js';
 import { SoundCloudProvider } from '../src/main/providers/soundcloud.js';
 import { findMatch, similarity } from '../src/main/match.js';
+import { SpotifyProvider } from '../src/main/providers/spotify.js';
 import { SpotifySync } from '../src/renderer/spotify-sync.js';
 import { spMode } from '../src/renderer/sp-mode.js';
 spMode.fallback = false; // в этих проверках Spotify играет сам (Premium)
@@ -47,9 +48,11 @@ test('outbox: failures survive restart and never go to another account', async (
 test('outbox: a hopeless like (track gone) is dropped and does not block the rest', async () => {
   const sent = [];
   const x = outbox(async item => { if (item.srcId === 'gone') throw Object.assign(new Error('HTTP 404'), { status: 404 }); sent.push(item.srcId); });
-  x.box.enqueue({ srcId: 'gone' }, true); x.box.enqueue({ srcId: 'ok' }, true);
+  const gone = x.box.enqueue({ srcId: 'gone' }, true); x.box.enqueue({ srcId: 'ok' }, true);
   const r = await x.box.flush();
   assert.deepEqual(sent, ['ok']);
+  assert.equal(r.sent, 1);
+  assert.equal(r.failures.get(gone.revision).status, 404);
   assert.equal(r.dropped, 1);
   assert.equal(r.left, 0);
 });
@@ -252,4 +255,25 @@ test('ultrareview: короткий список лайков для волны 
   assert.equal((await yt.likedTracks()).length, 500, 'полный список запрошен заново');
   assert.equal((await yt.likedTracks(300)).length, 300, 'короткий — из полного кэша');
   assert.deepEqual(calls, [300, 5000]);
+});
+
+test('Spotify sends likes and removals directly to the library endpoint', async () => {
+  const sp = new SpotifyProvider({});
+  const calls = [];
+  sp.request = async (...args) => { calls.push(args); };
+  await sp.like({ srcId: 'abc' });
+  await sp.like({ srcId: 'abc' }, false);
+  assert.deepEqual(calls, ['PUT', 'DELETE'].map(method =>
+    [method, 'me/library', { uris: 'spotify:track:abc' }]));
+});
+
+test('Yandex aborts a stalled metadata request at its deadline', async () => {
+  const ya = new YandexProvider({ timeoutMs: 10, fetch: async (_, { signal }) => {
+    assert.ok(signal);
+    await new Promise((_, reject) => {
+      const guard = setTimeout(() => reject(new Error('deadline missed')), 500);
+      signal.addEventListener('abort', () => { clearTimeout(guard); reject(signal.reason); });
+    });
+  } });
+  await assert.rejects(ya.likedTracks(), { name: 'TimeoutError' });
 });

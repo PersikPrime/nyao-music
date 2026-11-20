@@ -754,11 +754,18 @@ function handle(channel, fn) {
  */
 async function likeSoundCloud(track, on) {
   const token = sc.token;
-  scLikes.enqueue(track, on);
-  let result = await scLikes.flush();
+  const item = scLikes.enqueue(track, on);
+  const flush = async () => {
+    const result = await scLikes.flush();
+    if (token !== sc.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
+    if (result.failures.has(item.revision)) throw result.failures.get(item.revision);
+    return result;
+  };
+  let result = await flush();
   if (result.error?.captcha && token === sc.token) {
     const solved = await solveScCaptcha(win, result.error.captcha);
-    if (solved && token === sc.token) result = await scLikes.flush();
+    if (solved) result = await flush();
+    if (token !== sc.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
   }
   const pending = scLikes.list().some(x => x.srcId === String(track.srcId));
   return pending ? { on, pending: true, reason: result.error?.captcha ? 'SoundCloud ждёт проверки' : 'SoundCloud пока не принял изменение — повторю позже' } : on;

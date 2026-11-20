@@ -50,9 +50,10 @@ const MOODS = new Set(['active', 'fun', 'calm', 'sad']);
 const DIVERSITIES = new Set(['favorite', 'discover', 'popular']);
 
 export class YandexProvider {
-  constructor({ token = null, fetch = globalThis.fetch } = {}) {
+  constructor({ token = null, fetch = globalThis.fetch, timeoutMs = 15_000 } = {}) {
     this.token = token;
     this.fetch = fetch;
+    this.timeoutMs = timeoutMs;
     this.account = null;
     this.wave = null; // { sessionId, batchId }
   }
@@ -81,7 +82,7 @@ export class YandexProvider {
   async request(method, pathOrUrl, { json, form, query } = {}) {
     let url = pathOrUrl.startsWith('http') ? pathOrUrl : API + pathOrUrl;
     if (query) url += (url.includes('?') ? '&' : '?') + new URLSearchParams(query).toString();
-    const opts = { method, headers: this.headers() };
+    const opts = { method, headers: this.headers(), signal: AbortSignal.timeout(this.timeoutMs) };
     if (json !== undefined) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(json);
