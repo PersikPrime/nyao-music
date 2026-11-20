@@ -39,7 +39,8 @@ import { findMatch } from './match.js';
 import { Spotlight } from './spotlight.js';
 import { mergeArtists } from '../renderer/search.js';
 import os from 'node:os';
-import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, loginSoundCloud, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch, refreshVkSession } from './auth.js';
+import { SoundCloudOAuth } from './soundcloud-oauth.js';
+import { loginYandex, loginYTMusic, logoutYandex, logoutYTMusic, logoutSoundCloud, scSessionFetch, solveScCaptcha, loginVK, logoutVK, vkSessionFetch, refreshVkSession } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(__dirname, '..', 'renderer');
@@ -104,7 +105,9 @@ function watchHotStart(w) {
 
 // ---------- Ссылки nyao:// (приглашения, комнаты, профили, треки) открывают это приложение ----------
 let pendingLink = null;
+let scOAuth;
 function deepLink(raw) {
+  if (scOAuth?.callback(raw)) return;
   const link = parseDeepLink(raw);
   if (!link) return;
   if (win && !win.isDestroyed() && !win.webContents.isLoading()) {
@@ -398,7 +401,8 @@ function initProviders() {
   // по которым googlevideo проверяет ссылку
   const nodeFetch = globalThis.fetch.bind(globalThis);
   yt = new YTMusicProvider({ cookie: secrets.get('ytmCookie'), cacheDir: path.join(app.getPath('userData'), 'yt-cache'), fetch: nodeFetch, log: ytLog });
-  sc = new SoundCloudProvider({ token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch, onAccount: uid => {
+  scOAuth = new SoundCloudOAuth({ store: secrets, base: process.env.NYAO_SC_AUTH_BASE || API_BASE, open: url => shell.openExternal(url) });
+  sc = new SoundCloudProvider({ oauth: scOAuth, token: secrets.get('scToken'), fetch: nodeFetch, writeFetch: scSessionFetch, onAccount: uid => {
     const key = crypto.createHash('sha256').update(sc.token).digest('hex');
     writePending(readPending().map(x => x.account === key ? { ...x, account: 'uid:' + uid } : x));
     secrets.set('scIdentity', { key, uid: String(uid) });
@@ -666,6 +670,7 @@ function writePending(list) {
   fs.renameSync(pendingFile() + '.tmp', pendingFile());
 }
 const scAccountKey = () => {
+  if (scOAuth?.tokens) return 'uid:' + scOAuth.tokens.account.uid;
   if (!sc?.token) return null;
   const key = crypto.createHash('sha256').update(sc.token).digest('hex');
   const identity = secrets.get('scIdentity');
@@ -753,19 +758,20 @@ function handle(channel, fn) {
  * если всё равно не вышло, ставим лайк в очередь (в Nyao он уже стоит).
  */
 async function likeSoundCloud(track, on) {
-  const token = sc.token;
+  const identity = () => scOAuth?.tokens?.account || sc.token;
+  const token = identity();
   const item = scLikes.enqueue(track, on);
   const flush = async () => {
     const result = await scLikes.flush();
-    if (token !== sc.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
+    if (token !== identity()) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
     if (result.failures.has(item.revision)) throw result.failures.get(item.revision);
     return result;
   };
   let result = await flush();
-  if (result.error?.captcha && token === sc.token) {
+  if (result.error?.captcha && token === identity()) {
     const solved = await solveScCaptcha(win, result.error.captcha);
     if (solved) result = await flush();
-    if (token !== sc.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
+    if (token !== identity()) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');
   }
   const pending = scLikes.list().some(x => x.srcId === String(track.srcId));
   return pending ? { on, pending: true, reason: result.error?.captcha ? 'SoundCloud ждёт проверки' : 'SoundCloud пока не принял изменение — повторю позже' } : on;
@@ -1327,10 +1333,10 @@ function registerIpc() {
       return vk.getAccount();
     }
     if (service === 'sc') {
-      const token = await loginSoundCloud(win);
-      secrets.set('scToken', token);
-      sc.setToken(token);
-      return sc.getAccount();
+      const account = await scOAuth.login();
+      sc.setToken(null);
+      secrets.set('scToken', null);
+      return account;
     }
     const cookie = await loginYTMusic(win);
     secrets.set('ytmCookie', cookie);
@@ -1346,6 +1352,7 @@ function registerIpc() {
       return ya.getAccount();
     }
     if (service === 'sc') {
+      scOAuth.clear();
       secrets.set('scToken', v);
       sc.setToken(v);
       return sc.getAccount();
@@ -1365,6 +1372,7 @@ function registerIpc() {
       vk.setLoggedOut();
       await logoutVK();
     } else if (service === 'sc') {
+      scOAuth.clear();
       secrets.set('scToken', null);
       sc.setToken(null);
       await logoutSoundCloud();
@@ -1405,6 +1413,12 @@ function registerIpc() {
     return [...readMixes().map(mixSummary), ...yaLists, ...ytLists, ...scLists, ...vkLists, ...spLists];
   });
 
+  handle('library:likedSource', async source => {
+    const providers = { ya, yt, sc, vk, sp };
+    if (!Object.hasOwn(providers, source)) throw new Error('Неизвестный сервис');
+    const provider = providers[source];
+    return provider?.loggedIn ? provider.likedTracks() : [];
+  });
   handle('library:liked', async () => {
     const [a, b, c, d, e] = await Promise.all([
       ya.loggedIn ? safe(ya.likedTracks(), []) : [],

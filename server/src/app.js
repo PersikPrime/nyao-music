@@ -1,4 +1,5 @@
 // HTTP API сервера Nyao Music. Без фреймворков: маршрутов мало, зависимостей меньше — меньше дыр.
+import { soundcloudAuthRoutes } from './soundcloud-auth.js';
 import { sharePage, shareRoutes } from './share.js';
 import crypto from 'node:crypto';
 import { normalizeStatus } from './status.js';
@@ -500,6 +501,7 @@ export function createApp({ db, tg, mirror = null, log = console.log, minBuild =
     ...legacy,
     ...fsvideoPublicRoutes({ q, HttpError, clip, publicUrl, limit: fsvLimit }),
     ...flagsPublicRoutes({ q, optionalAuth: (req) => (req.headers.authorization ? auth(req).catch(() => null) : null) }),
+    ...soundcloudAuthRoutes({ readJson, HttpError, limit: authLimit }),
     ...spotlightPublicRoutes({ q, HttpError, readJson }),
     ...addonsPublicRoutes({ q, HttpError, dataDir }),
     ...admin.routes

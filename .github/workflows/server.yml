@@ -2,7 +2,7 @@
 # Секреты (Settings → Secrets → Actions): NYAO_SSH_HOST, NYAO_SSH_USER, NYAO_SSH_KEY,
 # NYAO_TG_CLIENT_SECRET, NYAO_DB_PASSWORD, NYAO_TG_RELAY (адрес ретранслятора на Cloudflare),
 # NYAO_FCM_SERVICE_ACCOUNT (JSON ключа сервисного аккаунта Firebase — для push), NYAO_ADMIN_IDS и NYAO_GH_ADMIN_TOKEN (Nyao Automator).
-# Токены музыкальных сервисов на сервер не попадают.
+# SoundCloud OAuth использует сервер для обмена кода и обновления токенов.
 name: Server deploy
 
 on:
@@ -58,6 +58,8 @@ jobs:
           DB_PASSWORD: ${{ secrets.NYAO_DB_PASSWORD }}
           # адрес Cloudflare Worker из server/cloudflare-worker.js: в РФ ТСПУ режет серверу oauth.telegram.org
           TG_RELAY: ${{ secrets.NYAO_TG_RELAY }}
+          SC_CLIENT_ID: ${{ secrets.NYAO_SC_CLIENT_ID }}
+          SC_CLIENT_SECRET: ${{ secrets.NYAO_SC_CLIENT_SECRET }}
           LASTFM_KEY: ${{ secrets.NYAO_LASTFM_KEY }}
           FCM: ${{ secrets.NYAO_FCM_SERVICE_ACCOUNT }}
           KS_B64: ${{ secrets.NYAO_KEYSTORE_B64 }}
@@ -92,6 +94,8 @@ jobs:
             echo "POSTGRES_PASSWORD=$(q "$DB_PASSWORD")"
             echo "TG_RELAY=$(q "$TG_RELAY")"
             # ключ Last.fm приложения (тот же, что у ПК): своя волна Nyao берёт оттуда похожие треки
+            echo "SC_CLIENT_ID=$(q "$SC_CLIENT_ID")"
+            echo "SC_CLIENT_SECRET=$(q "$SC_CLIENT_SECRET")"
             echo "LASTFM_KEY=$(q "$LASTFM_KEY")"
             # запасные IP Cloudflare для ретранслятора, если провайдер режет его адреса (Variables → NYAO_TG_RELAY_IPS)
             echo "TG_RELAY_IPS=${{ vars.NYAO_TG_RELAY_IPS }}"

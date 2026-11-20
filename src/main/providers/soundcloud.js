@@ -42,7 +42,8 @@ export class CaptchaError extends Error {
 }
 
 export class SoundCloudProvider {
-  constructor({ token = null, fetch = globalThis.fetch, writeFetch = null, onAccount = () => {} } = {}) {
+  constructor({ token = null, fetch = globalThis.fetch, writeFetch = null, oauth = null, onAccount = () => {} } = {}) {
+    this.oauth = oauth;
     this.token = token;
     this.fetch = fetch;
     // Запросы на запись (лайки) идут через сессию браузера, где ты входил: там cookie защиты DataDome
@@ -55,7 +56,7 @@ export class SoundCloudProvider {
   }
 
   get loggedIn() {
-    return !!this.token;
+    return !!(this.oauth?.tokens || this.token);
   }
 
   setToken(token) {
@@ -115,6 +116,7 @@ export class SoundCloudProvider {
   }
 
   async getAccount() {
+    if (this.oauth?.tokens) return this.oauth.tokens.account;
     if (this.account) return this.account;
     const token = this.token;
     const me = await this.request('GET', '/me');
@@ -135,7 +137,26 @@ export class SoundCloudProvider {
     return items.map((t) => t && full.get(String(t.id))).filter(Boolean);
   }
 
+  async officialPages(path, limit) {
+    const items = [];
+    let next = path;
+    const seen = new Set();
+    const account = this.oauth.tokens.account;
+    while (next && !seen.has(next) && items.length < limit) {
+      seen.add(next);
+      const page = await this.oauth.api(next);
+      if (account !== this.oauth.tokens?.account) throw new Error('Сменился аккаунт SoundCloud');
+      items.push(...(Array.isArray(page) ? page : page.collection || []));
+      next = page.next_href;
+    }
+    return items.slice(0, limit);
+  }
+
   async likedTracks(limit = 5000) {
+    if (this.oauth?.tokens) {
+      const tracks = await this.officialPages('/me/likes/tracks?linked_partitioning=true&limit=200', limit);
+      return this.remember(tracks.map(track => ({ ...track, id: track.id ?? track.urn?.split(':').pop() })));
+    }
     const { uid } = await this.getAccount();
     let res = await this.request('GET', `/users/${uid}/track_likes`, { query: { limit: 200 } });
     const out = [];
@@ -149,6 +170,10 @@ export class SoundCloudProvider {
   }
 
   async playlists() {
+    if (this.oauth?.tokens) {
+      const lists = await this.officialPages('/me/playlists?linked_partitioning=true&limit=50', 500);
+      return lists.map(p => ({ id: 'sc:' + (p.id ?? p.urn.split(':').pop()), source: 'sc', title: p.title, count: p.track_count, cover: bigArtwork(p.artwork_url) }));
+    }
     const { uid } = await this.getAccount();
     const res = await this.request('GET', `/users/${uid}/playlists`, { query: { limit: 50 } });
     return (res.collection || []).map((p) => ({
@@ -162,6 +187,10 @@ export class SoundCloudProvider {
 
   async playlistTracks(playlistId) {
     const id = playlistId.replace(/^sc:/, '');
+    if (this.oauth?.tokens) {
+      const tracks = await this.officialPages('/playlists/' + encodeURIComponent('soundcloud:playlists:' + id) + '/tracks?linked_partitioning=true&limit=200', 5000);
+      return this.remember(tracks.map(track => ({ ...track, id: track.id ?? track.urn?.split(':').pop() })));
+    }
     const p = await this.request('GET', `/playlists/${id}`);
     return this.remember(await this.fullTracks(p.tracks || []));
   }
@@ -195,6 +224,10 @@ export class SoundCloudProvider {
   }
 
   async like(track, on = true) {
+    if (this.oauth?.tokens) {
+      const urn = 'soundcloud:tracks:' + track.srcId;
+      return this.oauth.api('/likes/tracks/' + encodeURIComponent(urn), on ? 'POST' : 'DELETE');
+    }
     const token = this.token;
     const { uid } = await this.getAccount();
     if (token !== this.token) throw new Error('Аккаунт SoundCloud изменился — повтори запрос');

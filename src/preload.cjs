@@ -162,6 +162,7 @@ contextBridge.exposeInMainWorld('nyao', {
   library: {
     playlists: () => call('library:playlists'),
     liked: () => call('library:liked'),
+    likedSource: source => call('library:likedSource', source),
     tracks: (id) => call('library:tracks', id)
   },
   mix: {

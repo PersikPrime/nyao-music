@@ -612,7 +612,7 @@ const SRC_TINT = { ya: ['#2A2208', '#FFD60A'], yt: ['#2A0E0C', '#FF6A5C'], sc: [
 /** Плитки «Мне нравится»: общая и, если включено, по сервисам */
 function likedEntries() {
   const c = state.lib.counts || {};
-  const total = (c.ya || 0) + (c.yt || 0) + (c.sc || 0) + (c.vk || 0);
+  const total = (c.ya || 0) + (c.yt || 0) + (c.sc || 0) + (c.vk || 0) + (c.sp || 0);
   const all = { id: 'liked', title: 'Мне нравится', source: 'mix', sub: state.lib.counts ? `Все сервисы · ${total}` : 'Все сервисы', count: total };
   if (!state.settings || !state.settings.splitLiked) return [all];
   const per = SERVICES.filter((x) => state.status[x.id] || c[x.id]).map((x) => ({ id: `liked:${x.id}`, title: `Мне нравится · ${x.id === 'ya' ? 'Яндекс' : x.name}`, source: x.id, sub: `${c[x.id] || 0} ${pl(c[x.id] || 0, 'трек', 'трека', 'треков')}`, count: c[x.id] || 0 }));
@@ -938,7 +938,7 @@ function renderLibrary() {
   const lib = state.lib;
   const c = libraryCounts();
   const likes = likedEntries();
-  const all = lib.lists ? [...likes, ...lib.lists] : null;
+  const all = lib.lists || lib.counts ? [...likes, ...(lib.lists || [])] : null;
   const isLiked = (p) => p.id === 'liked' || p.id.startsWith('liked:');
   const shown = all ? all.filter((p) => lib.filter === 'all' || p.source === lib.filter || (p.id === 'liked' && lib.filter === 'mix')) : null;
   const sel = all ? all.find((p) => p.id === lib.selected) : null;
@@ -963,6 +963,8 @@ function renderLibrary() {
     <div class="lib-side">
       <div class="lib-side-head">
         <h1 class="page">Медиатека</h1>
+        ${SERVICES.filter(service => lib.likeErrors?.[service.id]).map(service =>
+          `<button class="chip" data-action="retry-liked" data-v="${service.id}" title="${esc(lib.likeErrors[service.id])}">${service.name} · Повторить</button>`).join('')}
         <button class="icbtn" data-action="mix-builder" aria-label="Новый микс" title="Новый микс">${ICONS.plus}</button>
       </div>
       <div class="chips">${f('all', `Все · ${c.all}`)}${f('ya', 'Яндекс', 'var(--ya)')}${f('yt', 'YouTube', 'var(--yt-bright)')}${state.status.sc || c.sc ? f('sc', 'SoundCloud', 'var(--sc)') : ''}${state.status.vk ? f('vk', 'VK', 'var(--vk)') : ''}${state.status.sp || c.sp ? f('sp', 'Spotify', 'var(--sp)') : ''}${f('mix', 'Миксы', 'var(--accent)')}${f('artists', `Исполнители${state.favArtists.length ? ' · ' + state.favArtists.length : ''}`)}</div>
@@ -2424,17 +2426,41 @@ async function loadLibrary(force = false) {
   }
   if (!state.lib.tracks && state.route === 'library') selectPlaylist(state.lib.selected);
 }
-let likedPromise = null;
-function loadLiked(force = false) {
-  if (!likedPromise || force) {
-    likedPromise = api.library.liked().then((r) => {
-      state.lib.counts = { ya: r.ya, yt: r.yt, sc: r.sc || 0, vk: r.vk || 0, sp: r.sp || 0 };
-      state.lib.liked = r.tracks;
-      r.tracks.forEach((t) => player.liked.add(t.id));
-      return r.tracks;
-    }).catch(() => []);
-  }
-  return likedPromise;
+// Keep results and in-flight reads scoped to this library instance (one login session).
+function readLikedSource(source, retry = false) {
+  const lib = state.lib;
+  lib.likeRequests ??= {};
+  lib.likePages ??= {};
+  lib.likeErrors ??= {};
+  if (lib.likeRequests[source]) return lib.likeRequests[source];
+  if (!retry && (lib.likePages[source] || lib.likeErrors[source])) return Promise.resolve();
+  const request = api.library.likedSource(source).then(tracks => {
+    if (state.lib !== lib) return;
+    for (const track of lib.likePages[source] || []) player.liked.delete(track.id);
+    for (const track of tracks) player.liked.add(track.id);
+    lib.likePages[source] = tracks;
+    delete lib.likeErrors[source];
+    lib.counts = { ...lib.counts, [source]: tracks.length };
+    const pages = SERVICES.map(service => lib.likePages[service.id] || []);
+    lib.liked = [];
+    for (let i = 0; i < Math.max(...pages.map(page => page.length)); i++) {
+      for (const page of pages) if (page[i]) lib.liked.push(page[i]);
+    }
+    if (lib.selected === 'liked') lib.tracks = lib.liked;
+    else if (lib.selected === 'liked:' + source) lib.tracks = tracks;
+  }).catch(error => { lib.likeErrors[source] = error.message; }).finally(() => {
+    delete lib.likeRequests[source];
+    if (state.lib !== lib) return;
+    if (state.route === 'library') renderLibrary();
+    else if (state.route === 'home') renderHome();
+  });
+  lib.likeRequests[source] = request;
+  return request;
+}
+async function loadLiked() {
+  const lib = state.lib;
+  await Promise.all(SERVICES.map(service => readLikedSource(service.id)));
+  return lib.liked || [];
 }
 async function selectPlaylist(id) {
   state.lib.selected = id;
@@ -3735,6 +3761,9 @@ async function handleAction(el, e) {
     case 'lib-select':
       selectPlaylist(el.dataset.id);
       break;
+    case 'retry-liked':
+      await readLikedSource(el.dataset.v, true);
+      break;
     case 'lib-filter':
       state.lib.filter = el.dataset.v;
       renderLibrary();
@@ -4089,7 +4118,7 @@ async function afterAuthChange() {
   await loadStatus();
   state.home = null;
   state.lib = { lists: null, filter: 'all', selected: 'liked', tracks: null, counts: null };
-  likedPromise = null;
+  player.liked.clear();
   artistCache.clear();
   if (isSettingsRoute()) renderSettings();
   if (SERVICES.some(service => state.status[service.id])) {
