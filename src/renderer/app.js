@@ -2540,10 +2540,12 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
   const menu = $('#menu');
   const mixes = (state.lib.lists || []).filter((p) => p.source === 'mix');
   const inQueue = queueIndex > -1 && queueIndex !== player.index;
+  const waveReason = queueIndex > -1 && player.mode === 'wave' ? track.waveReason : '';
   menu.innerHTML = addOnly ? `
     <div class="lbl">Добавить «${esc(track.title)}»</div>
     ${mixes.map((m) => `<button data-m="mix" data-id="${esc(m.id)}">${esc(m.title)}</button>`).join('') || '<div class="lbl" style="text-transform:none;letter-spacing:0">Миксов пока нет</div>'}
     <button data-m="newmix">${ICONS.plus} Новый микс…</button>` : `
+    ${waveReason ? '<button data-m="wave-reason">Почему этот трек?</button>' : ''}
     <button data-m="next">Играть следующим</button>
     <button data-m="last">В конец очереди</button>
     ${inQueue ? '<button data-m="remove">Убрать из очереди</button>' : ''}
@@ -2569,7 +2571,9 @@ function openMenu(x, y, track, queueIndex = -1, { addOnly = false } = {}) {
     if (!b) return;
     menu.hidden = true;
     try {
-      if (b.dataset.m === 'next') {
+      if (b.dataset.m === 'wave-reason') {
+        toast(`${waveReason} · ${srcName(track.source)}`);
+      } else if (b.dataset.m === 'next') {
         player.enqueueNext(track);
         toast('Будет играть следующим');
       } else if (b.dataset.m === 'last') {
@@ -3253,7 +3257,7 @@ async function handleAction(el, e) {
       break;
     }
     case 'cur-more':
-      if (player.current) openMenu(e.clientX, e.clientY, player.current);
+      if (player.current) openMenu(e.clientX, e.clientY, player.current, player.index);
       break;
     case 'fullscreen':
       fullscreen.show();
